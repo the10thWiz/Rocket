@@ -1,0 +1,15 @@
+[package]
+name = "websocket_echo"
+version = "0.0.0"
+workspace = "../../"
+edition = "2018"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+futures = "0.3.0"
+rocket = { path = "../../core/lib", features = ["tungstenite"] }
+
+[dependencies.tokio]
+version = "0.2.9"
+features = ["fs", "io-std", "io-util", "rt-threaded", "sync", "signal", "macros"]

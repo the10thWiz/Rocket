@@ -60,6 +60,10 @@ impl AsyncReadBody {
     pub fn empty() -> Self {
         Self { inner: hyper::Body::empty(), state: State::Done }
     }
+
+    pub(crate) fn into_inner(self) -> hyper::Body {
+        self.inner
+    }
 }
 
 impl From<hyper::Body> for AsyncReadBody {

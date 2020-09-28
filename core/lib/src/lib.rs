@@ -120,6 +120,8 @@ pub mod handler;
 pub mod fairing;
 pub mod error;
 pub mod catcher;
+#[cfg(feature = "tungstenite")]
+pub mod tungstenite;
 
 // Reexport of HTTP everything.
 pub mod http {
