@@ -412,13 +412,13 @@ mod uri_serde {
             Ok(())
         }
         
+        /// /path?query
+        fn origin<'a>(path: &'a str, query: Option<&'a str>) -> Uri<'a> {
+            Uri::Origin(Origin::new(path, query))
+        }
+
         #[test]
         fn serde_origin_form() -> Result<(), TestError> {
-            /// /path?query
-            fn origin<'a>(path: &'a str, query: Option<&'a str>) -> Uri<'a> {
-                Uri::Origin(Origin::new(path, query))
-            }
-
             test_helper("/", "\"/\"", origin("/", None))?;
             test_helper("/foo", "\"/foo\"", origin("/foo", None))?;
             test_helper("/bar/foo", "\"/bar/foo\"", origin("/bar/foo", None))?;
@@ -429,13 +429,13 @@ mod uri_serde {
             test_helper("/a?param=value", "\"/a?param=value\"", origin("/a", Some("param=value")))
         }
 
+        /// username:password@some.host:8088
+        fn authority<'a>(user: Option<&'a str>, host: &'a str, port: Option<u16>) -> Uri<'a> {
+            Uri::Authority(Authority::new(user, Host::Raw(host), port))
+        }
+
         #[test]
         fn serde_authority_form() -> Result<(), TestError> {
-            /// username:password@some.host:8088
-            fn authority<'a>(user: Option<&'a str>, host: &'a str, port: Option<u16>) -> Uri<'a> {
-                Uri::Authority(Authority::new(user, Host::Raw(host), port))
-            }
-
             test_helper("example.com", "\"example.com\"", authority(None, "example.com", None))?;
             test_helper("test.example.com", "\"test.example.com\"", authority(None, "test.example.com", None))?;
             test_helper("www.example.com", "\"www.example.com\"", authority(None, "www.example.com", None))?;
@@ -468,16 +468,18 @@ mod uri_serde {
             test_helper("u@example.com:65333", "\"u@example.com:65333\"", authority(Some("u"), "example.com", Some(65333)))
         }
 
+        /// http://user:pass@domain.com:4444/path?query
+        fn absolute<'a>(scheme: &'a str, user: Option<&'a str>, host: Option<&'a str>, port: Option<u16>, path: Option<&'a str>, query: Option<&'a str>) -> Uri<'a> {
+            Uri::Absolute(Absolute::new(scheme, host.map(|host| Authority::new(user, Host::Raw(host), port)), path.map(|path| Origin::new(path, query))))
+        }
+
         #[test]
         fn serde_absolute_form() -> Result<(), TestError> {
-            /// http://user:pass@domain.com:4444/path?query
-            fn absolute<'a>(scheme: &'a str, user: Option<&'a str>, host: Option<&'a str>, port: Option<u16>, path: Option<&'a str>, query: Option<&'a str>) -> Uri<'a> {
-                Uri::Absolute(Absolute::new(scheme, host.map(|host| Authority::new(user, Host::Raw(host), port)), path.map(|path| Origin::new(path, query))))
-            }
             // `Some("")` and `Some("/")` are needed because of how the Uri is parsed. This could
             // potentially be fixed in the Uri's implementation of Eq, where an origin or authority
             // of None could be interperted as "/" or "" as appropriate
             test_helper("http:///", "\"http:///\"", absolute("http", None, Some(""), None, Some("/"), None))?;
+            test_helper("http://", "\"http://\"", absolute("http", None, Some(""), None, None, None))?;
             test_helper("https:///", "\"https:///\"", absolute("https", None, Some(""), None, Some("/"), None))?;
             test_helper("snmp:///", "\"snmp:///\"", absolute("snmp", None, Some(""), None, Some("/"), None))?;
 
@@ -583,7 +585,22 @@ mod uri_serde {
             //serde_json::from_str::<Uri<'static>>("\"://example.com:/test?\"").expect_err("Invalid uri");
             //serde_json::from_str::<Uri<'static>>("\"://@example.com/test?\"").expect_err("Invalid uri");
             //serde_json::from_str::<Uri<'static>>("\"://@example.com:/test?\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"://@example.com:/test?\"").expect_err("Invalid uri");
+            serde_json::from_str::<Uri<'static>>("\"@example.com:/test\"").expect_err("Invalid uri");
+            serde_json::from_str::<Uri<'static>>("\"@example.com/test?\"").expect_err("Invalid uri");
+            serde_json::from_str::<Uri<'static>>("\"http?\"").expect_err("Invalid uri");
+        }
+
+        #[test]
+        fn serde_quirks() -> Result<(), TestError> {
+            // `http:/` => scheme: `http`, origin: `/`, authority: None
+            test_helper("http:/", "\"http:/\"", absolute("http", None, None, None, Some("/"), None))?;
+            // `http:` => scheme: `http`, origin: ``, authority: None
+            test_helper("http:", "\"http:\"", absolute("http", None, None, None, Some(""), None))?;
+            // `http:` => scheme: `http`, origin: ``, query: ``, authority: None
+            test_helper("http:?", "\"http:?\"", absolute("http", None, None, None, Some(""), Some("")))?;
+            // `/http?` => path: `/http`, query: ``
+            test_helper("/http?", "\"/http?\"", origin("/http", Some("")))?;
+            Ok(())
         }
     }
 }
