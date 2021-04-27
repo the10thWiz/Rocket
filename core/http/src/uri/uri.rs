@@ -527,22 +527,6 @@ mod uri_serde {
         // Commented out tests currently fail
         #[test]
         fn serde_invalid_uri() {
-            // Commented out lines parse as `Authority { source: "<value>", host: Raw((0, 1)) }`
-            //serde_json::from_str::<Uri<'static>>("\"&\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\".\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"!\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"-\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"=\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"+\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"'\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\",\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"$\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"_\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"(\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\")\"").expect_err("Invalid uri");
-            // This one might be okay
-            //serde_json::from_str::<Uri<'static>>("\"1\"").expect_err("Invalid uri");
-            // These all fail to parse
             serde_json::from_str::<Uri<'static>>("\"@\"").expect_err("Invalid uri");
             serde_json::from_str::<Uri<'static>>("\"#\"").expect_err("Invalid uri");
             serde_json::from_str::<Uri<'static>>("\"%\"").expect_err("Invalid uri");
@@ -558,12 +542,8 @@ mod uri_serde {
             serde_json::from_str::<Uri<'static>>("\"\\\"").expect_err("Invalid uri");
             serde_json::from_str::<Uri<'static>>("\"\t\"").expect_err("Invalid uri");
             serde_json::from_str::<Uri<'static>>("\"?\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"\"").expect_err("Invalid uri");
             serde_json::from_str::<Uri<'static>>("\":\"").expect_err("Invalid uri");
-
-            // Any normal ascii should be a valid uri, since unless it includes some seperators it
-            // can be interperted as a domain name
-            //serde_json::from_str::<Uri<'static>>("\"\"").expect_err("Invalid uri");
+            serde_json::from_str::<Uri<'static>>("\"\"").expect_err("Invalid uri");
         }
 
         #[test]
@@ -571,13 +551,15 @@ mod uri_serde {
             // Empty Query
             serde_json::from_str::<Uri<'static>>("\"example.com/test?\"").expect_err("Invalid uri");
             //serde_json::from_str::<Uri<'static>>("\"/test?\"").expect_err("Invalid uri");
-            // Empty port - `:` is interperted as part of the domain name
+            // Empty port - `:` is interperted as part of the domain name, but shouldn't be
             //serde_json::from_str::<Uri<'static>>("\"example.com:/test\"").expect_err("Invalid uri");
             // Empty userinfo
             serde_json::from_str::<Uri<'static>>("\"@example.com/test\"").expect_err("Invalid uri");
             // Empty scheme - is interpered with scheme: ``
+            // Probably valid!
             //serde_json::from_str::<Uri<'static>>("\"://example.com/test\"").expect_err("Invalid uri");
             
+            // The empty scheme is likely valid, but the userinfo and port should make them errors
             //serde_json::from_str::<Uri<'static>>("\"://@example.com/test\"").expect_err("Invalid uri");
             //serde_json::from_str::<Uri<'static>>("\"://example.com:/test\"").expect_err("Invalid uri");
             //serde_json::from_str::<Uri<'static>>("\"://@example.com:/test\"").expect_err("Invalid uri");
@@ -588,18 +570,17 @@ mod uri_serde {
             serde_json::from_str::<Uri<'static>>("\"@example.com:/test\"").expect_err("Invalid uri");
             serde_json::from_str::<Uri<'static>>("\"@example.com/test?\"").expect_err("Invalid uri");
             serde_json::from_str::<Uri<'static>>("\"http?\"").expect_err("Invalid uri");
+            //serde_json::from_str::<Uri<'static>>("\"/http?\"").expect_err("Invalid uri");
+            //serde_json::from_str::<Uri<'static>>("\"http:?\"").expect_err("Invalid uri");
         }
 
         #[test]
         fn serde_quirks() -> Result<(), TestError> {
+            // These are valid, albiet unusual Uris
             // `http:/` => scheme: `http`, origin: `/`, authority: None
             test_helper("http:/", "\"http:/\"", absolute("http", None, None, None, Some("/"), None))?;
             // `http:` => scheme: `http`, origin: ``, authority: None
             test_helper("http:", "\"http:\"", absolute("http", None, None, None, Some(""), None))?;
-            // `http:` => scheme: `http`, origin: ``, query: ``, authority: None
-            test_helper("http:?", "\"http:?\"", absolute("http", None, None, None, Some(""), Some("")))?;
-            // `/http?` => path: `/http`, query: ``
-            test_helper("/http?", "\"/http?\"", origin("/http", Some("")))?;
             Ok(())
         }
     }
