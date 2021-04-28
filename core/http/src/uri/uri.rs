@@ -66,7 +66,7 @@ use crate::uri::encoding::{percent_encode, DEFAULT_ENCODE_SET};
 /// When the `serde` feature is enabled, the Uri type implements both serialize and
 /// deserialize, through the appropriate Serde traits. This allows the use of Uri
 /// in configuration documents that are parsed via serde, with little to no issue.
-/// 
+///
 /// The implementation currently relies on the Uri's display and parse functions,
 /// and may not be compatible across mutiple Rocket versions
 #[derive(Debug, PartialEq, Clone)]
@@ -326,22 +326,20 @@ impl_uri_from!(Origin);
 impl_uri_from!(Authority);
 impl_uri_from!(Absolute);
 
+#[cfg(feature = "serde")]
 mod uri_serde {
-    #![cfg(feature = "serde")]
-    
+
     pub use super::Uri;
+
     use std::fmt;
     use std::convert::TryFrom;
-    // TODO pick import names
-    use _serde::{Deserialize, Deserializer, Serialize, Serializer, de::{self, Visitor}};
+    use _serde::{ser::{Serialize, Serializer}, de::{self, Visitor, Deserialize, Deserializer}};
 
     // The serialize implementation depends on the fmt::Display implementation. However, this
     // should be okay, and is likely the best option, since allocating a string is unavoidable, and
     // this method should allocate exactly one string
     impl<'a> Serialize for Uri<'a> {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-                S: Serializer {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
             serializer.serialize_str(&format!("{}", self))
         }
     }
@@ -350,83 +348,61 @@ mod uri_serde {
 
     impl<'de> Visitor<'de> for UriVisitor {
         type Value = Uri<'de>;
+
         fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "a URI")
         }
 
-        fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
-        where
-                E: de::Error, {
+        fn visit_borrowed_str<E: de::Error>(self, v: &'de str) -> Result<Self::Value, E> {
             Uri::try_from(v).map_err(de::Error::custom)
         }
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-                E: de::Error, {
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
             Uri::try_from(v.to_string()).map_err(de::Error::custom)
         }
-        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-        where
-                E: de::Error, {
+
+        fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
             Uri::try_from(v).map_err(de::Error::custom)
         }
     }
 
     impl<'de> Deserialize<'de> for Uri<'de> {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-                D: Deserializer<'de> {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             deserializer.deserialize_str(UriVisitor)
         }
     }
-    
+
     #[cfg(test)]
     mod tests {
+        use serde_test::*;
+
         use super::*;
-        
+
         use std::convert::TryFrom;
-        use crate::{ext::IntoOwned, uri::{self, Origin, Authority, Absolute, Host}};
-        #[derive(Debug)]
-        enum TestError {
-            UriError(Box<uri::Error<'static>>),
-            JsonError(serde_json::Error),
-        }
-        impl<'a> From<uri::Error<'a>> for TestError {
-            fn from(e: uri::Error<'a>) -> Self {
-                Self::UriError(Box::new(e.into_owned()))
-            }
-        }
-        impl From<serde_json::Error> for TestError {
-            fn from(e: serde_json::Error) -> Self {
-                Self::JsonError(e)
-            }
-        }
+        use crate::{ext::IntoOwned, uri::{self, Origin, Authority, Absolute, Host, Error}};
 
-        // Test Helper function
-        // 'a sould almost always be 'static, but it may be useful to not require that
-        fn test_helper<'a>(raw: &str, json: &'a str, uri_obj: Uri<'a>) -> Result<(), TestError> {
-            let uri = Uri::try_from(raw).expect(raw);
+        #[track_caller]
+        fn test_helper(raw: &'static str, uri_obj: Uri<'static>) {
+            let uri = Uri::try_from(raw).expect("Failed to convert string to uri");
             assert_eq!(uri, uri_obj, "Uri::try_from did not create the expected Uri: {} != {}", raw, uri_obj);
-
-            assert_eq!(serde_json::to_string(&uri)?, json, "Serialization did not produce the expected Json string");
-            assert_eq!(serde_json::from_str::<Uri<'a>>(json)?, uri, "Deserialization from a `&str` did not produce the expected Uri");
-            Ok(())
+            assert_tokens(&uri_obj, &[serde_test::Token::Str(raw)]);
         }
-        
+
         /// /path?query
         fn origin<'a>(path: &'a str, query: Option<&'a str>) -> Uri<'a> {
             Uri::Origin(Origin::new(path, query))
         }
 
         #[test]
-        fn serde_origin_form() -> Result<(), TestError> {
-            test_helper("/", "\"/\"", origin("/", None))?;
-            test_helper("/foo", "\"/foo\"", origin("/foo", None))?;
-            test_helper("/bar/foo", "\"/bar/foo\"", origin("/bar/foo", None))?;
-            test_helper("/index.html", "\"/index.html\"", origin("/index.html", None))?;
-            test_helper("/a/nice/url", "\"/a/nice/url\"", origin("/a/nice/url", None))?;
+        fn serde_origin_form() {
+            test_helper("/", origin("/", None));
+            test_helper("/foo", origin("/foo", None));
+            test_helper("/bar/foo", origin("/bar/foo", None));
+            test_helper("/index.html", origin("/index.html", None));
+            test_helper("/a/nice/url", origin("/a/nice/url", None));
 
-            test_helper("/a?param", "\"/a?param\"", origin("/a", Some("param")))?;
-            test_helper("/a?param=value", "\"/a?param=value\"", origin("/a", Some("param=value")))
+            test_helper("/a?param", origin("/a", Some("param")));
+            test_helper("/a?param=value", origin("/a", Some("param=value")));
         }
 
         /// username:password@some.host:8088
@@ -435,37 +411,37 @@ mod uri_serde {
         }
 
         #[test]
-        fn serde_authority_form() -> Result<(), TestError> {
-            test_helper("example.com", "\"example.com\"", authority(None, "example.com", None))?;
-            test_helper("test.example.com", "\"test.example.com\"", authority(None, "test.example.com", None))?;
-            test_helper("www.example.com", "\"www.example.com\"", authority(None, "www.example.com", None))?;
-            test_helper("com", "\"com\"", authority(None, "com", None))?;
+        fn serde_authority_form() {
+            test_helper("example.com", authority(None, "example.com", None));
+            test_helper("test.example.com", authority(None, "test.example.com", None));
+            test_helper("www.example.com", authority(None, "www.example.com", None));
+            test_helper("com", authority(None, "com", None));
 
-            test_helper("user:pass@example.com", "\"user:pass@example.com\"", authority(Some("user:pass"), "example.com", None))?;
-            test_helper("user:pass@test.example.com", "\"user:pass@test.example.com\"", authority(Some("user:pass"), "test.example.com", None))?;
-            test_helper("user:pass@www.example.com", "\"user:pass@www.example.com\"", authority(Some("user:pass"), "www.example.com", None))?;
-            test_helper("user:pass@com", "\"user:pass@com\"", authority(Some("user:pass"), "com", None))?;
-            test_helper("username@example.com", "\"username@example.com\"", authority(Some("username"), "example.com", None))?;
-            test_helper("username:long_pass)with0odd$chars@example.com", "\"username:long_pass)with0odd$chars@example.com\"", authority(Some("username:long_pass)with0odd$chars"), "example.com", None))?;
-            test_helper("username0with$user:passchars@example.com", "\"username0with$user:passchars@example.com\"", authority(Some("username0with$user:passchars"), "example.com", None))?;
-            test_helper("u@example.com", "\"u@example.com\"", authority(Some("u"), "example.com", None))?;
+            test_helper("user:pass@example.com", authority(Some("user:pass"), "example.com", None));
+            test_helper("user:pass@test.example.com", authority(Some("user:pass"), "test.example.com", None));
+            test_helper("user:pass@www.example.com", authority(Some("user:pass"), "www.example.com", None));
+            test_helper("user:pass@com", authority(Some("user:pass"), "com", None));
+            test_helper("username@example.com", authority(Some("username"), "example.com", None));
+            test_helper("username:long_pass)with0odd$chars@example.com", authority(Some("username:long_pass)with0odd$chars"), "example.com", None));
+            test_helper("username0with$user:passchars@example.com", authority(Some("username0with$user:passchars"), "example.com", None));
+            test_helper("u@example.com", authority(Some("u"), "example.com", None));
 
-            test_helper("example.com:1", "\"example.com:1\"", authority(None, "example.com", Some(1)))?;
-            test_helper("example.com:8000", "\"example.com:8000\"", authority(None, "example.com", Some(8000)))?;
-            test_helper("example.com:8080", "\"example.com:8080\"", authority(None, "example.com", Some(8080)))?;
-            test_helper("example.com:65333", "\"example.com:65333\"", authority(None, "example.com", Some(65333)))?;
+            test_helper("example.com:1", authority(None, "example.com", Some(1)));
+            test_helper("example.com:8000", authority(None, "example.com", Some(8000)));
+            test_helper("example.com:8080", authority(None, "example.com", Some(8080)));
+            test_helper("example.com:65333", authority(None, "example.com", Some(65333)));
 
-            test_helper("user:pass@test.example.com:123", "\"user:pass@test.example.com:123\"", authority(Some("user:pass"), "test.example.com", Some(123)))?;
-            test_helper("user:pass@www.example.com:123", "\"user:pass@www.example.com:123\"", authority(Some("user:pass"), "www.example.com", Some(123)))?;
-            test_helper("user:pass@com:123", "\"user:pass@com:123\"", authority(Some("user:pass"), "com", Some(123)))?;
-            test_helper("username@example.com:123", "\"username@example.com:123\"", authority(Some("username"), "example.com", Some(123)))?;
-            test_helper("username:long_pass)with0odd$chars%@example.com:123", "\"username:long_pass)with0odd$chars%@example.com:123\"", authority(Some("username:long_pass)with0odd$chars%"), "example.com", Some(123)))?;
-            test_helper("username0with$user:passchars@example.com:123", "\"username0with$user:passchars@example.com:123\"", authority(Some("username0with$user:passchars"), "example.com", Some(123)))?;
+            test_helper("user:pass@test.example.com:123", authority(Some("user:pass"), "test.example.com", Some(123)));
+            test_helper("user:pass@www.example.com:123", authority(Some("user:pass"), "www.example.com", Some(123)));
+            test_helper("user:pass@com:123", authority(Some("user:pass"), "com", Some(123)));
+            test_helper("username@example.com:123", authority(Some("username"), "example.com", Some(123)));
+            test_helper("username:long_pass)with0odd$chars%@example.com:123", authority(Some("username:long_pass)with0odd$chars%"), "example.com", Some(123)));
+            test_helper("username0with$user:passchars@example.com:123", authority(Some("username0with$user:passchars"), "example.com", Some(123)));
 
-            test_helper("u@example.com:1", "\"u@example.com:1\"", authority(Some("u"), "example.com", Some(1)))?;
-            test_helper("u@example.com:8000", "\"u@example.com:8000\"", authority(Some("u"), "example.com", Some(8000)))?;
-            test_helper("u@example.com:8080", "\"u@example.com:8080\"", authority(Some("u"), "example.com", Some(8080)))?;
-            test_helper("u@example.com:65333", "\"u@example.com:65333\"", authority(Some("u"), "example.com", Some(65333)))
+            test_helper("u@example.com:1", authority(Some("u"), "example.com", Some(1)));
+            test_helper("u@example.com:8000", authority(Some("u"), "example.com", Some(8000)));
+            test_helper("u@example.com:8080", authority(Some("u"), "example.com", Some(8080)));
+            test_helper("u@example.com:65333", authority(Some("u"), "example.com", Some(65333)));
         }
 
         /// http://user:pass@domain.com:4444/path?query
@@ -474,115 +450,116 @@ mod uri_serde {
         }
 
         #[test]
-        fn serde_absolute_form() -> Result<(), TestError> {
+        fn serde_absolute_form() {
             // `Some("")` and `Some("/")` are needed because of how the Uri is parsed. This could
             // potentially be fixed in the Uri's implementation of Eq, where an origin or authority
             // of None could be interperted as "/" or "" as appropriate
-            test_helper("http:///", "\"http:///\"", absolute("http", None, Some(""), None, Some("/"), None))?;
-            test_helper("http://", "\"http://\"", absolute("http", None, Some(""), None, None, None))?;
-            test_helper("https:///", "\"https:///\"", absolute("https", None, Some(""), None, Some("/"), None))?;
-            test_helper("snmp:///", "\"snmp:///\"", absolute("snmp", None, Some(""), None, Some("/"), None))?;
+            test_helper("http:///", absolute("http", None, Some(""), None, Some("/"), None));
+            test_helper("http://", absolute("http", None, Some(""), None, None, None));
+            test_helper("https:///", absolute("https", None, Some(""), None, Some("/"), None));
+            test_helper("snmp:///", absolute("snmp", None, Some(""), None, Some("/"), None));
 
-            test_helper("http://example.com/", "\"http://example.com/\"", absolute("http", None, Some("example.com"), None, Some("/"), None))?;
-            test_helper("http://topleveldomain/", "\"http://topleveldomain/\"", absolute("http", None, Some("topleveldomain"), None, Some("/"), None))?;
-            test_helper("http://sub.example.com/", "\"http://sub.example.com/\"", absolute("http", None, Some("sub.example.com"), None, Some("/"), None))?;
-            test_helper("http://user@example.com/", "\"http://user@example.com/\"", absolute("http", Some("user"), Some("example.com"), None, Some("/"), None))?;
-            test_helper("http://user:pass@example.com/", "\"http://user:pass@example.com/\"", absolute("http", Some("user:pass"), Some("example.com"), None, Some("/"), None))?;
-            test_helper("http://example.com:80/", "\"http://example.com:80/\"", absolute("http", None, Some("example.com"), Some(80), Some("/"), None))?;
-            test_helper("http://example.com:123/", "\"http://example.com:123/\"", absolute("http", None, Some("example.com"), Some(123), Some("/"), None))?;
-            test_helper("http://example.com:65333/", "\"http://example.com:65333/\"", absolute("http", None, Some("example.com"), Some(65333), Some("/"), None))?;
-            test_helper("http://user@example.com:80/", "\"http://user@example.com:80/\"", absolute("http", Some("user"), Some("example.com"), Some(80), Some("/"), None))?;
-            test_helper("http://user:pass@example.com:80/", "\"http://user:pass@example.com:80/\"", absolute("http", Some("user:pass"), Some("example.com"), Some(80), Some("/"), None))?;
+            test_helper("http://example.com/", absolute("http", None, Some("example.com"), None, Some("/"), None));
+            test_helper("http://topleveldomain/", absolute("http", None, Some("topleveldomain"), None, Some("/"), None));
+            test_helper("http://sub.example.com/", absolute("http", None, Some("sub.example.com"), None, Some("/"), None));
+            test_helper("http://user@example.com/", absolute("http", Some("user"), Some("example.com"), None, Some("/"), None));
+            test_helper("http://user:pass@example.com/", absolute("http", Some("user:pass"), Some("example.com"), None, Some("/"), None));
+            test_helper("http://example.com:80/", absolute("http", None, Some("example.com"), Some(80), Some("/"), None));
+            test_helper("http://example.com:123/", absolute("http", None, Some("example.com"), Some(123), Some("/"), None));
+            test_helper("http://example.com:65333/", absolute("http", None, Some("example.com"), Some(65333), Some("/"), None));
+            test_helper("http://user@example.com:80/", absolute("http", Some("user"), Some("example.com"), Some(80), Some("/"), None));
+            test_helper("http://user:pass@example.com:80/", absolute("http", Some("user:pass"), Some("example.com"), Some(80), Some("/"), None));
 
-            test_helper("http://example.com", "\"http://example.com\"", absolute("http", None, Some("example.com"), None, None, None))?;
-            test_helper("http://topleveldomain", "\"http://topleveldomain\"", absolute("http", None, Some("topleveldomain"), None, None, None))?;
-            test_helper("http://sub.example.com", "\"http://sub.example.com\"", absolute("http", None, Some("sub.example.com"), None, None, None))?;
-            test_helper("http://user@example.com", "\"http://user@example.com\"", absolute("http", Some("user"), Some("example.com"), None, None, None))?;
-            test_helper("http://user:pass@example.com", "\"http://user:pass@example.com\"", absolute("http", Some("user:pass"), Some("example.com"), None, None, None))?;
-            test_helper("http://example.com:80", "\"http://example.com:80\"", absolute("http", None, Some("example.com"), Some(80), None, None))?;
-            test_helper("http://example.com:123", "\"http://example.com:123\"", absolute("http", None, Some("example.com"), Some(123), None, None))?;
-            test_helper("http://example.com:65333", "\"http://example.com:65333\"", absolute("http", None, Some("example.com"), Some(65333), None, None))?;
-            test_helper("http://user@example.com:80", "\"http://user@example.com:80\"", absolute("http", Some("user"), Some("example.com"), Some(80), None, None))?;
-            test_helper("http://user:pass@example.com:80", "\"http://user:pass@example.com:80\"", absolute("http", Some("user:pass"), Some("example.com"), Some(80), None, None))?;
+            test_helper("http://example.com", absolute("http", None, Some("example.com"), None, None, None));
+            test_helper("http://topleveldomain", absolute("http", None, Some("topleveldomain"), None, None, None));
+            test_helper("http://sub.example.com", absolute("http", None, Some("sub.example.com"), None, None, None));
+            test_helper("http://user@example.com", absolute("http", Some("user"), Some("example.com"), None, None, None));
+            test_helper("http://user:pass@example.com", absolute("http", Some("user:pass"), Some("example.com"), None, None, None));
+            test_helper("http://example.com:80", absolute("http", None, Some("example.com"), Some(80), None, None));
+            test_helper("http://example.com:123", absolute("http", None, Some("example.com"), Some(123), None, None));
+            test_helper("http://example.com:65333", absolute("http", None, Some("example.com"), Some(65333), None, None));
+            test_helper("http://user@example.com:80", absolute("http", Some("user"), Some("example.com"), Some(80), None, None));
+            test_helper("http://user:pass@example.com:80", absolute("http", Some("user:pass"), Some("example.com"), Some(80), None, None));
 
-            test_helper("http:///path", "\"http:///path\"", absolute("http", None, Some(""), None, Some("/path"), None))?;
-            test_helper("http:///path/", "\"http:///path/\"", absolute("http", None, Some(""), None, Some("/path/"), None))?;
-            test_helper("http:///path/with/segments", "\"http:///path/with/segments\"", absolute("http", None, Some(""), None, Some("/path/with/segments"), None))?;
-            test_helper("http:///path/with/segments/", "\"http:///path/with/segments/\"", absolute("http", None, Some(""), None, Some("/path/with/segments/"), None))?;
-            test_helper("http:///index.html", "\"http:///index.html\"", absolute("http", None, Some(""), None, Some("/index.html"), None))?;
-            test_helper("http:///path?query", "\"http:///path?query\"", absolute("http", None, Some(""), None, Some("/path"), Some("query")))?;
-            test_helper("http:///path?query=value", "\"http:///path?query=value\"", absolute("http", None, Some(""), None, Some("/path"), Some("query=value")))?;
-            test_helper("http:///index.html?query", "\"http:///index.html?query\"", absolute("http", None, Some(""), None, Some("/index.html"), Some("query")))?;
-            test_helper("http:///index.html?query=value", "\"http:///index.html?query=value\"", absolute("http", None, Some(""), None, Some("/index.html"), Some("query=value")))?;
-            test_helper("http:///index.html?query", "\"http:///index.html?query\"", absolute("http", None, Some(""), None, Some("/index.html"), Some("query")))?;
-            test_helper("http:///path/with/segments/?query=value", "\"http:///path/with/segments/?query=value\"", absolute("http", None, Some(""), None, Some("/path/with/segments/"), Some("query=value")))
+            test_helper("http:///path", absolute("http", None, Some(""), None, Some("/path"), None));
+            test_helper("http:///path/", absolute("http", None, Some(""), None, Some("/path/"), None));
+            test_helper("http:///path/with/segments", absolute("http", None, Some(""), None, Some("/path/with/segments"), None));
+            test_helper("http:///path/with/segments/", absolute("http", None, Some(""), None, Some("/path/with/segments/"), None));
+            test_helper("http:///index.html", absolute("http", None, Some(""), None, Some("/index.html"), None));
+            test_helper("http:///path?query", absolute("http", None, Some(""), None, Some("/path"), Some("query")));
+            test_helper("http:///path?query=value", absolute("http", None, Some(""), None, Some("/path"), Some("query=value")));
+            test_helper("http:///index.html?query", absolute("http", None, Some(""), None, Some("/index.html"), Some("query")));
+            test_helper("http:///index.html?query=value", absolute("http", None, Some(""), None, Some("/index.html"), Some("query=value")));
+            test_helper("http:///index.html?query", absolute("http", None, Some(""), None, Some("/index.html"), Some("query")));
+            test_helper("http:///path/with/segments/?query=value", absolute("http", None, Some(""), None, Some("/path/with/segments/"), Some("query=value")));
         }
-        
+
         #[test]
-        fn serde_asterisk_form() -> Result<(), TestError> {
-            test_helper("*", "\"*\"", Uri::Asterisk)
+        fn serde_asterisk_form() {
+            test_helper("*", Uri::Asterisk);
         }
-        
 
         // Commented out tests currently fail
         #[test]
         fn serde_invalid_uri() {
-            serde_json::from_str::<Uri<'static>>("\"@\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"#\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"%\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"[\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"]\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"{\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"}\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"<\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\">\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\" \"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"^\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"|\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"\\\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"\t\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"?\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\":\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"\"").expect_err("Invalid uri");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("#")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("[")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("]")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("{")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("}")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("<")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str(">")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str(" ")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("^")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("|")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("\\")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("\t")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("?")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str(":")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("%")], "'%' is not a valid URI at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("")], "empty URI at index 0");
         }
 
+        /// These will be moved elsewhere
         #[test]
         fn serde_empty_parts() {
-            // Empty Query
-            serde_json::from_str::<Uri<'static>>("\"example.com/test?\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"/test?\"").expect_err("Invalid uri");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("example.com/test?")], "expected EOF but found '/' at index 11");
+            //serde_json::from_str::<Uri<'static>>("/test?").expect_err("Invalid uri");
             // Empty port - `:` is interperted as part of the domain name, but shouldn't be
-            //serde_json::from_str::<Uri<'static>>("\"example.com:/test\"").expect_err("Invalid uri");
-            // Empty userinfo
-            serde_json::from_str::<Uri<'static>>("\"@example.com/test\"").expect_err("Invalid uri");
-            // Empty scheme - is interpered with scheme: ``
-            // Probably valid!
-            //serde_json::from_str::<Uri<'static>>("\"://example.com/test\"").expect_err("Invalid uri");
-            
+            //serde_json::from_str::<Uri<'static>>("example.com:/test").expect_err("Invalid uri");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@example.com/test")], "expected EOF but found '/' at index 12");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@example.com:/test")], "expected EOF but found '/' at index 13");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@example.com/test?")], "expected EOF but found '/' at index 12");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("http?")], "expected EOF but found '?' at index 4");
+
             // The empty scheme is likely valid, but the userinfo and port should make them errors
-            //serde_json::from_str::<Uri<'static>>("\"://@example.com/test\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"://example.com:/test\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"://@example.com:/test\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"://example.com/test?\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"://example.com:/test?\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"://@example.com/test?\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"://@example.com:/test?\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"@example.com:/test\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"@example.com/test?\"").expect_err("Invalid uri");
-            serde_json::from_str::<Uri<'static>>("\"http?\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"/http?\"").expect_err("Invalid uri");
-            //serde_json::from_str::<Uri<'static>>("\"http:?\"").expect_err("Invalid uri");
+            println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+            println!("{:?}", Uri::try_from("://example.com:/test").unwrap());
+            //println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+            //println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+            //println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+            //println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+            //println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+            //println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+            //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://@example.com/test")], "");
+            //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://example.com:/test")], "");
+            //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://@example.com:/test")], "");
+            //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://example.com/test?")], "");
+            //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://example.com:/test?")], "");
+            //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://@example.com/test?")], "");
+            //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://@example.com:/test?")], "");
+            //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("/http?")], "");
+            //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("http:?")], "");
         }
 
         #[test]
-        fn serde_quirks() -> Result<(), TestError> {
+        fn serde_quirks() {
             // These are valid, albiet unusual Uris
             // `http:/` => scheme: `http`, origin: `/`, authority: None
-            test_helper("http:/", "\"http:/\"", absolute("http", None, None, None, Some("/"), None))?;
+            test_helper("http:/", absolute("http", None, None, None, Some("/"), None));
             // `http:` => scheme: `http`, origin: ``, authority: None
-            test_helper("http:", "\"http:\"", absolute("http", None, None, None, Some(""), None))?;
-            Ok(())
+            test_helper("http:", absolute("http", None, None, None, Some(""), None));
         }
     }
 }
-
