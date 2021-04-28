@@ -148,6 +148,36 @@ impl<S, E, F> IntoOutcome<S, E, F> for Option<S> {
     }
 }
 
+impl<S, E, F> IntoOutcome<S, E, F> for Result<S, E> {
+    type Failure = E;
+    type Forward = F;
+
+    #[inline]
+    fn into_outcome(self, _: E) -> Outcome<S, E, F> {
+        match self {
+            Ok(val) => Success(val),
+            Err(e) => Failure(e)
+        }
+    }
+
+    #[inline]
+    fn or_forward(self, forward: F) -> Outcome<S, E, F> {
+        match self {
+            Ok(val) => Success(val),
+            Err(e) => Forward(forward)
+        }
+    }
+}
+
+impl<S, E, F> From<Result<S, E>> for Outcome<S, E, F> {
+    fn from(r: Result<S, E>) -> Self {
+        match r {
+            Ok(s) => Self::Success(s),
+            Err(e) => Self::Failure(e),
+        }
+    }
+}
+
 impl<S, E, F> Outcome<S, E, F> {
     /// Unwraps the Outcome, yielding the contents of a Success.
     ///
@@ -602,6 +632,30 @@ impl<S, E, F> Outcome<S, E, F> {
             Success(..) => (Color::Green, "Success"),
             Failure(..) => (Color::Red, "Failure"),
             Forward(..) => (Color::Yellow, "Forward"),
+        }
+    }
+
+    /// Converts from `Outcome<S, E, F>` to `Result<S, E>`.
+    ///
+    /// Panics if the outcome is Outcome::Forward
+    #[inline]
+    pub fn as_result(self) -> Result<S, E> {
+        match self {
+            Outcome::Success(s) => Ok(s),
+            Outcome::Failure(e) => Err(e),
+            Outcome::Forward(_) => panic!("Outcome::Forward cannot be converted into a result"),
+        }
+    }
+
+    /// Converts from `Outcome<S, E, F>` to `Result<S, E>`.
+    ///
+    /// Uses the provided function to convert `Outcome::Forward(f)` into `Result::Err(e)`
+    #[inline]
+    pub fn as_result_with_forward(self, func: impl FnOnce(F) -> E) -> Result<S, E> {
+        match self {
+            Outcome::Success(s) => Ok(s),
+            Outcome::Failure(e) => Err(e),
+            Outcome::Forward(f) => Err(func(f)),
         }
     }
 }
