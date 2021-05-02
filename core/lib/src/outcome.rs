@@ -164,7 +164,7 @@ impl<S, E, F> IntoOutcome<S, E, F> for Result<S, E> {
     fn or_forward(self, forward: F) -> Outcome<S, E, F> {
         match self {
             Ok(val) => Success(val),
-            Err(e) => Forward(forward)
+            Err(_) => Forward(forward)
         }
     }
 }

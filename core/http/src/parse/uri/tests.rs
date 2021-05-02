@@ -259,3 +259,59 @@ fn display() {
         "abc", "@):0", "[a]"
     }
 }
+
+#[test]
+fn partial_uri() {
+    //assert_no_parse!("://?", "[a]");
+    //assert_no_parse!("://a:/");
+    //assert_displays_eq!("//a:/"); "//a:/" => Origin
+    //assert_displays_eq!("a?");
+    //assert_displays_eq!("a/?");
+    //assert_displays_eq!("a/a?");
+    assert_displays_eq!("/a?");
+    assert_displays_eq!("//a?");
+    assert_displays_eq!("://a?");
+    assert_displays_eq!(":a?");
+    assert_displays_eq!(":/a?");
+}
+
+// TODO implement these tests
+//#[test]
+//fn serde_empty_parts() {
+    //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("example.com/test?")], "expected EOF but found '/' at index 11");
+    ////serde_json::from_str::<Uri<'static>>("/test?").expect_err("Invalid uri");
+    //// Empty port - `:` is interperted as part of the domain name, but shouldn't be
+    ////serde_json::from_str::<Uri<'static>>("example.com:/test").expect_err("Invalid uri");
+    //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@example.com/test")], "expected EOF but found '/' at index 12");
+    //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@example.com:/test")], "expected EOF but found '/' at index 13");
+    //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@example.com/test?")], "expected EOF but found '/' at index 12");
+    //assert_de_tokens_error::<Uri<'static>>(&[Token::Str("http?")], "expected EOF but found '?' at index 4");
+
+    //// The empty scheme is likely valid, but the userinfo and port should make them errors
+    //println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+    //println!("{:?}", Uri::try_from("://example.com:/test").unwrap());
+    ////println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+    ////println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+    ////println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+    ////println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+    ////println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+    ////println!("{:?}", Uri::try_from("://@example.com/test").unwrap());
+    ////assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://@example.com/test")], "");
+    ////assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://example.com:/test")], "");
+    ////assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://@example.com:/test")], "");
+    ////assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://example.com/test?")], "");
+    ////assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://example.com:/test?")], "");
+    ////assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://@example.com/test?")], "");
+    ////assert_de_tokens_error::<Uri<'static>>(&[Token::Str("://@example.com:/test?")], "");
+    ////assert_de_tokens_error::<Uri<'static>>(&[Token::Str("/http?")], "");
+    ////assert_de_tokens_error::<Uri<'static>>(&[Token::Str("http:?")], "");
+//}
+
+//#[test]
+//fn serde_quirks() {
+    //// These are valid, albiet unusual Uris
+    //// `http:/` => scheme: `http`, origin: `/`, authority: None
+    //test_helper("http:/", absolute("http", None, None, None, Some("/"), None));
+    //// `http:` => scheme: `http`, origin: ``, authority: None
+    //test_helper("http:", absolute("http", None, None, None, Some(""), None));
+//}

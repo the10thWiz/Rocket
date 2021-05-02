@@ -17,7 +17,7 @@ pub fn uri<'a>(input: &mut RawInput<'a>) -> Result<'a, Uri<'a>> {
             eat(b'/') => Uri::Origin(Origin::new::<_, &str>("/", None)),
             eat(b'%') => parse_error!("'%' is not a valid URI")?,
             _ => unsafe {
-                // the `is_reg_name_char` guarantees ASCII
+                // the `is_reg_name_char` guarantees ASCII - but what about validity?
                 let host = Host::Raw(take_n_if(1, is_reg_name_char)?);
                 Uri::Authority(Authority::raw(input.start.into(), None, host, None))
             }
