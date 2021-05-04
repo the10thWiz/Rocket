@@ -384,7 +384,8 @@ mod uri_serde {
         #[track_caller]
         fn test_helper(raw: &'static str, uri_obj: Uri<'static>) {
             let uri = Uri::try_from(raw).expect("Failed to convert string to uri");
-            assert_eq!(uri, uri_obj, "Uri::try_from did not create the expected Uri: {} != {}", raw, uri_obj);
+            assert_eq!(uri, uri_obj,
+                       "Uri::try_from did not create the expected Uri: {} != {}", raw, uri_obj);
             assert_tokens(&uri_obj, &[serde_test::Token::Str(raw)]);
         }
 
@@ -413,14 +414,25 @@ mod uri_serde {
         }
 
         /// http://user:pass@domain.com:4444/path?query
-        fn absolute<'a>(scheme: &'a str, user: Option<&'a str>, host: Option<&'a str>, port: Option<u16>, path: Option<&'a str>, query: Option<&'a str>) -> Uri<'a> {
-            Uri::Absolute(Absolute::new(scheme, host.map(|host| Authority::new(user, Host::Raw(host), port)), path.map(|path| Origin::new(path, query))))
+        fn absolute<'a>(scheme: &'a str,
+                        user: Option<&'a str>,
+                        host: Option<&'a str>,
+                        port: Option<u16>,
+                        path: Option<&'a str>,
+                        query: Option<&'a str>) -> Uri<'a> {
+            Uri::Absolute(Absolute::new(scheme,
+                                    host.map(|host| Authority::new(user, Host::Raw(host), port)),
+                                    path.map(|path| Origin::new(path, query))))
         }
 
         #[test]
         fn serde_absolute_form() {
-            test_helper("http://example.com/", absolute("http", None, Some("example.com"), None, Some("/"), None));
-            test_helper("http://user:pass@example.com:80/path/with/segments/?query=value", absolute("http", Some("user:pass"), Some("example.com"), Some(80), Some("/path/with/segments/"), Some("query=value")));
+            test_helper("http://example.com/",
+                        absolute("http", None, Some("example.com"), None,
+                        Some("/"), None));
+            test_helper("http://user:pass@example.com:80/path/with/segments/?query=value",
+                        absolute("http", Some("user:pass"), Some("example.com"), Some(80),
+                        Some("/path/with/segments/"), Some("query=value")));
 
         }
 
@@ -434,7 +446,8 @@ mod uri_serde {
         /// just change it here.
         #[test]
         fn serde_invalid_uri() {
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@")], "unexpected EOF: expected some token at index 0");
+            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@")],
+                                        "unexpected EOF: expected some token at index 0");
             assert_de_tokens_error::<Uri<'static>>(&[Token::Str("")], "empty URI at index 0");
         }
     }
