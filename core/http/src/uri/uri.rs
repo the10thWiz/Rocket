@@ -419,9 +419,6 @@ mod uri_serde {
 
         #[test]
         fn serde_absolute_form() {
-            // `Some("")` and `Some("/")` are needed because of how the Uri is parsed. This could
-            // potentially be fixed in the Uri's implementation of Eq, where an origin or authority
-            // of None could be interperted as "/" or "" as appropriate
             test_helper("http://example.com/", absolute("http", None, Some("example.com"), None, Some("/"), None));
             test_helper("http://user:pass@example.com:80/path/with/segments/?query=value", absolute("http", Some("user:pass"), Some("example.com"), Some(80), Some("/path/with/segments/"), Some("query=value")));
 
@@ -431,7 +428,7 @@ mod uri_serde {
         fn serde_asterisk_form() {
             test_helper("*", Uri::Asterisk);
         }
-        
+
         /// These errors come from the Uri parser, but there is no simple way to avoid specifying
         /// the exact error using `serde_test`. If updating URI parsing causes this test to fail,
         /// just change it here.
