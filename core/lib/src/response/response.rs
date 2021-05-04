@@ -282,7 +282,7 @@ impl<'r> Builder<'r> {
         self.response.set_max_chunk_size(size);
         self
     }
-    
+
     /// Adds an upgrade response to this response. It overwrites any existing upgrade responses,
     /// and is mutually exclusive with a response body.
     ///

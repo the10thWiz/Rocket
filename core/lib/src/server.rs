@@ -132,7 +132,8 @@ impl Rocket<Orbit> {
     ) -> io::Result<()> {
         let upgrade_pending = upgrade_pending(response.take_upgradable());
         if let Some(upgrade_pending) = upgrade_pending {
-            upgrade_pending.send(on_upgrade).expect("`upgrade_pending()` should always wait for an `OnUpgrade`");
+            upgrade_pending.send(on_upgrade)
+                .expect("`upgrade_pending()` should always wait for an `OnUpgrade`");
         }
 
         let mut hyp_res = hyper::Response::builder()

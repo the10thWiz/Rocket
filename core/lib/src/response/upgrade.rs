@@ -23,7 +23,8 @@ pub trait UpgradeResponder: Send + Unpin {
 /// should never fail.
 ///
 /// When upgradable is None, this does nothing.
-pub(crate) fn upgrade_pending(upgradable: Option<Box<dyn UpgradeResponder>>) -> Option<oneshot::Sender<OnUpgrade>> {
+pub(crate) fn upgrade_pending(upgradable: Option<Box<dyn UpgradeResponder>>)
+        -> Option<oneshot::Sender<OnUpgrade>> {
     if let Some(upgradable) = upgradable {
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
