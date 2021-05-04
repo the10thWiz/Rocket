@@ -498,8 +498,10 @@ mod uri_serde {
         fn serde_asterisk_form() {
             test_helper("*", Uri::Asterisk);
         }
-
-        // Commented out tests currently fail
+        
+        /// These errors come from the Uri parser, but there is no simple way to avoid specifying
+        /// the exact error using `serde_test`. If updating URI parsing causes this test to fail,
+        /// just change it here.
         #[test]
         fn serde_invalid_uri() {
             assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@")], "unexpected EOF: expected some token at index 0");
