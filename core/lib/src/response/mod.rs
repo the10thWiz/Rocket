@@ -35,6 +35,7 @@ pub(crate) mod flash;
 pub mod content;
 pub mod status;
 pub mod stream;
+pub mod upgrade;
 
 #[doc(hidden)]
 pub use rocket_codegen::Responder;

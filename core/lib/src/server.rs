@@ -6,7 +6,7 @@ use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 use tokio::sync::oneshot;
 use yansi::Paint;
 
-use crate::{Rocket, Orbit, Request, Response, Data, route};
+use crate::{Rocket, Orbit, Request, Response, Data, route, response::upgrade::upgrade_pending};
 use crate::form::Form;
 use crate::outcome::Outcome;
 use crate::error::{Error, ErrorKind};
@@ -63,7 +63,7 @@ async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
 async fn hyper_service_fn(
     rocket: Arc<Rocket<Orbit>>,
     h_addr: std::net::SocketAddr,
-    hyp_req: hyper::Request<hyper::Body>,
+    mut hyp_req: hyper::Request<hyper::Body>,
 ) -> Result<hyper::Response<hyper::Body>, io::Error> {
     // This future must return a hyper::Response, but the response body might
     // borrow from the request. Instead, write the body in another future that
@@ -72,6 +72,7 @@ async fn hyper_service_fn(
 
     tokio::spawn(async move {
         // Get all of the information from Hyper.
+        let on_upgrade = hyper::upgrade::on(&mut hyp_req);
         let (h_parts, h_body) = hyp_req.into_parts();
 
         // Convert the Hyper request into a Rocket request.
@@ -89,7 +90,7 @@ async fn hyper_service_fn(
                 // handler) instead of doing this.
                 let dummy = Request::new(&rocket, Method::Get, Origin::dummy());
                 let r = rocket.handle_error(Status::BadRequest, &dummy).await;
-                return rocket.send_response(r, tx).await;
+                return rocket.send_response(r, on_upgrade, tx).await;
             }
         };
 
@@ -99,7 +100,7 @@ async fn hyper_service_fn(
         // Dispatch the request to get a response, then write that response out.
         let token = rocket.preprocess_request(&mut req, &mut data).await;
         let r = rocket.dispatch(token, &mut req, data).await;
-        rocket.send_response(r, tx).await;
+        rocket.send_response(r, on_upgrade, tx).await;
     });
 
     // Receive the response written to `tx` by the task above.
@@ -112,9 +113,10 @@ impl Rocket<Orbit> {
     async fn send_response(
         &self,
         response: Response<'_>,
+        on_upgrade: hyper::upgrade::OnUpgrade,
         tx: oneshot::Sender<hyper::Response<hyper::Body>>,
     ) {
-        match self.make_response(response, tx).await {
+        match self.make_response(response, on_upgrade, tx).await {
             Ok(()) => info_!("{}", Paint::green("Response succeeded.")),
             Err(e) => error_!("Failed to write response: {}.", e),
         }
@@ -125,8 +127,14 @@ impl Rocket<Orbit> {
     async fn make_response(
         &self,
         mut response: Response<'_>,
+        on_upgrade: hyper::upgrade::OnUpgrade,
         tx: oneshot::Sender<hyper::Response<hyper::Body>>,
     ) -> io::Result<()> {
+        let upgrade_pending = upgrade_pending(response.take_upgradable());
+        if let Some(upgrade_pending) = upgrade_pending {
+            upgrade_pending.send(on_upgrade).expect("`upgrade_pending()` should always wait for an `OnUpgrade`");
+        }
+
         let mut hyp_res = hyper::Response::builder()
             .status(response.status().code);
 
