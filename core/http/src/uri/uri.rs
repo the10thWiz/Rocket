@@ -396,12 +396,7 @@ mod uri_serde {
         #[test]
         fn serde_origin_form() {
             test_helper("/", origin("/", None));
-            test_helper("/foo", origin("/foo", None));
-            test_helper("/bar/foo", origin("/bar/foo", None));
             test_helper("/index.html", origin("/index.html", None));
-            test_helper("/a/nice/url", origin("/a/nice/url", None));
-
-            test_helper("/a?param", origin("/a", Some("param")));
             test_helper("/a?param=value", origin("/a", Some("param=value")));
         }
 
@@ -413,35 +408,8 @@ mod uri_serde {
         #[test]
         fn serde_authority_form() {
             test_helper("example.com", authority(None, "example.com", None));
-            test_helper("test.example.com", authority(None, "test.example.com", None));
-            test_helper("www.example.com", authority(None, "www.example.com", None));
-            test_helper("com", authority(None, "com", None));
-
             test_helper("user:pass@example.com", authority(Some("user:pass"), "example.com", None));
-            test_helper("user:pass@test.example.com", authority(Some("user:pass"), "test.example.com", None));
-            test_helper("user:pass@www.example.com", authority(Some("user:pass"), "www.example.com", None));
-            test_helper("user:pass@com", authority(Some("user:pass"), "com", None));
-            test_helper("username@example.com", authority(Some("username"), "example.com", None));
-            test_helper("username:long_pass)with0odd$chars@example.com", authority(Some("username:long_pass)with0odd$chars"), "example.com", None));
-            test_helper("username0with$user:passchars@example.com", authority(Some("username0with$user:passchars"), "example.com", None));
-            test_helper("u@example.com", authority(Some("u"), "example.com", None));
-
-            test_helper("example.com:1", authority(None, "example.com", Some(1)));
             test_helper("example.com:8000", authority(None, "example.com", Some(8000)));
-            test_helper("example.com:8080", authority(None, "example.com", Some(8080)));
-            test_helper("example.com:65333", authority(None, "example.com", Some(65333)));
-
-            test_helper("user:pass@test.example.com:123", authority(Some("user:pass"), "test.example.com", Some(123)));
-            test_helper("user:pass@www.example.com:123", authority(Some("user:pass"), "www.example.com", Some(123)));
-            test_helper("user:pass@com:123", authority(Some("user:pass"), "com", Some(123)));
-            test_helper("username@example.com:123", authority(Some("username"), "example.com", Some(123)));
-            test_helper("username:long_pass)with0odd$chars%@example.com:123", authority(Some("username:long_pass)with0odd$chars%"), "example.com", Some(123)));
-            test_helper("username0with$user:passchars@example.com:123", authority(Some("username0with$user:passchars"), "example.com", Some(123)));
-
-            test_helper("u@example.com:1", authority(Some("u"), "example.com", Some(1)));
-            test_helper("u@example.com:8000", authority(Some("u"), "example.com", Some(8000)));
-            test_helper("u@example.com:8080", authority(Some("u"), "example.com", Some(8080)));
-            test_helper("u@example.com:65333", authority(Some("u"), "example.com", Some(65333)));
         }
 
         /// http://user:pass@domain.com:4444/path?query
@@ -454,44 +422,9 @@ mod uri_serde {
             // `Some("")` and `Some("/")` are needed because of how the Uri is parsed. This could
             // potentially be fixed in the Uri's implementation of Eq, where an origin or authority
             // of None could be interperted as "/" or "" as appropriate
-            test_helper("http:///", absolute("http", None, Some(""), None, Some("/"), None));
-            test_helper("http://", absolute("http", None, Some(""), None, None, None));
-            test_helper("https:///", absolute("https", None, Some(""), None, Some("/"), None));
-            test_helper("snmp:///", absolute("snmp", None, Some(""), None, Some("/"), None));
-
             test_helper("http://example.com/", absolute("http", None, Some("example.com"), None, Some("/"), None));
-            test_helper("http://topleveldomain/", absolute("http", None, Some("topleveldomain"), None, Some("/"), None));
-            test_helper("http://sub.example.com/", absolute("http", None, Some("sub.example.com"), None, Some("/"), None));
-            test_helper("http://user@example.com/", absolute("http", Some("user"), Some("example.com"), None, Some("/"), None));
-            test_helper("http://user:pass@example.com/", absolute("http", Some("user:pass"), Some("example.com"), None, Some("/"), None));
-            test_helper("http://example.com:80/", absolute("http", None, Some("example.com"), Some(80), Some("/"), None));
-            test_helper("http://example.com:123/", absolute("http", None, Some("example.com"), Some(123), Some("/"), None));
-            test_helper("http://example.com:65333/", absolute("http", None, Some("example.com"), Some(65333), Some("/"), None));
-            test_helper("http://user@example.com:80/", absolute("http", Some("user"), Some("example.com"), Some(80), Some("/"), None));
-            test_helper("http://user:pass@example.com:80/", absolute("http", Some("user:pass"), Some("example.com"), Some(80), Some("/"), None));
+            test_helper("http://user:pass@example.com:80/path/with/segments/?query=value", absolute("http", Some("user:pass"), Some("example.com"), Some(80), Some("/path/with/segments/"), Some("query=value")));
 
-            test_helper("http://example.com", absolute("http", None, Some("example.com"), None, None, None));
-            test_helper("http://topleveldomain", absolute("http", None, Some("topleveldomain"), None, None, None));
-            test_helper("http://sub.example.com", absolute("http", None, Some("sub.example.com"), None, None, None));
-            test_helper("http://user@example.com", absolute("http", Some("user"), Some("example.com"), None, None, None));
-            test_helper("http://user:pass@example.com", absolute("http", Some("user:pass"), Some("example.com"), None, None, None));
-            test_helper("http://example.com:80", absolute("http", None, Some("example.com"), Some(80), None, None));
-            test_helper("http://example.com:123", absolute("http", None, Some("example.com"), Some(123), None, None));
-            test_helper("http://example.com:65333", absolute("http", None, Some("example.com"), Some(65333), None, None));
-            test_helper("http://user@example.com:80", absolute("http", Some("user"), Some("example.com"), Some(80), None, None));
-            test_helper("http://user:pass@example.com:80", absolute("http", Some("user:pass"), Some("example.com"), Some(80), None, None));
-
-            test_helper("http:///path", absolute("http", None, Some(""), None, Some("/path"), None));
-            test_helper("http:///path/", absolute("http", None, Some(""), None, Some("/path/"), None));
-            test_helper("http:///path/with/segments", absolute("http", None, Some(""), None, Some("/path/with/segments"), None));
-            test_helper("http:///path/with/segments/", absolute("http", None, Some(""), None, Some("/path/with/segments/"), None));
-            test_helper("http:///index.html", absolute("http", None, Some(""), None, Some("/index.html"), None));
-            test_helper("http:///path?query", absolute("http", None, Some(""), None, Some("/path"), Some("query")));
-            test_helper("http:///path?query=value", absolute("http", None, Some(""), None, Some("/path"), Some("query=value")));
-            test_helper("http:///index.html?query", absolute("http", None, Some(""), None, Some("/index.html"), Some("query")));
-            test_helper("http:///index.html?query=value", absolute("http", None, Some(""), None, Some("/index.html"), Some("query=value")));
-            test_helper("http:///index.html?query", absolute("http", None, Some(""), None, Some("/index.html"), Some("query")));
-            test_helper("http:///path/with/segments/?query=value", absolute("http", None, Some(""), None, Some("/path/with/segments/"), Some("query=value")));
         }
 
         #[test]
@@ -505,21 +438,6 @@ mod uri_serde {
         #[test]
         fn serde_invalid_uri() {
             assert_de_tokens_error::<Uri<'static>>(&[Token::Str("@")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("#")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("[")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("]")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("{")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("}")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("<")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str(">")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str(" ")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("^")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("|")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("\\")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("\t")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("?")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str(":")], "unexpected EOF: expected some token at index 0");
-            assert_de_tokens_error::<Uri<'static>>(&[Token::Str("%")], "'%' is not a valid URI at index 0");
             assert_de_tokens_error::<Uri<'static>>(&[Token::Str("")], "empty URI at index 0");
         }
     }
