@@ -32,12 +32,10 @@ pub(crate) fn upgrade_pending(upgradable: Option<Box<dyn UpgradeResponder>>)
                 match on_upgrade.await {
                     Ok(upgraded) => {
                         if let Err(e) = upgradable.on_upgrade(upgraded).await {
-                            eprintln!("server foobar io error: {}", e)
-                        }else {
-                            println!("Socket handler finished");
-                        };
+                            error_!("Error in upgraded connection: {}", e)
+                        }
                     }
-                    Err(e) => eprintln!("upgrade error: {:?}", e),
+                    Err(e) => error_!("Failed to upgrade connection: {:?}", e),
                 }
             }
         });
