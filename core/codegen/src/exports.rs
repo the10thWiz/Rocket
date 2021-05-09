@@ -106,7 +106,7 @@ define_exported_paths! {
     __message => __message,
     FromMessage => ::rocket::websocket::FromMessage,
     _Handler => ::rocket::websocket::Handler,
-    _Message => ::rocket::websocket::Message,
+    Message => ::rocket::websocket::Message,
     _WebsocketStream => ::rocket::websocket::WebSocketStream<::rocket_http::hyper::upgrade::Upgraded>,
 }
 

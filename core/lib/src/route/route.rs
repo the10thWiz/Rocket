@@ -8,6 +8,8 @@ use crate::http::{uri, Method, MediaType};
 use crate::route::{Handler, RouteUri, BoxFuture};
 use crate::sentinel::Sentry;
 
+use super::WebsocketHandler;
+
 /// A request handling route.
 ///
 /// A route consists of exactly the information in its fields. While a `Route`
@@ -182,6 +184,8 @@ pub struct Route {
     pub method: Method,
     /// The function that should be called when the route matches.
     pub handler: Box<dyn Handler>,
+    /// The function that should be called when the route matches.
+    pub websocket_handler: Box<dyn WebsocketHandler>,
     /// The route URI.
     pub uri: RouteUri<'static>,
     /// The rank of this route. Lower ranks have higher priorities.
@@ -215,8 +219,8 @@ impl Route {
     /// assert_eq!(index.method, Method::Get);
     /// assert_eq!(index.uri, "/");
     /// ```
-    pub fn new<H: Handler>(method: Method, uri: &str, handler: H) -> Route {
-        Route::ranked(None, method, uri, handler)
+    pub fn new<H: Handler, W: WebsocketHandler>(method: Method, uri: &str, handler: H, websocket_handler: W) -> Route {
+        Route::ranked(None, method, uri, handler, websocket_handler)
     }
 
     /// Creates a new route with the given rank, method, path, and handler with
@@ -244,8 +248,8 @@ impl Route {
     /// assert_eq!(foo.method, Method::Post);
     /// assert_eq!(foo.uri, "/foo?bar");
     /// ```
-    pub fn ranked<H, R>(rank: R, method: Method, uri: &str, handler: H) -> Route
-        where H: Handler + 'static, R: Into<Option<isize>>,
+    pub fn ranked<H, R, W>(rank: R, method: Method, uri: &str, handler: H, websocket_handler: W) -> Route
+        where H: Handler + 'static, R: Into<Option<isize>>, W: WebsocketHandler + 'static,
     {
         let uri = RouteUri::new("/", uri);
         let rank = rank.into().unwrap_or_else(|| uri.default_rank());
@@ -254,6 +258,7 @@ impl Route {
             format: None,
             sentinels: Vec::new(),
             handler: Box::new(handler),
+            websocket_handler: Box::new(websocket_handler),
             rank, uri, method,
             websocket: false,
         }

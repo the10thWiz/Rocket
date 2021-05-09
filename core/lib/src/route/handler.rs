@@ -1,4 +1,4 @@
-use crate::{Request, Data};
+use crate::{Data, Request, websocket::Message};
 use crate::response::{Response, Responder};
 use crate::http::Status;
 
@@ -164,6 +164,40 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
               Self: 'async_trait,
     {
         self(req, data)
+    }
+}
+
+#[crate::async_trait]
+pub trait WebsocketHandler: Cloneable + Send + Sync + 'static {
+    /// Called by Rocket when a `Request` with its associated `Data` should be
+    /// handled by this handler.
+    ///
+    /// The variant of `Outcome` returned by the returned `Future` determines
+    /// what Rocket does next. If the return value is a `Success(Response)`, the
+    /// wrapped `Response` is used to respond to the client. If the return value
+    /// is a `Failure(Status)`, the error catcher for `Status` is invoked to
+    /// generate a response. Otherwise, if the return value is `Forward(Data)`,
+    /// the next matching route is attempted. If there are no other matching
+    /// routes, the `404` error catcher is invoked.
+    async fn handle<'r>(&self, request: &'r Request<'_>, message: Message) -> Result<(), ()>;
+}
+
+// We write this manually to avoid double-boxing.
+impl<F: Clone + Sync + Send + 'static> WebsocketHandler for F
+    where for<'x> F: Fn(&'x Request<'_>, Message) -> BoxFuture<'x>,
+{
+    #[inline(always)]
+    fn handle<'r, 'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        req: &'r Request<'life1>,
+        message: Message,
+    ) -> BoxFuture<'r>
+        where 'r: 'async_trait,
+              'life0: 'async_trait,
+              'life1: 'async_trait,
+              Self: 'async_trait,
+    {
+        self(req, message)
     }
 }
 

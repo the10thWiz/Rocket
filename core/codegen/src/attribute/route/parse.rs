@@ -112,6 +112,15 @@ impl Route {
         Route::upgrade_dynamic(param, args).map(Parameter::Guard)
     }
 
+    pub fn upgrade_param_ref(param: Parameter, args: &Arguments) -> Result<Parameter> {
+        if !param.dynamic().is_some() {
+            return Ok(param);
+        }
+
+        let param = param.take_dynamic().expect("dynamic() => take_dynamic()");
+        Route::upgrade_dynamic(param, args).map(Parameter::Guard)
+    }
+
     pub fn upgrade_dynamic(param: Dynamic, args: &Arguments) -> Result<Guard> {
         if let Some((ident, ty)) = args.map.get(&param.name) {
             Ok(Guard::from(param, ident.clone(), ty.clone()))
@@ -302,7 +311,7 @@ impl WebsocketRoute {
         // Parse and collect the path parameters.
         let (source, span) = (attr.uri.path(), attr.uri.path_span);
         let path_params = Parameter::parse_many::<uri::Path>(source.as_str(), span)
-            .map(|p| Route::upgrade_param(p?, &arguments))
+            .map(|p| Route::upgrade_param_ref(p?, &arguments))
             .filter_map(|p| p.map_err(|e| diags.push(e.into())).ok())
             .collect::<Vec<_>>();
 

@@ -3,7 +3,6 @@ use std::borrow::Cow;
 
 use tokio::io::{AsyncRead, AsyncSeek};
 
-use crate::response::upgrade::UpgradeResponder;
 use crate::http::{Header, HeaderMap, Status, ContentType, Cookie};
 use crate::response::Body;
 
@@ -283,15 +282,6 @@ impl<'r> Builder<'r> {
         self
     }
 
-    /// Adds an upgrade response to this response. It overwrites any existing upgrade responses,
-    /// and is mutually exclusive with a response body.
-    ///
-    /// TODO: enforce mutual exclusivivity
-    #[inline(always)]
-    pub fn upgrade(&mut self, upgrade: Box<dyn UpgradeResponder>) {
-        self.response.upgrade = Some(upgrade);
-    }
-
     /// Merges the `other` `Response` into `self` by setting any fields in
     /// `self` to the corresponding value in `other` if they are set in `other`.
     /// Fields in `self` are unchanged if they are not set in `other`. If a
@@ -423,7 +413,6 @@ pub struct Response<'r> {
     status: Option<Status>,
     headers: HeaderMap<'r>,
     body: Body<'r>,
-    upgrade: Option<Box<dyn UpgradeResponder>>,
 }
 
 impl<'r> Response<'r> {
@@ -936,13 +925,6 @@ impl<'r> Response<'r> {
         for (name, mut values) in other.headers.into_iter_raw() {
             self.headers.add_all(name.into_cow(), &mut values);
         }
-    }
-
-    /// Takes the UpgradeResponder from this response, and returns it. This replaces the
-    /// UpgradeResponder with None, so this function should only be called once.
-    #[inline(always)]
-    pub(crate) fn take_upgradable(&mut self) -> Option<Box<dyn UpgradeResponder>> {
-        self.upgrade.take()
     }
 }
 

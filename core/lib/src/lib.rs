@@ -124,7 +124,6 @@ pub mod fairing;
 pub mod error;
 pub mod catcher;
 pub mod route;
-#[cfg(feature = "websockets")]
 pub mod websocket;
 
 // Reexport of HTTP everything.
