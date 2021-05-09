@@ -83,6 +83,7 @@ define_exported_paths! {
     _Ok => ::std::result::Result::Ok,
     _Err => ::std::result::Result::Err,
     _Box => ::std::boxed::Box,
+    _Pin => ::std::pin::Pin,
     _Vec => ::std::vec::Vec,
     _Cow => ::std::borrow::Cow,
     BorrowMut => ::std::borrow::BorrowMut,
@@ -101,6 +102,12 @@ define_exported_paths! {
     Catcher => ::rocket::Catcher,
     SmallVec => ::rocket::http::private::SmallVec,
     Status => ::rocket::http::Status,
+    _websocket => ::rocket::websocket,
+    __message => __message,
+    FromMessage => ::rocket::websocket::FromMessage,
+    _Handler => ::rocket::websocket::Handler,
+    _Message => ::rocket::websocket::Message,
+    _WebsocketStream => ::rocket::websocket::WebSocketStream<::rocket_http::hyper::upgrade::Upgraded>,
 }
 
 macro_rules! define_spanned_export {

@@ -190,6 +190,8 @@ pub struct Route {
     pub format: Option<MediaType>,
     /// The discovered sentinels.
     pub(crate) sentinels: Vec<Sentry>,
+    /// Whether this route is a websocket listener
+    pub(crate) websocket: bool,
 }
 
 impl Route {
@@ -253,6 +255,7 @@ impl Route {
             sentinels: Vec::new(),
             handler: Box::new(handler),
             rank, uri, method,
+            websocket: false,
         }
     }
 
@@ -345,6 +348,8 @@ pub struct StaticInfo {
     /// Route-derived sentinels, if any.
     /// This isn't `&'static [SentryInfo]` because `type_name()` isn't `const`.
     pub sentinels: Vec<Sentry>,
+    /// Websocket
+    pub websocket: bool,
 }
 
 #[doc(hidden)]
@@ -361,6 +366,7 @@ impl From<StaticInfo> for Route {
             format: info.format,
             sentinels: info.sentinels.into_iter().collect(),
             uri,
+            websocket: info.websocket,
         }
     }
 }

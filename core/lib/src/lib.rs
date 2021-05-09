@@ -124,6 +124,8 @@ pub mod fairing;
 pub mod error;
 pub mod catcher;
 pub mod route;
+#[cfg(feature = "websockets")]
+pub mod websocket;
 
 // Reexport of HTTP everything.
 pub mod http {
@@ -160,6 +162,9 @@ mod phase;
 #[doc(inline)] pub use error::Error;
 #[doc(inline)] pub use sentinel::Sentinel;
 #[doc(inline)] pub use rocket_codegen::*;
+#[cfg(feature = "websockets")]
+pub use rocket_codegen::channel;
+
 pub use crate::rocket::Rocket;
 pub use crate::request::Request;
 pub use crate::shutdown::Shutdown;

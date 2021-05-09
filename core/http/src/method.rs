@@ -25,7 +25,9 @@ pub enum Method {
     /// The `CONNECT` variant.
     Connect,
     /// The `PATCH` variant.
-    Patch
+    Patch,
+    // /// A Websocket connection
+    //Websocket,
 }
 
 impl Method {

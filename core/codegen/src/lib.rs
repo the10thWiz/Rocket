@@ -286,6 +286,14 @@ route_attribute!(head => Method::Head);
 route_attribute!(patch => Method::Patch);
 route_attribute!(options => Method::Options);
 
+
+/// Websocket handler attribute
+#[cfg(feature = "websockets")]
+#[proc_macro_attribute]
+pub fn channel(args: TokenStream, input: TokenStream) -> TokenStream {
+    emit!(attribute::route::websocket(args, input))
+}
+
 /// Attribute to generate a [`Catcher`] and associated metadata.
 ///
 /// This attribute can only be applied to free functions:

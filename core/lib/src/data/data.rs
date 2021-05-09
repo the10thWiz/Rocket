@@ -1,3 +1,5 @@
+use rocket_http::hyper;
+
 use crate::tokio::io::AsyncReadExt;
 use crate::data::data_stream::DataStream;
 use crate::data::{ByteUnit, StreamReader};
@@ -188,5 +190,11 @@ impl Data {
     #[inline(always)]
     pub fn peek_complete(&self) -> bool {
         self.is_complete
+    }
+    
+    /// Gets the internal Hyper body
+    #[inline(always)]
+    pub(crate) fn into_hyper_body(self) -> Option<hyper::Body> {
+        self.stream.into_inner()
     }
 }

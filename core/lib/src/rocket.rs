@@ -488,6 +488,10 @@ impl Rocket<Build> {
 
         // Initialize the router; check for collisions.
         let mut router = Router::new();
+        #[cfg(feature = "websockets")]
+        if self.routes.iter().any(|r| r.websocket) || true {
+            self = self.manage(crate::websocket::WebsocketRouter::new());
+        }
         self.routes.clone().into_iter().for_each(|r| router.add_route(r));
         self.catchers.clone().into_iter().for_each(|c| router.add_catcher(c));
         router.finalize().map_err(ErrorKind::Collisions)?;
@@ -676,6 +680,7 @@ impl Rocket<Orbit> {
     pub fn shutdown(&self) -> Shutdown {
         self.shutdown.clone()
     }
+
 }
 
 impl<P: Phase> Rocket<P> {
@@ -859,5 +864,23 @@ impl<P: Phase> DerefMut for Rocket<P> {
 impl<P: Phase> fmt::Debug for Rocket<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+#[cfg(feature = "websockets")]
+use crate::websocket::{WebsocketRouter, WebSocketConnection, Handler};
+#[cfg(feature = "websockets")]
+use tokio::sync::oneshot;
+#[cfg(feature = "websockets")]
+use std::pin::Pin;
+
+impl Rocket<Orbit> {
+    /// Registers a websocket handler 
+    ///
+    /// # Panics if the 
+    #[doc(hidden)]
+    #[cfg(feature = "websockets")]
+    pub async fn register_websocket_handler(&self, rx: oneshot::Receiver<Pin<Box<WebSocketConnection>>>, handler: Handler) {
+        self.state::<WebsocketRouter>().expect("No router attached").register_websocket_handler(rx, handler).await;
     }
 }

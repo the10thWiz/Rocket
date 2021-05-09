@@ -230,6 +230,13 @@ impl StreamReader {
     pub fn empty() -> Self {
         Self { inner: StreamKind::Body(hyper::Body::empty()), state: State::Done }
     }
+
+    pub(crate) fn into_inner(self) -> Option<hyper::Body> {
+        match self.inner {
+            StreamKind::Body(b) => Some(b),
+            _ => None,
+        }
+    }
 }
 
 impl From<hyper::Body> for StreamReader {
