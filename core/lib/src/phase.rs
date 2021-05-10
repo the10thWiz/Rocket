@@ -3,7 +3,7 @@ use figment::Figment;
 
 use crate::{Catcher, Config, Rocket, Route, Shutdown};
 use crate::router::Router;
-use crate::websocket::router::WebsocketRouter;
+use crate::websocket::WebsocketRouter;
 use crate::fairing::Fairings;
 
 mod private {

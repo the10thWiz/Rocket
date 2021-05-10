@@ -6,7 +6,7 @@ use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 use tokio::sync::oneshot;
 use yansi::Paint;
 
-use crate::{Rocket, Orbit, Request, Response, Data, route, response::upgrade::upgrade_pending};
+use crate::{Data, Orbit, Request, Response, Rocket, response::upgrade::upgrade_pending, route, websocket::WebsocketRouter};
 use crate::form::Form;
 use crate::outcome::Outcome;
 use crate::error::{Error, ErrorKind};
@@ -72,7 +72,7 @@ async fn hyper_service_fn(
 
     tokio::spawn(async move {
         if rocket.websocket_router.is_upgrade(&hyp_req) {
-            rocket.websocket_router.route(hyp_req, h_addr, tx).await;
+            WebsocketRouter::route(rocket, hyp_req, h_addr, tx).await;
         }else {
             //let on_upgrade = hyper::upgrade::on(&mut hyp_req);
             // Get all of the information from Hyper.

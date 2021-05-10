@@ -8,7 +8,7 @@ use crate::http::{uri, Method, MediaType};
 use crate::route::{Handler, RouteUri, BoxFuture};
 use crate::sentinel::Sentry;
 
-use super::WebsocketHandler;
+use super::{BoxFutureWs, WebsocketHandler};
 
 /// A request handling route.
 ///
@@ -348,6 +348,8 @@ pub struct StaticInfo {
     pub format: Option<MediaType>,
     /// The route's handler, i.e, the annotated function.
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFuture<'r>,
+    /// The route's handler, i.e, the annotated function.
+    pub websocket_handler: for<'r> fn(&'r crate::Request<'_>, crate::websocket::Message) -> BoxFutureWs<'r>,
     /// The route's rank, if any.
     pub rank: Option<isize>,
     /// Route-derived sentinels, if any.
@@ -367,6 +369,7 @@ impl From<StaticInfo> for Route {
             name: Some(info.name.into()),
             method: info.method,
             handler: Box::new(info.handler),
+            websocket_handler: Box::new(info.websocket_handler),
             rank: info.rank.unwrap_or_else(|| uri.default_rank()),
             format: info.format,
             sentinels: info.sentinels.into_iter().collect(),
