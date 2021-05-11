@@ -223,3 +223,134 @@ impl std::ops::Deref for RouteUri {
         &self.origin
     }
 }
+
+/// The parsed `#[websocket(..)]`
+#[derive(Debug, FromMeta)]
+pub struct WebsocketAttribute {
+    #[meta(naked)]
+    pub uri: RouteUri,
+    #[meta(naked)]
+    pub message: SpanWrapped<Dynamic>,
+    //pub data: Option<SpanWrapped<Dynamic>>,
+    pub format: Option<MediaType>,
+    pub rank: Option<isize>,
+}
+
+pub struct WebsocketRoute {
+    /// The attribute: `#[websocket(path, ...)]`.
+    pub attr: WebsocketAttribute,
+    /// The static and dynamic path parameters.
+    pub path_params: Vec<Parameter>,
+    /// The static and dynamic query parameters.
+    pub query_params: Vec<Parameter>,
+    /// The data guard, if any.
+    pub data_guard: Option<Guard>,
+    /// The request guards.
+    pub request_guards: Vec<Guard>,
+    /// The decorated function: the handler.
+    pub handler: syn::ItemFn,
+    /// The parsed arguments to the user's function.
+    pub arguments: Arguments,
+}
+
+impl WebsocketRoute {
+    //pub fn upgrade_param(param: Parameter, args: &Arguments) -> Result<Parameter> {
+        //if !param.dynamic().is_some() {
+            //return Ok(param);
+        //}
+
+        //let param = param.take_dynamic().expect("dynamic() => take_dynamic()");
+        //Self::upgrade_dynamic(param, args).map(Parameter::Guard)
+    //}
+
+    //pub fn upgrade_dynamic(param: Dynamic, args: &Arguments) -> Result<Guard> {
+        //if let Some((ident, ty)) = args.map.get(&param.name) {
+            //Ok(Guard::from(param, ident.clone(), ty.clone()))
+        //} else {
+            //let msg = format!("expected argument named `{}` here", param.name);
+            //let diag = param.span().error("unused parameter").span_note(args.span, msg);
+            //Err(diag)
+        //}
+    //}
+
+    pub fn from(attr: WebsocketAttribute, handler: syn::ItemFn) -> Result<Self> {
+        let mut diags = Diagnostics::new();
+
+        // Check the validity of function arguments.
+        let span = handler.sig.paren_token.span;
+        let mut arguments = Arguments { map: ArgumentMap::new(), span };
+        for arg in &handler.sig.inputs {
+            if let Some((ident, ty)) = arg.typed() {
+                let value = (ident.clone(), ty.with_stripped_lifetimes());
+                arguments.map.insert(Name::from(ident), value);
+            } else {
+                let span = arg.span();
+                let diag = if arg.wild().is_some() {
+                    span.error("handler arguments must be named")
+                        .help("to name an ignored handler argument, use `_name`")
+                } else {
+                    span.error("handler arguments must be of the form `ident: Type`")
+                };
+                diags.push(diag);
+            }
+        }
+        
+        // Parse and collect the path parameters.
+        let (source, span) = (attr.uri.path(), attr.uri.path_span);
+        let path_params = Parameter::parse_many::<uri::Path>(source.as_str(), span)
+            .map(|p| Route::upgrade_param_ref(p?, &arguments))
+            .filter_map(|p| p.map_err(|e| diags.push(e.into())).ok())
+            .collect::<Vec<_>>();
+
+        // Parse and collect the query parameters.
+        let query_params = match (attr.uri.query(), attr.uri.query_span) {
+            (Some(r), Some(span)) => Parameter::parse_many::<uri::Query>(r.as_str(), span)
+                .map(|p| Route::upgrade_param(p?, &arguments))
+                .filter_map(|p| p.map_err(|e| diags.push(e.into())).ok())
+                .collect::<Vec<_>>(),
+            _ => vec![]
+        };
+
+        // Remove the `SpanWrapped` layer and upgrade to a guard.
+        let data_guard = Some(attr.message.clone())
+            .map(|p| Route::upgrade_dynamic(p.value, &arguments))
+            .and_then(|p| p.map_err(|e| diags.push(e.into())).ok());
+
+        // Collect all of the declared dynamic route parameters.
+        let all_dyn_params = path_params.iter().filter_map(|p| p.dynamic())
+            .chain(query_params.iter().filter_map(|p| p.dynamic()));
+            //.chain(data_guard.as_ref().map(|g| &g.source).into_iter());
+
+        // Check for any duplicates in the dynamic route parameters.
+        let mut dyn_params: IndexSet<&Dynamic> = IndexSet::new();
+        for p in all_dyn_params {
+            if let Some(prev) = dyn_params.replace(p) {
+                diags.push(p.span().error(format!("duplicate parameter: `{}`", p.name))
+                    .span_note(prev.span(), "previous parameter with the same name here"))
+            }
+        }
+
+        // Collect the request guards: all the arguments not already a guard.
+        let request_guards = arguments.map.iter()
+            .filter(|(name, _)| {
+                let mut all_other_guards = path_params.iter().filter_map(|p| p.guard())
+                    .chain(query_params.iter().filter_map(|p| p.guard()))
+                    .chain(data_guard.as_ref().into_iter());
+
+                all_other_guards.all(|g| &g.name != *name)
+            })
+            .enumerate()
+            .map(|(index, (name, (ident, ty)))| Guard {
+                source: Dynamic { index, name: name.clone(), trailing: false },
+                fn_ident: ident.clone(),
+                ty: ty.clone(),
+            })
+            .collect();
+
+        Ok(Self {
+            attr, path_params, query_params, 
+            data_guard,
+            request_guards, handler, arguments,
+        })
+    }
+}
