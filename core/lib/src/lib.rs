@@ -124,6 +124,7 @@ pub mod fairing;
 pub mod error;
 pub mod catcher;
 pub mod route;
+pub mod channels;
 
 // Reexport of HTTP everything.
 pub mod http {
