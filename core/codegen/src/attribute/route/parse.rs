@@ -275,7 +275,7 @@ impl WebsocketRoute {
                 diags.push(diag);
             }
         }
-        
+
         // Parse and collect the path parameters.
         let (source, span) = (attr.uri.path(), attr.uri.path_span);
         let path_params = Parameter::parse_many::<uri::Path>(source.as_str(), span)
@@ -329,7 +329,7 @@ impl WebsocketRoute {
             .collect();
 
         Ok(Self {
-            attr, path_params, query_params, 
+            attr, path_params, query_params,
             data_guard,
             request_guards, handler, arguments,
         })

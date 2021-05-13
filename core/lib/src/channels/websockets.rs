@@ -82,7 +82,7 @@ impl Websocket {
     pub(crate) async fn next(&self) -> Option<Result<Message, Error>> {
         let mut lock = self.inner.lock().await;
         let stream = lock.as_mut().unwrap();
-        
+
         let mut lock = self.reciever.lock().await;
         if let Some(recv) = lock.as_mut() {
             loop {
@@ -121,7 +121,9 @@ impl Websocket {
     }
 
     pub async fn send_to(&self, channel_id: String, message: impl IntoMessage) {
-        let _ = self.channels.as_ref().unwrap().send(WebsocketMessage::Forward(channel_id, Self::to_message(message)));
+        let _ = self.channels.as_ref()
+            .unwrap()
+            .send(WebsocketMessage::Forward(channel_id, Self::to_message(message)));
     }
 
     pub async fn subscribe(&self, channel_id: String) {
@@ -144,7 +146,9 @@ impl Websocket {
     pub async fn close_with_status(&self, status: Status) {
         let mut lock = self.inner.lock().await;
         let stream = lock.as_mut().unwrap();
-        let _ = stream.send(Message::close(Some((status.code, status.reason().unwrap_or("").to_string())))).await;
+        let _ = stream.send(
+            Message::close(Some((status.code, status.reason().unwrap_or("").to_string())))
+        ).await;
     }
 }
 

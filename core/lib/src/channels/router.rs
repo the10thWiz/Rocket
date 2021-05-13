@@ -1,15 +1,17 @@
-use std::{error::Error, io::Cursor, sync::Arc};
+use std::{io::Cursor, sync::Arc};
 
-use futures::{Future, FutureExt, SinkExt, StreamExt};
-use rocket_http::{Header, Status, hyper::{self, header::{CONNECTION, UPGRADE}, upgrade::{OnUpgrade, Upgraded}}, uri::Origin};
+use futures::{Future, FutureExt};
+use rocket_http::{Header, Status, uri::Origin};
+use rocket_http::hyper::{self, header::{CONNECTION, UPGRADE}, upgrade::OnUpgrade};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Decoder;
 use websocket_codec::{ClientRequest, Message, MessageCodec, Opcode};
 
-use crate::{Data, Request, Response, Rocket, Route, channels::channel::Channel, http, phase::Orbit, router::{Collide, Collisions}};
+use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
+use crate::router::{Collide, Collisions};
 use yansi::Paint;
 
-use super::{Websocket, channel::WebsocketMessage};
+use super::{Websocket, channel::{Channel, WebsocketMessage}};
 
 async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
     where F: FnOnce() -> Fut, Fut: Future<Output = T>,
@@ -65,7 +67,7 @@ impl WebsocketRouter {
 
     pub fn routes(&self) -> impl Iterator<Item = &Route> + Clone {
         self.routes.iter()
-    } 
+    }
 
     pub fn add_route(&mut self, route: Route) {
         if route.websocket_handler.is_some() {
@@ -109,7 +111,11 @@ impl WebsocketRouter {
         Self::header_contains(hyper_request, "Upgrade", "websocket")
     }
 
-    fn header_contains(hyper_request: &hyper::Request<hyper::Body>, name: impl AsRef<str>, contains: impl AsRef<str>) -> bool {
+    fn header_contains(
+        hyper_request: &hyper::Request<hyper::Body>,
+        name: impl AsRef<str>,
+        contains: impl AsRef<str>
+    ) -> bool {
         if let Some(value) = hyper_request.headers().get(name.as_ref()) {
             if let Ok(value) = value.to_str() {
                 if value.to_lowercase().contains(contains.as_ref()) {
@@ -120,7 +126,12 @@ impl WebsocketRouter {
         false
     }
 
-    pub async fn handle(rocket: Arc<Rocket<Orbit>>, mut request: hyper::Request<hyper::Body>, h_addr: std::net::SocketAddr, tx: oneshot::Sender<hyper::Response<hyper::Body>>) {
+    pub async fn handle(
+        rocket: Arc<Rocket<Orbit>>,
+        mut request: hyper::Request<hyper::Body>,
+        h_addr: std::net::SocketAddr,
+        tx: oneshot::Sender<hyper::Response<hyper::Body>>
+    ) {
         let upgrade = hyper::upgrade::on(&mut request);
         let (h_parts, h_body) = request.into_parts();
 
@@ -146,11 +157,11 @@ impl WebsocketRouter {
 
         // Dispatch the request to get a response, then write that response out.
         let _token = rocket.preprocess_request(&mut req, &mut data).await;
-        
+
         let mut response = None;
         let transmitter = rocket.websocket_router.transmitter.clone();
         req.local_cache(|| Websocket::new(transmitter));
-        
+
         for route in rocket.websocket_router.route(&req) {
             req.set_route(route);
 
@@ -185,7 +196,6 @@ impl WebsocketRouter {
         response.header(Header::new("Sec-WebSocket-Accept", cl_req.ws_accept()));
         response.sized_body(None, Cursor::new("Switching to websocket"));
         response.finalize()
-        
     }
 
     /// Construct a rocket response from the given hyper request
@@ -196,7 +206,12 @@ impl WebsocketRouter {
         response.finalize()
     }
 
-    async fn websocket_task(rocket: Arc<Rocket<Orbit>>, request: &Request<'_>, on_upgrade: OnUpgrade, route: &Route) {
+    async fn websocket_task(
+        _rocket: Arc<Rocket<Orbit>>,
+        request: &Request<'_>,
+        on_upgrade: OnUpgrade,
+        route: &Route
+    ) {
         if let Ok(upgrade) = on_upgrade.await {
             let ws = request.local_cache(|| Websocket::empty());
             ws.add_inner(MessageCodec::server().framed(upgrade)).await;
@@ -206,12 +221,16 @@ impl WebsocketRouter {
             while let Some(Ok(message)) = ws.next().await {
                 match message.opcode() {
                     Opcode::Text | Opcode::Binary => {
-                        let _res = handle(name, || handler.handle(&request, Some(Data::from(message.into_data())))).await;
+                        let _res = handle(name, || handler.handle(&request,
+                                                          Some(Data::from(message.into_data()))
+                                                    )).await;
                     }
                     Opcode::Ping => {
                         ws.send_raw(Message::pong(message.into_data())).await;
                     },
-                    Opcode::Pong => (), // These would come after a server initiated ping, but we don't have an API for that.
+                    Opcode::Pong => (),
+                        // These would come after a server initiated ping,
+                        // but we don't have an API for that.
                     Opcode::Close => break,
                 }
             }

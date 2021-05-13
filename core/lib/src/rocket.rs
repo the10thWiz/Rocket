@@ -485,7 +485,7 @@ impl Rocket<Build> {
                     .unwrap_or(crate::config::SecretKey::zero());
             }
         };
-        
+
         let mut websocket_router = WebsocketRouter::new();
         self.routes.clone().into_iter().for_each(|r| websocket_router.add_route(r));
         websocket_router.finalize().map_err(ErrorKind::Collisions)?;

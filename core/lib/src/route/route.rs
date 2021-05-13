@@ -346,7 +346,9 @@ pub struct StaticInfo {
     /// The route's handler, i.e, the annotated function.
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFuture<'r>,
     /// The route's websocket handler, i.e, the annotated function.
-    pub websocket_handler: Option<for<'r> fn(&'r crate::Request<'_>, Option<crate::Data>) -> BoxFutureWs<'r>>,
+    pub websocket_handler: Option<
+        for<'r> fn(&'r crate::Request<'_>, Option<crate::Data>) -> BoxFutureWs<'r>
+    >,
     /// The route's rank, if any.
     pub rank: Option<isize>,
     /// Route-derived sentinels, if any.
@@ -364,7 +366,8 @@ impl From<StaticInfo> for Route {
             name: Some(info.name.into()),
             method: info.method,
             handler: Box::new(info.handler),
-            websocket_handler: info.websocket_handler.map(|w| Box::new(w) as Box<dyn WebsocketHandler>),
+            websocket_handler: info.websocket_handler
+                .map(|w| Box::new(w) as Box<dyn WebsocketHandler>),
             rank: info.rank.unwrap_or_else(|| uri.default_rank()),
             format: info.format,
             sentinels: info.sentinels.into_iter().collect(),

@@ -20,5 +20,5 @@ members = [
   "pastebin",
   "todo",
 
-	"websocket-echo",
+  "websocket-echo",
 ]
