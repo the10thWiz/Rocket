@@ -6,7 +6,7 @@ use yansi::Paint;
 use either::Either;
 use figment::{Figment, Provider};
 
-use crate::{Catcher, Config, Route, Shutdown, sentinel};
+use crate::{Catcher, Config, Route, Shutdown, channels::WebsocketRouter, sentinel};
 use crate::router::Router;
 use crate::trip_wire::TripWire;
 use crate::fairing::{Fairing, Fairings};
@@ -485,6 +485,10 @@ impl Rocket<Build> {
                     .unwrap_or(crate::config::SecretKey::zero());
             }
         };
+        
+        let mut websocket_router = WebsocketRouter::new();
+        self.routes.clone().into_iter().for_each(|r| websocket_router.add_route(r));
+        websocket_router.finalize().map_err(ErrorKind::Collisions)?;
 
         // Initialize the router; check for collisions.
         let mut router = Router::new();
@@ -504,7 +508,7 @@ impl Rocket<Build> {
 
         // Ignite the rocket.
         let rocket: Rocket<Ignite> = Rocket(Igniting {
-            router, config,
+            router, websocket_router, config,
             shutdown: Shutdown(TripWire::new()),
             figment: self.0.figment,
             fairings: self.0.fairings,
@@ -592,6 +596,7 @@ impl Rocket<Ignite> {
     fn into_orbit(self) -> Rocket<Orbit> {
         Rocket(Orbiting {
             router: self.0.router,
+            websocket_router: self.0.websocket_router,
             fairings: self.0.fairings,
             figment: self.0.figment,
             config: self.0.config,
