@@ -8,6 +8,8 @@ use crate::http::{uri, Method, MediaType};
 use crate::route::{Handler, RouteUri, BoxFuture};
 use crate::sentinel::Sentry;
 
+use super::{BoxFutureWs, WebsocketHandler};
+
 /// A request handling route.
 ///
 /// A route consists of exactly the information in its fields. While a `Route`
@@ -182,6 +184,8 @@ pub struct Route {
     pub method: Method,
     /// The function that should be called when the route matches.
     pub handler: Box<dyn Handler>,
+    /// The function that should be called when the route matches for websocket connection
+    pub websocket_handler: Option<Box<dyn WebsocketHandler>>,
     /// The route URI.
     pub uri: RouteUri<'static>,
     /// The rank of this route. Lower ranks have higher priorities.
@@ -252,6 +256,7 @@ impl Route {
             format: None,
             sentinels: Vec::new(),
             handler: Box::new(handler),
+            websocket_handler: None,
             rank, uri, method,
         }
     }
@@ -340,6 +345,8 @@ pub struct StaticInfo {
     pub format: Option<MediaType>,
     /// The route's handler, i.e, the annotated function.
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFuture<'r>,
+    /// The route's websocket handler, i.e, the annotated function.
+    pub websocket_handler: Option<for<'r> fn(&'r crate::Request<'_>, Option<crate::Data>) -> BoxFutureWs<'r>>,
     /// The route's rank, if any.
     pub rank: Option<isize>,
     /// Route-derived sentinels, if any.
@@ -357,6 +364,7 @@ impl From<StaticInfo> for Route {
             name: Some(info.name.into()),
             method: info.method,
             handler: Box::new(info.handler),
+            websocket_handler: info.websocket_handler.map(|w| Box::new(w) as Box<dyn WebsocketHandler>),
             rank: info.rank.unwrap_or_else(|| uri.default_rank()),
             format: info.format,
             sentinels: info.sentinels.into_iter().collect(),

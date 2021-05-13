@@ -10,6 +10,10 @@ pub type Outcome<'r> = crate::outcome::Outcome<Response<'r>, Status, Data>;
 /// [`Handler`].
 pub type BoxFuture<'r, T = Outcome<'r>> = futures::future::BoxFuture<'r, T>;
 
+type WsRet = Result<(), ()>;
+/// Type alias for the return type of a _raw_ Websocket Route
+pub type BoxFutureWs<'r, T = WsRet> = futures::future::BoxFuture<'r, T>;
+
 /// Trait implemented by [`Route`](crate::Route) request handlers.
 ///
 /// In general, you will never need to implement `Handler` manually or be
@@ -167,6 +171,40 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
     }
 }
 
+#[crate::async_trait]
+pub trait WebsocketHandler: CloneableWs + Send + Sync + 'static {
+    /// Called by Rocket when a `Request` with its associated `Data` should be
+    /// handled by this handler.
+    ///
+    /// The variant of `Outcome` returned by the returned `Future` determines
+    /// what Rocket does next. If the return value is a `Success(Response)`, the
+    /// wrapped `Response` is used to respond to the client. If the return value
+    /// is a `Failure(Status)`, the error catcher for `Status` is invoked to
+    /// generate a response. Otherwise, if the return value is `Forward(Data)`,
+    /// the next matching route is attempted. If there are no other matching
+    /// routes, the `404` error catcher is invoked.
+    async fn handle<'r>(&self, request: &'r Request<'_>, data: Option<Data>) -> WsRet;
+}
+
+// We write this manually to avoid double-boxing.
+impl<F: Clone + Sync + Send + 'static> WebsocketHandler for F
+    where for<'x> F: Fn(&'x Request<'_>, Option<Data>) -> BoxFutureWs<'x>,
+{
+    #[inline(always)]
+    fn handle<'r, 'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        req: &'r Request<'life1>,
+        data: Option<Data>,
+    ) -> BoxFutureWs<'r>
+        where 'r: 'async_trait,
+              'life0: 'async_trait,
+              'life1: 'async_trait,
+              Self: 'async_trait,
+    {
+        self(req, data)
+    }
+}
+
 impl<'r, 'o: 'r> Outcome<'o> {
     /// Return the `Outcome` of response to `req` from `responder`.
     ///
@@ -291,6 +329,8 @@ pub fn dummy_handler<'r>(r: &'r Request<'_>, _: Data) -> BoxFuture<'r> {
 mod private {
     pub trait Sealed {}
     impl<T: super::Handler + Clone> Sealed for T {}
+    pub trait SealedWs {}
+    impl<T: super::WebsocketHandler + Clone> SealedWs for T {}
 }
 
 /// Helper trait to make a [`Route`](crate::Route)'s `Box<dyn Handler>`
@@ -312,6 +352,29 @@ impl<T: Handler + Clone> Cloneable for T {
 
 impl Clone for Box<dyn Handler> {
     fn clone(&self) -> Box<dyn Handler> {
+        self.clone_handler()
+    }
+}
+
+/// Helper trait to make a [`Route`](crate::Route)'s `Box<dyn WebSocketHandler>`
+/// `Clone`.
+///
+/// This trait cannot be implemented directly. Instead, implement `Clone` and
+/// [`WebSocketHandler`]; all types that implement `Clone` and `WebSocketHandler` automatically
+/// implement `Cloneable`.
+pub trait CloneableWs: private::SealedWs {
+    #[doc(hidden)]
+    fn clone_handler(&self) -> Box<dyn WebsocketHandler>;
+}
+
+impl<T: WebsocketHandler + Clone> CloneableWs for T {
+    fn clone_handler(&self) -> Box<dyn WebsocketHandler> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn WebsocketHandler> {
+    fn clone(&self) -> Box<dyn WebsocketHandler> {
         self.clone_handler()
     }
 }
