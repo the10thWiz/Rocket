@@ -54,6 +54,7 @@ impl IntoMessage for &str {
 pub struct Websocket {
     inner: Arc<Mutex<Option<Framed<Upgraded, MessageCodec>>>>,
     channels: Option<mpsc::UnboundedSender<WebsocketMessage>>,
+    reciever: Arc<Mutex<Option<mpsc::UnboundedReceiver<Message>>>>,
 }
 
 impl Websocket {
@@ -61,6 +62,7 @@ impl Websocket {
         Self {
             inner: Arc::new(Mutex::new(None)),
             channels: None,
+            reciever: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -68,6 +70,7 @@ impl Websocket {
         Self {
             inner: Arc::new(Mutex::new(None)),
             channels: Some(channels),
+            reciever: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -79,7 +82,22 @@ impl Websocket {
     pub(crate) async fn next(&self) -> Option<Result<Message, Error>> {
         let mut lock = self.inner.lock().await;
         let stream = lock.as_mut().unwrap();
-        stream.next().await
+        
+        let mut lock = self.reciever.lock().await;
+        if let Some(recv) = lock.as_mut() {
+            loop {
+                select! {
+                    m = stream.next() => return m,
+                    Some(m) = recv.recv() => {
+                        if let Err(e) = stream.send(m).await {
+                            return Some(Err(e));
+                        }
+                    },
+                }
+            }
+        }else {
+            stream.next().await
+        }
     }
 
     pub(crate) async fn send_raw(&self, message: Message) {
