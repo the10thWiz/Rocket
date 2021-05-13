@@ -191,10 +191,4 @@ impl Data {
     pub fn peek_complete(&self) -> bool {
         self.is_complete
     }
-    
-    /// Gets the internal Hyper body
-    #[inline(always)]
-    pub(crate) fn into_hyper_body(self) -> Option<hyper::Body> {
-        self.stream.into_inner()
-    }
 }
