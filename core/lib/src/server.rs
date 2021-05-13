@@ -6,7 +6,7 @@ use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 use tokio::sync::oneshot;
 use yansi::Paint;
 
-use crate::{Rocket, Orbit, Request, Response, Data, route};
+use crate::{Data, Orbit, Request, Response, Rocket, channels::WebsocketRouter, route};
 use crate::form::Form;
 use crate::outcome::Outcome;
 use crate::error::{Error, ErrorKind};
@@ -69,37 +69,40 @@ async fn hyper_service_fn(
     // borrow from the request. Instead, write the body in another future that
     // sends the response metadata (and a body channel) prior.
     let (tx, rx) = oneshot::channel();
-
     tokio::spawn(async move {
-        // Get all of the information from Hyper.
-        let (h_parts, h_body) = hyp_req.into_parts();
+        if rocket.websocket_router.is_upgrade(&hyp_req) {
+            WebsocketRouter::handle(rocket, hyp_req, h_addr, tx).await;
+        }else {
+            // Get all of the information from Hyper.
+            let (h_parts, h_body) = hyp_req.into_parts();
 
-        // Convert the Hyper request into a Rocket request.
-        let req_res = Request::from_hyp(
-            &rocket, h_parts.method, h_parts.headers, &h_parts.uri, h_addr
-        );
+            // Convert the Hyper request into a Rocket request.
+            let req_res = Request::from_hyp(
+                &rocket, h_parts.method, h_parts.headers, &h_parts.uri, h_addr
+            );
 
-        let mut req = match req_res {
-            Ok(req) => req,
-            Err(e) => {
-                error!("Bad incoming request: {}", e);
-                // TODO: We don't have a request to pass in, so we just
-                // fabricate one. This is weird. We should let the user know
-                // that we failed to parse a request (by invoking some special
-                // handler) instead of doing this.
-                let dummy = Request::new(&rocket, Method::Get, Origin::dummy());
-                let r = rocket.handle_error(Status::BadRequest, &dummy).await;
-                return rocket.send_response(r, tx).await;
-            }
-        };
+            let mut req = match req_res {
+                Ok(req) => req,
+                Err(e) => {
+                    error!("Bad incoming request: {}", e);
+                    // TODO: We don't have a request to pass in, so we just
+                    // fabricate one. This is weird. We should let the user know
+                    // that we failed to parse a request (by invoking some special
+                    // handler) instead of doing this.
+                    let dummy = Request::new(&rocket, Method::Get, Origin::dummy());
+                    let r = rocket.handle_error(Status::BadRequest, &dummy).await;
+                    return rocket.send_response(r, tx).await;
+                }
+            };
 
-        // Retrieve the data from the hyper body.
-        let mut data = Data::from(h_body);
+            // Retrieve the data from the hyper body.
+            let mut data = Data::from(h_body);
 
-        // Dispatch the request to get a response, then write that response out.
-        let token = rocket.preprocess_request(&mut req, &mut data).await;
-        let r = rocket.dispatch(token, &mut req, data).await;
-        rocket.send_response(r, tx).await;
+            // Dispatch the request to get a response, then write that response out.
+            let token = rocket.preprocess_request(&mut req, &mut data).await;
+            let r = rocket.dispatch(token, &mut req, data).await;
+            rocket.send_response(r, tx).await;
+        }
     });
 
     // Receive the response written to `tx` by the task above.
@@ -109,7 +112,7 @@ async fn hyper_service_fn(
 impl Rocket<Orbit> {
     /// Wrapper around `make_response` to log a success or failure.
     #[inline]
-    async fn send_response(
+    pub(crate) async fn send_response(
         &self,
         response: Response<'_>,
         tx: oneshot::Sender<hyper::Response<hyper::Body>>,
