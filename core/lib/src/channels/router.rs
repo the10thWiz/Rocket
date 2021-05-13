@@ -6,7 +6,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Decoder;
 use websocket_codec::{ClientRequest, Message, MessageCodec, Opcode};
 
-use crate::{Data, Request, Response, Rocket, Route, http, phase::Orbit, router::{Collide, Collisions}};
+use crate::{Data, Request, Response, Rocket, Route, channels::channel::Channel, http, phase::Orbit, router::{Collide, Collisions}};
 use yansi::Paint;
 
 use super::{Websocket, channel::WebsocketMessage};
@@ -56,6 +56,7 @@ pub struct WebsocketRouter {
 impl WebsocketRouter {
     pub fn new() -> Self {
         let (transmitter, rx) = mpsc::unbounded_channel();
+        tokio::spawn(Channel::channel_task(rx));
         Self {
             transmitter,
             routes: vec![],

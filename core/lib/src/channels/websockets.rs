@@ -120,7 +120,19 @@ impl Websocket {
         let _ = stream.send(Self::to_message(message)).await;
     }
 
-    pub async fn send_to(&self, channel_id: (), message: impl IntoMessage) {
+    pub async fn send_to(&self, channel_id: String, message: impl IntoMessage) {
+        let _ = self.channels.as_ref().unwrap().send(WebsocketMessage::Forward(channel_id, Self::to_message(message)));
+    }
+
+    pub async fn subscribe(&self, channel_id: String) {
+        let mut lock = self.reciever.lock().await;
+        if lock.is_none() {
+            let (tx, rx) = mpsc::unbounded_channel();
+            *lock = Some(rx);
+            let _ = self.channels.as_ref()
+                .unwrap()
+                .send(WebsocketMessage::Register(channel_id, tx));
+        }
     }
 
     pub async fn close(&self) {
