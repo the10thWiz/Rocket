@@ -44,6 +44,7 @@ pin-project-lite = "0.2"
 indexmap = { version = "1.0", features = ["serde-1"] }
 tempfile = "3"
 async-trait = "0.1.43"
+websocket-codec = "0.5.0"
 
 [dependencies.async-stream]
 git = "https://github.com/SergioBenitez/async-stream.git"
