@@ -59,7 +59,8 @@ enum State {
 /// The kinds of streams we accept as `Data`.
 enum StreamKind {
     Body(hyper::Body),
-    Multipart(multer::Field)
+    Multipart(multer::Field),
+    Websocket(),
 }
 
 impl DataStream {
@@ -244,6 +245,12 @@ impl From<multer::Field> for StreamReader {
     }
 }
 
+impl From<hyper::Bytes> for StreamReader {
+    fn from(bytes: hyper::Bytes) -> Self {
+        Self { inner: StreamKind::Websocket(), state: State::Partial(Cursor::new(bytes)) }
+    }
+}
+
 impl AsyncRead for DataStream {
     #[inline(always)]
     fn poll_read(
@@ -267,6 +274,7 @@ impl Stream for StreamKind {
                 .map_err_ext(|e| io::Error::new(io::ErrorKind::Other, e)),
             StreamKind::Multipart(mp) => Pin::new(mp).poll_next(cx)
                 .map_err_ext(|e| io::Error::new(io::ErrorKind::Other, e)),
+            StreamKind::Websocket() => Poll::Ready(None),
         }
     }
 
@@ -274,6 +282,7 @@ impl Stream for StreamKind {
         match self {
             StreamKind::Body(body) => body.size_hint(),
             StreamKind::Multipart(mp) => mp.size_hint(),
+            StreamKind::Websocket() => (0, Some(0)),
         }
     }
 }
