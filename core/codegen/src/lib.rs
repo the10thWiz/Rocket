@@ -292,7 +292,7 @@ route_attribute!(options => Method::Options);
 /// Very similar to the other route macros
 ///
 #[proc_macro_attribute]
-pub fn channel(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn websocket(args: TokenStream, input: TokenStream) -> TokenStream {
     emit!(attribute::route::websocket(args, input))
 }
 

@@ -350,7 +350,7 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
                     method: #method,
                     uri: #uri,
                     handler: monomorphized_function,
-                    websocket_handler: #_None(websocket_handler),
+                    websocket_handler: #_None,
                     format: #format,
                     rank: #rank,
                     sentinels: #sentinels,
@@ -447,7 +447,7 @@ fn websocket_query_decls(route: &WebsocketRoute) -> Option<TokenStream> {
     }
 
     define_spanned_export!(Span::call_site() =>
-        __req, __data, _log, _form, Outcome, _Ok, _Err, _Some, _None
+        __req, __data, _log, _form, _Ok, _Err, _Some, _None
     );
 
     // Record all of the static parameters for later filtering.
@@ -586,12 +586,15 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn websocket_data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => _log, __req, __data, FromData, _Ok, _Err);
+    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, _Err);
 
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data) {
-            #_Ok(_m) => _m,
-            #_Err(_e) => {
+        let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
+            #Outcome::Success(_m) => _m,
+            #Outcome::Forward(_d) => {
+                return #_Err(());
+            }
+            #Outcome::Failure(_e) => {
                 #_log::error_!("`{}` message conversion failed: {:?}.", stringify!(#ty), _e);
                 return #_Err(());
             }
@@ -640,7 +643,7 @@ fn websocket_responder_outcome_expr(route: &WebsocketRoute) -> TokenStream {
     let user_handler_fn_name = &route.handler.sig.ident;
     define_spanned_export!(ret_span => __req, _route, _Ok);
     let parameter_names = route.arguments.map.values()
-        .map(|(ident, ty)| ident.rocketized());
+        .map(|(ident, _)| ident.rocketized());
 
     let _await = route.handler.sig.asyncness
         .map(|a| quote_spanned!(a.span().into() => .await));
@@ -739,15 +742,19 @@ fn codegen_websocket(route: WebsocketRoute) -> Result<TokenStream> {
             fn into_info(self) -> #_route::StaticInfo {
                 fn monomorphized_function<'_b>(
                     #__req: &'_b #Request<'_>,
-                    #__data: #Data
+                    #__data: #_Option<#Data>
                 ) -> #_route::BoxFutureWs<'_b> {
                     #_Box::pin(async move {
                         #(#request_guards)*
                         #(#param_guards)*
                         #query_guards
-                        #data_guard
+                        if let #_Some(#__data) = #__data {
+                            #data_guard
 
-                        #responder_outcome
+                            #responder_outcome
+                        }else {
+                            #_Ok(())
+                        }
                     })
                 }
 
