@@ -21,4 +21,5 @@ members = [
   "todo",
 
   "websocket-echo",
+  "websocket-channels",
 ]
