@@ -161,7 +161,9 @@ impl<T: ChannelDescriptor> Channel<T> {
     ///
     /// See ChannelDescriptor for more info on the matching process
     pub fn subscribe(&self, id: impl Into<T>, channel: &Websocket) {
-        let _ = self.channels.send(WebsocketMessage::Register(id.into(), channel.subscribe_handle()));
+        let _ = self.channels.send(
+            WebsocketMessage::Register(id.into(), channel.subscribe_handle())
+        );
     }
 
     /// Unsubscribes the client from this channel using the descriptor `id`
@@ -171,7 +173,9 @@ impl<T: ChannelDescriptor> Channel<T> {
     /// that is exactly equal.
     /// See ChannelDescriptor for more info on the matching process
     pub fn unsubscribe(&self, id: impl Into<T>, channel: &Websocket) {
-        let _ = self.channels.send(WebsocketMessage::Unregister(id.into(), channel.subscribe_handle()));
+        let _ = self.channels.send(
+            WebsocketMessage::Unregister(id.into(), channel.subscribe_handle())
+        );
     }
 
     /// Unsubscribes the client from any messages on this channel
