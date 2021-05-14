@@ -1,3 +1,14 @@
+//! Phoenix-like channels for Rocket websockets.
+//!
+//! The implementation is somewhat complex, but quite flexible. A `Channel` object is created to
+//! share messages using a subscription based model. A client can subscribe to a specific
+//! descriptor in a channel, using the methods provided by the `Channel` object. See the
+//! documentation for the `ChannelDescriptor` trait for more information on the matching process.
+//!
+//! Typically, a Channel will be created and added to the state that Rocket manages. This is
+//! nessecary since Rocket needs to know what type you would like to use as the `ChannelDescriptor`,
+//! and it also allows mutiple channels, depending on the descriptor type.
+
 use tokio::sync::mpsc;
 use websocket_codec::Message;
 
@@ -95,6 +106,7 @@ impl<T> ChannelDescriptor for Option<T>
     }
 }
 
+/// Internal enum for sharing messages between clients
 enum WebsocketMessage<T: ChannelDescriptor + 'static> {
     /// Registers a websocket to recieve messages from a room
     ///
@@ -114,6 +126,14 @@ enum WebsocketMessage<T: ChannelDescriptor + 'static> {
 }
 
 /// A channel for sharing messages between multiple clients, and the central server.
+///
+/// This should typically be created, and added to Rocket's managed state, where it
+/// can be accessed via the state request guard. `Channel` also implements clone, and
+/// acts as a handle to the internal channels, which allows messages to be generated
+/// and sent outside of Rocket request handlers.
+///
+/// See the examples for how to use Channel.
+/// TODO: Create examples
 #[derive(Clone)]
 pub struct Channel<T: ChannelDescriptor> {
     channels: mpsc::UnboundedSender<WebsocketMessage<T>>,
@@ -161,7 +181,8 @@ impl<T: ChannelDescriptor> Channel<T> {
     pub fn unsubscribe_all(&self, channel: &Websocket) {
         let _ = self.channels.send(WebsocketMessage::UnregisterAll(channel.subscribe_handle()));
     }
-
+    
+    /// Channel task for tracking subscribtions and forwarding messages
     async fn channel_task(mut rx: mpsc::UnboundedReceiver<WebsocketMessage<T>>) {
         let mut subs = ChannelMap::new(100);
         while let Some(wsm) = rx.recv().await {
@@ -175,12 +196,16 @@ impl<T: ChannelDescriptor> Channel<T> {
     }
 }
 
+/// Convient struct for holding channel subscribtions
 struct ChannelMap<T: ChannelDescriptor>(Vec<(mpsc::UnboundedSender<Message>, Vec<T>)>);
 
 impl<T: ChannelDescriptor> ChannelMap<T> {
+    /// Create map with capactity
     fn new(capacity: usize) -> Self {
         Self(Vec::with_capacity(capacity))
     }
+
+    /// Add `descriptor` to the list of subscriptions for `tx`
     fn insert(&mut self, tx: mpsc::UnboundedSender<Message>, descriptor: T) {
         for (t, v) in self.0.iter_mut() {
             if t.same_channel(&tx) {
@@ -190,9 +215,13 @@ impl<T: ChannelDescriptor> ChannelMap<T> {
         }
         self.0.push((tx, vec![descriptor]));
     }
+
+    /// Remove every descriptor `tx` is subscribed to
     fn remove_key(&mut self, tx: mpsc::UnboundedSender<Message>) {
         self.0.retain(|(t, _)| !t.same_channel(&tx));
     }
+
+    /// Remove every descriptor that `descriptor` matches and `tx` is subscribed to
     fn remove_value(&mut self, tx: mpsc::UnboundedSender<Message>, descriptor: T) {
         for (t, v) in self.0.iter_mut() {
             if t.same_channel(&tx) {
@@ -201,6 +230,9 @@ impl<T: ChannelDescriptor> ChannelMap<T> {
             }
         }
     }
+
+    /// Forward a message to every client that is subscribed to a descriptor that matches
+    /// `descriptor`
     fn send(&mut self, descriptor: T, message: Message) {
         self.0.retain(|(t, v)| {
             if v.iter().any(|r| r.matches(&descriptor)) {
