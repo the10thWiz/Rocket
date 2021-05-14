@@ -3,7 +3,7 @@ use std::{io::Cursor, sync::Arc};
 use futures::{Future, FutureExt};
 use rocket_http::{Header, Status, uri::Origin};
 use rocket_http::hyper::{self, header::{CONNECTION, UPGRADE}, upgrade::OnUpgrade};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use tokio_util::codec::Decoder;
 use websocket_codec::{ClientRequest, Message, MessageCodec, Opcode};
 
@@ -11,7 +11,7 @@ use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
 use crate::router::{Collide, Collisions};
 use yansi::Paint;
 
-use super::{Websocket, channel::{Channel, WebsocketMessage}};
+use super::Websocket;
 
 async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
     where F: FnOnce() -> Fut, Fut: Future<Output = T>,
@@ -51,16 +51,12 @@ async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
 
 #[derive(Debug)]
 pub struct WebsocketRouter {
-    transmitter: mpsc::UnboundedSender<WebsocketMessage>,
     routes: Vec<Route>,
 }
 
 impl WebsocketRouter {
     pub fn new() -> Self {
-        let (transmitter, rx) = mpsc::unbounded_channel();
-        tokio::spawn(Channel::channel_task(rx));
         Self {
-            transmitter,
             routes: vec![],
         }
     }
@@ -159,8 +155,7 @@ impl WebsocketRouter {
         let _token = rocket.preprocess_request(&mut req, &mut data).await;
 
         let mut response = None;
-        let transmitter = rocket.websocket_router.transmitter.clone();
-        req.local_cache(|| Websocket::new(transmitter));
+        req.local_cache(|| Websocket::new());
 
         for route in rocket.websocket_router.route(&req) {
             req.set_route(route);

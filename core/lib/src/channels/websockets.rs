@@ -9,8 +9,6 @@ use websocket_codec::{Message, MessageCodec, Error};
 
 use crate::{Request, request::{FromRequest, Outcome}};
 
-use super::channel::WebsocketMessage;
-
 pub trait IntoMessage {
     type B: Into<Bytes>;
     fn is_binary(&self) -> bool;
@@ -50,27 +48,42 @@ impl IntoMessage for &str {
     }
 }
 
+
+
+pub(crate) fn to_message(message: impl IntoMessage) -> Message {
+    if message.is_binary() {
+        Message::new(websocket_codec::Opcode::Binary, message.into_bytes()).unwrap()
+    }else {
+        Message::new(websocket_codec::Opcode::Text, message.into_bytes()).unwrap()
+    }
+}
+
 #[derive(Clone)]
 pub struct Websocket {
     inner: Arc<Mutex<Option<Framed<Upgraded, MessageCodec>>>>,
-    channels: Option<mpsc::UnboundedSender<WebsocketMessage>>,
-    reciever: Arc<Mutex<Option<mpsc::UnboundedReceiver<Message>>>>,
+    channels: Option<()>,
+    reciever: Arc<Mutex<mpsc::UnboundedReceiver<Message>>>,
+    sender: mpsc::UnboundedSender<Message>,
 }
 
 impl Websocket {
     pub(crate) fn empty() -> Self {
+        let (sender, reciever) = mpsc::unbounded_channel();
         Self {
             inner: Arc::new(Mutex::new(None)),
             channels: None,
-            reciever: Arc::new(Mutex::new(None)),
+            reciever: Arc::new(Mutex::new(reciever)),
+            sender,
         }
     }
 
-    pub(crate) fn new(channels: mpsc::UnboundedSender<WebsocketMessage>) -> Self {
+    pub(crate) fn new() -> Self {
+        let (sender, reciever) = mpsc::unbounded_channel();
         Self {
             inner: Arc::new(Mutex::new(None)),
-            channels: Some(channels),
-            reciever: Arc::new(Mutex::new(None)),
+            channels: Some(()),
+            reciever: Arc::new(Mutex::new(reciever)),
+            sender,
         }
     }
 
@@ -83,20 +96,16 @@ impl Websocket {
         let mut lock = self.inner.lock().await;
         let stream = lock.as_mut().unwrap();
 
-        let mut lock = self.reciever.lock().await;
-        if let Some(recv) = lock.as_mut() {
-            loop {
-                select! {
-                    m = stream.next() => return m,
-                    Some(m) = recv.recv() => {
-                        if let Err(e) = stream.send(m).await {
-                            return Some(Err(e));
-                        }
-                    },
-                }
+        let mut recv = self.reciever.lock().await;
+        loop {
+            select! {
+                m = stream.next() => return m,
+                Some(m) = recv.recv() => {
+                    if let Err(e) = stream.send(m).await {
+                        return Some(Err(e));
+                    }
+                },
             }
-        }else {
-            stream.next().await
         }
     }
 
@@ -106,35 +115,14 @@ impl Websocket {
         let _ = stream.send(message).await;
     }
 
-    fn to_message(message: impl IntoMessage) -> Message {
-        if message.is_binary() {
-            Message::new(websocket_codec::Opcode::Binary, message.into_bytes()).unwrap()
-        }else {
-            Message::new(websocket_codec::Opcode::Text, message.into_bytes()).unwrap()
-        }
-    }
-
     pub async fn send(&self, message: impl IntoMessage) {
         let mut lock = self.inner.lock().await;
         let stream = lock.as_mut().unwrap();
-        let _ = stream.send(Self::to_message(message)).await;
+        let _ = stream.send(to_message(message)).await;
     }
 
-    pub async fn send_to(&self, channel_id: String, message: impl IntoMessage) {
-        let _ = self.channels.as_ref()
-            .unwrap()
-            .send(WebsocketMessage::Forward(channel_id, Self::to_message(message)));
-    }
-
-    pub async fn subscribe(&self, channel_id: String) {
-        let mut lock = self.reciever.lock().await;
-        if lock.is_none() {
-            let (tx, rx) = mpsc::unbounded_channel();
-            *lock = Some(rx);
-            let _ = self.channels.as_ref()
-                .unwrap()
-                .send(WebsocketMessage::Register(channel_id, tx));
-        }
+    pub(crate) fn subscribe_handle(&self) -> mpsc::UnboundedSender<Message> {
+        self.sender.clone()
     }
 
     pub async fn close(&self) {
@@ -163,7 +151,4 @@ impl<'r> FromRequest<'r> for Websocket {
             Outcome::Failure((Status::InternalServerError, "Websockets not initialized"))
         }
     }
-}
-
-pub struct WebsocketHandle {
 }
