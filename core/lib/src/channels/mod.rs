@@ -5,4 +5,5 @@ pub mod channel;
 
 pub(crate) use router::WebsocketRouter;
 
-pub use websockets::{Websocket, WebsocketHandle};
+pub use websockets::Websocket;
+pub use channel::{Channel, ChannelDescriptor};

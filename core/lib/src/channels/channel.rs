@@ -37,10 +37,10 @@ use super::{Websocket, websockets::{IntoMessage, to_message}};
 /// struct Topic(String, Option<String>);
 /// ```
 ///
-/// This means a message to the topic `('hello', None)` would not just be sent to clients subscribed
-/// to the topic `('hello', None)`, but also to any clients subscribed to `('hello', Some(_))`.
-/// However, the reverse is not true - a message to `('hello', Some('main'))` would not be sent to
-/// any client except those subscribed to `('hello', Some('main'))`.
+/// This means a message to the topic `("hello", None)` would not just be sent to clients subscribed
+/// to the topic `("hello", None)`, but also to any clients subscribed to `("hello", Some(_))`.
+/// However, the reverse is not true - a message to `("hello", Some("main"))` would not be sent to
+/// any client except those subscribed to `("hello", Some("main"))`.
 ///
 /// # WIP
 /// This trait, and the associated features are still a work in progress.
@@ -153,15 +153,15 @@ impl<T: ChannelDescriptor> Channel<T> {
     /// Sends a message to all clients subscribed to this channel using descriptor `id`
     ///
     /// See ChannelDescriptor for more info on the matching process
-    pub fn send(&self, id: T, message: impl IntoMessage) {
-        let _ = self.channels.send(WebsocketMessage::Forward(id, to_message(message)));
+    pub fn send(&self, id: impl Into<T>, message: impl IntoMessage) {
+        let _ = self.channels.send(WebsocketMessage::Forward(id.into(), to_message(message)));
     }
 
     /// Subscribes the client to this channel using the descriptor `id`
     ///
     /// See ChannelDescriptor for more info on the matching process
-    pub fn subscribe(&self, id: T, channel: &Websocket) {
-        let _ = self.channels.send(WebsocketMessage::Register(id, channel.subscribe_handle()));
+    pub fn subscribe(&self, id: impl Into<T>, channel: &Websocket) {
+        let _ = self.channels.send(WebsocketMessage::Register(id.into(), channel.subscribe_handle()));
     }
 
     /// Unsubscribes the client from this channel using the descriptor `id`
@@ -170,18 +170,18 @@ impl<T: ChannelDescriptor> Channel<T> {
     /// This will unsubscribe this client from EVERY descriptor that matches `id`, not just one
     /// that is exactly equal.
     /// See ChannelDescriptor for more info on the matching process
-    pub fn unsubscribe(&self, id: T, channel: &Websocket) {
-        let _ = self.channels.send(WebsocketMessage::Unregister(id, channel.subscribe_handle()));
+    pub fn unsubscribe(&self, id: impl Into<T>, channel: &Websocket) {
+        let _ = self.channels.send(WebsocketMessage::Unregister(id.into(), channel.subscribe_handle()));
     }
 
     /// Unsubscribes the client from any messages on this channel
     ///
     /// The client is automatically unsubscribed if they are disconnected, so this does not need
-    /// to be called, unless the client is still connected
+    /// to be called when the client is disconnecting
     pub fn unsubscribe_all(&self, channel: &Websocket) {
         let _ = self.channels.send(WebsocketMessage::UnregisterAll(channel.subscribe_handle()));
     }
-    
+
     /// Channel task for tracking subscribtions and forwarding messages
     async fn channel_task(mut rx: mpsc::UnboundedReceiver<WebsocketMessage<T>>) {
         let mut subs = ChannelMap::new(100);
@@ -236,7 +236,10 @@ impl<T: ChannelDescriptor> ChannelMap<T> {
     fn send(&mut self, descriptor: T, message: Message) {
         self.0.retain(|(t, v)| {
             if v.iter().any(|r| r.matches(&descriptor)) {
+                // message.clone() should be very cheap, since it uses `Bytes` internally to store
+                // the raw data
                 if let Err(_) = t.send(message.clone()) {
+                    // An error is only returned when the websocket has closed
                     return false;
                 }
             }

@@ -105,7 +105,9 @@ impl WebsocketRouter {
 
     pub fn is_upgrade(&self, hyper_request: &hyper::Request<hyper::Body>) -> bool {
         hyper_request.method() == hyper::Method::GET &&
-            ClientRequest::parse(|n| hyper_request.headers().get(n).map(|s| s.to_str().unwrap_or(""))).is_ok()
+            ClientRequest::parse(|n| hyper_request.headers()
+                                 .get(n).map(|s| s.to_str().unwrap_or(""))
+                                ).is_ok()
     }
 
     fn header_contains(
