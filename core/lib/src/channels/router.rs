@@ -180,6 +180,7 @@ impl WebsocketRouter {
     }
 
     fn create_reponse<'r>(req: &'r Request<'r>) -> Response<'r> {
+        // Use websocket-codec to parse the client request
         let cl_req = match ClientRequest::parse(|n| req.headers().get_one(n)) {
             Ok(v) => v,
             Err(_e) => return Self::handle_error(Status::UpgradeRequired),
