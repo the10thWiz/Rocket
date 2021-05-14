@@ -1,3 +1,5 @@
+//! Internal Routing structs
+
 use std::{io::Cursor, sync::Arc};
 
 use futures::{Future, FutureExt};
@@ -103,8 +105,7 @@ impl WebsocketRouter {
 
     pub fn is_upgrade(&self, hyper_request: &hyper::Request<hyper::Body>) -> bool {
         hyper_request.method() == hyper::Method::GET &&
-        Self::header_contains(hyper_request, "Connection", "upgrade") &&
-        Self::header_contains(hyper_request, "Upgrade", "websocket")
+            ClientRequest::parse(|n| hyper_request.headers().get(n).map(|s| s.to_str().unwrap_or(""))).is_ok()
     }
 
     fn header_contains(
@@ -197,7 +198,6 @@ impl WebsocketRouter {
     fn handle_error<'_b>(status: Status) -> Response<'_b> {
         let mut response = Response::build();
         response.status(status);
-        //response.sized_body(None, Cursor::new("Upgrade failed"));
         response.finalize()
     }
 
@@ -224,8 +224,9 @@ impl WebsocketRouter {
                         ws.send_raw(Message::pong(message.into_data())).await;
                     },
                     Opcode::Pong => (),
-                        // These would come after a server initiated ping,
-                        // but we don't have an API for that.
+                    // These would come after a server initiated ping,
+                    // but we don't have an API for that, so they should
+                    // never come
                     Opcode::Close => break,
                 }
             }
