@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use rocket_http::{Status, hyper::upgrade::Upgraded};
-use tokio::{select, sync::{Mutex, mpsc}};
+use rocket_http::{Status, hyper::upgrade::{Parts, Upgraded}};
+use tokio::{net::TcpStream, select, sync::{Mutex, mpsc}};
 use tokio_util::codec::Framed;
 use websocket_codec::{Message, MessageCodec, Error};
 
@@ -105,9 +105,13 @@ impl Channel {
     }
 
     /// Add the inner channel
-    pub(crate) async fn add_inner(&self, inner: Framed<Upgraded, MessageCodec>) {
-        let mut stream = self.inner.lock().await;
-        *stream = Some(inner);
+    pub(crate) async fn add_inner(&self, upgrade: Upgraded) {
+        let tmp: Result<Parts<TcpStream>, Upgraded> = upgrade.downcast();
+        if let Ok(parts) = tmp {
+            //parts.io.write
+        }
+        //let mut stream = self.inner.lock().await;
+        //*stream = Some(inner);
     }
 
     /// Gets the handle to subscribe this channel to a descriptor

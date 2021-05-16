@@ -3,9 +3,9 @@
 use std::{io::Cursor, sync::Arc};
 
 use futures::{Future, FutureExt};
-use rocket_http::{Header, Status, uri::Origin};
+use rocket_http::{Header, Status, hyper::upgrade::{Parts, Upgraded}, uri::Origin};
 use rocket_http::hyper::{self, header::{CONNECTION, UPGRADE}, upgrade::OnUpgrade};
-use tokio::sync::oneshot;
+use tokio::{net::TcpStream, sync::oneshot};
 use tokio_util::codec::Decoder;
 use websocket_codec::{ClientRequest, Message, MessageCodec, Opcode};
 
@@ -110,21 +110,6 @@ impl WebsocketRouter {
                                 ).is_ok()
     }
 
-    fn header_contains(
-        hyper_request: &hyper::Request<hyper::Body>,
-        name: impl AsRef<str>,
-        contains: impl AsRef<str>
-    ) -> bool {
-        if let Some(value) = hyper_request.headers().get(name.as_ref()) {
-            if let Ok(value) = value.to_str() {
-                if value.to_lowercase().contains(contains.as_ref()) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     pub async fn handle(
         rocket: Arc<Rocket<Orbit>>,
         mut request: hyper::Request<hyper::Body>,
@@ -212,7 +197,7 @@ impl WebsocketRouter {
     ) {
         if let Ok(upgrade) = on_upgrade.await {
             let ws = request.local_cache(|| Channel::empty());
-            ws.add_inner(MessageCodec::server().framed(upgrade)).await;
+            ws.add_inner(upgrade).await;
 
             let name = route.name.as_deref();
             let handler = route.websocket_handler.as_ref().unwrap();
