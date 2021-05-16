@@ -12,7 +12,7 @@
 use tokio::sync::mpsc;
 use websocket_codec::Message;
 
-use super::{Websocket, websockets::{IntoMessage, to_message}};
+use super::{Channel, websockets::{IntoMessage, to_message}};
 
 /// A channel descriptor trait. This allows a `Channel` to have multiple
 /// sub channels, and to control how messages are shared between clients.
@@ -54,7 +54,7 @@ use super::{Websocket, websockets::{IntoMessage, to_message}};
 ///
 /// It would be nice to be able to provide a default implementation of this
 /// trait with a derive macro.
-pub trait ChannelDescriptor: Send + 'static {
+pub trait Topic: Send + 'static {
     /// When called, self always refers to the ChannelDescriptor that the
     /// client subscribed to, and other is the ChannelDescriptor that the
     /// message was sent to.
@@ -64,7 +64,7 @@ pub trait ChannelDescriptor: Send + 'static {
 macro_rules! derive_via_eq {
     ($($type:ident),*) => {
         $(
-        impl ChannelDescriptor for $type {
+        impl Topic for $type {
             fn matches(&self, other: &Self) -> bool {
                 self == other
             }
@@ -77,8 +77,8 @@ derive_via_eq!(String);
 derive_via_eq!(usize, u8, u16, u32, u64, u128);
 derive_via_eq!(isize, i8, i16, i32, i64, i128);
 
-impl<T> ChannelDescriptor for Vec<T>
-    where T: ChannelDescriptor
+impl<T> Topic for Vec<T>
+    where T: Topic
 {
     fn matches(&self, other: &Self) -> bool {
         // Disallow matches when other is longer
@@ -87,8 +87,8 @@ impl<T> ChannelDescriptor for Vec<T>
     }
 }
 
-impl<T> ChannelDescriptor for Option<T>
-    where T: ChannelDescriptor
+impl<T> Topic for Option<T>
+    where T: Topic
 {
     fn matches(&self, other: &Self) -> bool {
         if let Some(s) = self.as_ref() {
@@ -107,7 +107,7 @@ impl<T> ChannelDescriptor for Option<T>
 }
 
 /// Internal enum for sharing messages between clients
-enum WebsocketMessage<T: ChannelDescriptor + 'static> {
+enum WebsocketMessage<T: Topic + 'static> {
     /// Registers a websocket to recieve messages from a room
     ///
     /// Note: this should only be sent once per websocket connection
@@ -135,11 +135,11 @@ enum WebsocketMessage<T: ChannelDescriptor + 'static> {
 /// See the examples for how to use Channel.
 /// TODO: Create examples
 #[derive(Clone)]
-pub struct Channel<T: ChannelDescriptor> {
+pub struct Broker<T: Topic> {
     channels: mpsc::UnboundedSender<WebsocketMessage<T>>,
 }
 
-impl<T: ChannelDescriptor> Channel<T> {
+impl<T: Topic> Broker<T> {
     /// Creates a new channel, and starts the nessecary tasks in the background. The task will
     /// automatically end as soon as every handle on this channel has been dropped.
     pub fn new() -> Self {
@@ -160,7 +160,7 @@ impl<T: ChannelDescriptor> Channel<T> {
     /// Subscribes the client to this channel using the descriptor `id`
     ///
     /// See ChannelDescriptor for more info on the matching process
-    pub fn subscribe(&self, id: impl Into<T>, channel: &Websocket) {
+    pub fn subscribe(&self, id: impl Into<T>, channel: &Channel) {
         let _ = self.channels.send(
             WebsocketMessage::Register(id.into(), channel.subscribe_handle())
         );
@@ -172,7 +172,7 @@ impl<T: ChannelDescriptor> Channel<T> {
     /// This will unsubscribe this client from EVERY descriptor that matches `id`, not just one
     /// that is exactly equal.
     /// See ChannelDescriptor for more info on the matching process
-    pub fn unsubscribe(&self, id: impl Into<T>, channel: &Websocket) {
+    pub fn unsubscribe(&self, id: impl Into<T>, channel: &Channel) {
         let _ = self.channels.send(
             WebsocketMessage::Unregister(id.into(), channel.subscribe_handle())
         );
@@ -182,7 +182,7 @@ impl<T: ChannelDescriptor> Channel<T> {
     ///
     /// The client is automatically unsubscribed if they are disconnected, so this does not need
     /// to be called when the client is disconnecting
-    pub fn unsubscribe_all(&self, channel: &Websocket) {
+    pub fn unsubscribe_all(&self, channel: &Channel) {
         let _ = self.channels.send(WebsocketMessage::UnregisterAll(channel.subscribe_handle()));
     }
 
@@ -201,9 +201,9 @@ impl<T: ChannelDescriptor> Channel<T> {
 }
 
 /// Convient struct for holding channel subscribtions
-struct ChannelMap<T: ChannelDescriptor>(Vec<(mpsc::UnboundedSender<Message>, Vec<T>)>);
+struct ChannelMap<T: Topic>(Vec<(mpsc::UnboundedSender<Message>, Vec<T>)>);
 
-impl<T: ChannelDescriptor> ChannelMap<T> {
+impl<T: Topic> ChannelMap<T> {
     /// Create map with capactity
     fn new(capacity: usize) -> Self {
         Self(Vec::with_capacity(capacity))

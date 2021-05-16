@@ -13,7 +13,7 @@ use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
 use crate::router::{Collide, Collisions};
 use yansi::Paint;
 
-use super::Websocket;
+use super::Channel;
 
 async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
     where F: FnOnce() -> Fut, Fut: Future<Output = T>,
@@ -158,7 +158,7 @@ impl WebsocketRouter {
         let _token = rocket.preprocess_request(&mut req, &mut data).await;
 
         let mut response = None;
-        req.local_cache(|| Websocket::new());
+        req.local_cache(|| Channel::new());
 
         for route in rocket.websocket_router.route(&req) {
             req.set_route(route);
@@ -211,7 +211,7 @@ impl WebsocketRouter {
         route: &Route
     ) {
         if let Ok(upgrade) = on_upgrade.await {
-            let ws = request.local_cache(|| Websocket::empty());
+            let ws = request.local_cache(|| Channel::empty());
             ws.add_inner(MessageCodec::server().framed(upgrade)).await;
 
             let name = route.name.as_deref();

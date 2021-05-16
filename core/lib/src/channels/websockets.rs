@@ -74,14 +74,14 @@ pub(crate) fn to_message(message: impl IntoMessage) -> Message {
 /// Messages sent with the `send` method are only sent to one client, the one who sent the message.
 /// This is also nessecary for subscribing clients to specific channels.
 #[derive(Clone)]
-pub struct Websocket {
+pub struct Channel {
     inner: Arc<Mutex<Option<Framed<Upgraded, MessageCodec>>>>,
     channels: Option<()>,
     reciever: Arc<Mutex<mpsc::UnboundedReceiver<Message>>>,
     sender: mpsc::UnboundedSender<Message>,
 }
 
-impl Websocket {
+impl Channel {
     /// Create a fake reciever, for detecting internal errors in the FromRequest implementation
     pub(crate) fn empty() -> Self {
         let (sender, reciever) = mpsc::unbounded_channel();
@@ -161,7 +161,7 @@ impl Websocket {
 }
 
 #[crate::async_trait]
-impl<'r> FromRequest<'r> for Websocket {
+impl<'r> FromRequest<'r> for Channel {
     type Error = &'static str;
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         let tmp = request.local_cache(|| Self::empty()).clone();
