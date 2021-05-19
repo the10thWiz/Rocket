@@ -12,7 +12,7 @@
 use tokio::sync::mpsc;
 use websocket_codec::Message;
 
-use super::{Channel, websockets::{IntoMessage, to_message}};
+use super::{WebsocketChannel, websockets::{IntoMessage, to_message}};
 
 /// A channel descriptor trait. This allows a `Channel` to have multiple
 /// sub channels, and to control how messages are shared between clients.
@@ -160,7 +160,7 @@ impl<T: Topic> Broker<T> {
     /// Subscribes the client to this channel using the descriptor `id`
     ///
     /// See ChannelDescriptor for more info on the matching process
-    pub fn subscribe(&self, id: impl Into<T>, channel: &Channel) {
+    pub fn subscribe(&self, id: impl Into<T>, channel: &WebsocketChannel) {
         let _ = self.channels.send(
             WebsocketMessage::Register(id.into(), channel.subscribe_handle())
         );
@@ -172,7 +172,7 @@ impl<T: Topic> Broker<T> {
     /// This will unsubscribe this client from EVERY descriptor that matches `id`, not just one
     /// that is exactly equal.
     /// See ChannelDescriptor for more info on the matching process
-    pub fn unsubscribe(&self, id: impl Into<T>, channel: &Channel) {
+    pub fn unsubscribe(&self, id: impl Into<T>, channel: &WebsocketChannel) {
         let _ = self.channels.send(
             WebsocketMessage::Unregister(id.into(), channel.subscribe_handle())
         );
@@ -182,7 +182,7 @@ impl<T: Topic> Broker<T> {
     ///
     /// The client is automatically unsubscribed if they are disconnected, so this does not need
     /// to be called when the client is disconnecting
-    pub fn unsubscribe_all(&self, channel: &Channel) {
+    pub fn unsubscribe_all(&self, channel: &WebsocketChannel) {
         let _ = self.channels.send(WebsocketMessage::UnregisterAll(channel.subscribe_handle()));
     }
 

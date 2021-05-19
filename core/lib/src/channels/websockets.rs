@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::{SinkExt, StreamExt};
 use rocket_http::{Status, hyper::upgrade::{Parts, Upgraded}};
-use tokio::{net::TcpStream, select, sync::{Mutex, mpsc}};
-use tokio_util::codec::Framed;
-use websocket_codec::{Message, MessageCodec, Error};
+use tokio::{io::AsyncReadExt, net::TcpStream, select, sync::{Mutex, mpsc, oneshot}};
+use tokio_util::codec::{Decoder, Framed};
+use websocket_codec::{Error, Message, MessageCodec, protocol::{FrameHeader, FrameHeaderCodec}};
 
 use crate::{Request, request::{FromRequest, Outcome}};
 
@@ -69,81 +69,90 @@ pub(crate) fn to_message(message: impl IntoMessage) -> Message {
     }
 }
 
+//struct InnerChannel {
+    //inner: Parts<TcpStream>,
+    //current_frame: Option<(websocket_codec::protocol::FrameHeader, usize)>,
+    //reciever: mpsc::UnboundedReceiver<Message>,
+//}
+
+//impl InnerChannel {
+    //fn new(inner: Parts<TcpStream>, reciever: mpsc::UnboundedReceiver<Message>) -> Self {
+        //Self {
+            //inner, 
+            //reciever,
+            //current_frame: None,
+        //}
+    //}
+    //async fn next(&mut self) {
+        ////AsyncReadExt
+        ////let tmp = self.inner.read(&mut self.read_buf).await;
+        ////let tmp = self.frame_codec.decode(&mut self.read_buf);
+        ////FrameHeader::pa
+    //}
+    //async fn send(&mut self) {
+    //}
+//}
+
 /// A Websocket connection, directly connected to a client.
 ///
 /// Messages sent with the `send` method are only sent to one client, the one who sent the message.
 /// This is also nessecary for subscribing clients to specific channels.
-#[derive(Clone)]
-pub struct Channel {
-    inner: Arc<Mutex<Option<Framed<Upgraded, MessageCodec>>>>,
-    channels: Option<()>,
-    reciever: Arc<Mutex<mpsc::UnboundedReceiver<Message>>>,
-    sender: mpsc::UnboundedSender<Message>,
+pub struct WebsocketChannel {
+    //inner: Arc<Mutex<Option<InnerChannel>>>,
+    inner: mpsc::Receiver<Message>,
+    //channels: Option<()>,
+    //reciever: Arc<Mutex<mpsc::UnboundedReceiver<Message>>>,
+    sender: mpsc::Sender<Message>,
+    upgrade_tx: oneshot::Sender<Upgraded>
 }
 
-impl Channel {
-    /// Create a fake reciever, for detecting internal errors in the FromRequest implementation
-    pub(crate) fn empty() -> Self {
-        let (sender, reciever) = mpsc::unbounded_channel();
-        Self {
-            inner: Arc::new(Mutex::new(None)),
-            channels: None,
-            reciever: Arc::new(Mutex::new(reciever)),
-            sender,
-        }
-    }
-
-    /// Create a real reciever, without an inner channel
+impl WebsocketChannel {
     pub(crate) fn new() -> Self {
-        let (sender, reciever) = mpsc::unbounded_channel();
+        let (broker_tx, broker_rx) = mpsc::channel(10);
+        let (upgrade_tx, upgrade_rx) = oneshot::channel();
+        let (message_tx, message_rx) = mpsc::channel(0);
+        tokio::spawn(Self::message_handler(upgrade_rx, broker_rx, message_tx));
         Self {
-            inner: Arc::new(Mutex::new(None)),
-            channels: Some(()),
-            reciever: Arc::new(Mutex::new(reciever)),
-            sender,
+            inner: message_rx,
+            //channels: Some(()),
+            //reciever: Arc::new(Mutex::new(reciever)),
+            sender: broker_tx,
+            upgrade_tx,
         }
     }
 
-    /// Add the inner channel
-    pub(crate) async fn add_inner(&self, upgrade: Upgraded) {
-        let tmp: Result<Parts<TcpStream>, Upgraded> = upgrade.downcast();
-        if let Ok(parts) = tmp {
-            //parts.io.write
-        }
-        //let mut stream = self.inner.lock().await;
-        //*stream = Some(inner);
+    async fn message_handler(upgrade_rx: oneshot::Receiver<Upgraded>, broker_rx: mpsc::Receiver<Message>, message_tx: mpsc::Sender<Message>) {
+
     }
 
     /// Gets the handle to subscribe this channel to a descriptor
-    pub(crate) fn subscribe_handle(&self) -> mpsc::UnboundedSender<Message> {
+    pub(crate) fn subscribe_handle(&self) -> mpsc::Sender<Message> {
         self.sender.clone()
+    }
+
+    pub(crate) fn upgraded(&self, upgrade: Upgraded) {
+        self.upgrade_tx.send(upgrade);
     }
 
     /// Get the next message from this client.
     ///
     /// This method also forwards messages sent from any channels the client is subscribed to
-    pub(crate) async fn next(&self) -> Option<Result<Message, Error>> {
-        let mut lock = self.inner.lock().await;
-        let stream = lock.as_mut().unwrap();
+    pub(crate) async fn next(&mut self) -> Option<Message> {
+        self.inner.recv().await
+    }
+}
 
-        let mut recv = self.reciever.lock().await;
-        loop {
-            select! {
-                m = stream.next() => return m,
-                Some(m) = recv.recv() => {
-                    if let Err(e) = stream.send(m).await {
-                        return Some(Err(e));
-                    }
-                },
-            }
-        }
+#[derive(Clone)]
+pub struct Channel(mpsc::Sender<Message>);
+
+impl Channel {
+    pub(crate) fn from_websocket(chan: &WebsocketChannel) -> Self {
+        Self(chan.subscribe_handle())
     }
 
     /// Sends a raw Message to the client
     pub(crate) async fn send_raw(&self, message: Message) {
-        let mut lock = self.inner.lock().await;
-        let stream = lock.as_mut().unwrap();
-        let _ = stream.send(message).await;
+        let _ = self.0.send(message).await;
     }
 
     /// Send a message to the specific client connected to this websocket
@@ -168,8 +177,8 @@ impl Channel {
 impl<'r> FromRequest<'r> for Channel {
     type Error = &'static str;
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        let tmp = request.local_cache(|| Self::empty()).clone();
-        if tmp.channels.is_some() {
+        let tmp = request.local_cache(|| None).clone();
+        if let Some(tmp) = tmp {
             Outcome::Success(tmp)
         }else {
             Outcome::Failure((Status::InternalServerError, "Websockets not initialized"))

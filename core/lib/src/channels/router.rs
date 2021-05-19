@@ -13,7 +13,7 @@ use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
 use crate::router::{Collide, Collisions};
 use yansi::Paint;
 
-use super::Channel;
+use super::{WebsocketChannel, websockets::Channel};
 
 async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
     where F: FnOnce() -> Fut, Fut: Future<Output = T>,
@@ -143,7 +143,8 @@ impl WebsocketRouter {
         let _token = rocket.preprocess_request(&mut req, &mut data).await;
 
         let mut response = None;
-        req.local_cache(|| Channel::new());
+        let websocket_channel = WebsocketChannel::new();
+        req.local_cache(|| Some(Channel::from_websocket(&websocket_channel)));
 
         for route in rocket.websocket_router.route(&req) {
             req.set_route(route);
@@ -159,7 +160,7 @@ impl WebsocketRouter {
         }
         if let Some((response, route)) = response {
             rocket.send_response(response, tx).await;
-            Self::websocket_task(rocket.clone(), &req, upgrade, route).await;
+            Self::websocket_task(rocket.clone(), &req, upgrade, route, websocket_channel).await;
         }else {
             let response = Self::handle_error(Status::NotFound);
             rocket.send_response(response, tx).await;
@@ -193,29 +194,25 @@ impl WebsocketRouter {
         _rocket: Arc<Rocket<Orbit>>,
         request: &Request<'_>,
         on_upgrade: OnUpgrade,
-        route: &Route
+        route: &Route,
+        mut ws: WebsocketChannel,
     ) {
         if let Ok(upgrade) = on_upgrade.await {
-            let ws = request.local_cache(|| Channel::empty());
-            ws.add_inner(upgrade).await;
+            //let ws = request.local_cache(|| WebsocketChannel::empty());
+            //ws.add_inner(upgrade).await;
+            ws.upgraded(upgrade);
 
             let name = route.name.as_deref();
             let handler = route.websocket_handler.as_ref().unwrap();
-            while let Some(Ok(message)) = ws.next().await {
+            while let Some(message) = ws.next().await {
                 match message.opcode() {
                     Opcode::Text | Opcode::Binary => {
                         let _res = handle(name, || handler.handle(&request,
                                                           Some(Data::from(message.into_data()))
                                                     )).await;
                     }
-                    Opcode::Ping => {
-                        ws.send_raw(Message::pong(message.into_data())).await;
-                    },
-                    Opcode::Pong => (),
-                    // These would come after a server initiated ping,
-                    // but we don't have an API for that, so they should
-                    // never come
                     Opcode::Close => break,
+                    _ => (),
                 }
             }
         }
