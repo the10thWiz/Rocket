@@ -651,7 +651,7 @@ mod serde {
     impl<'a> Visitor<'a> for ReferenceVistor {
         type Value = Reference<'a>;
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(formatter, "Expecting a valid Reference URI")
+            write!(formatter, "reference Uri")
         }
 
         fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {

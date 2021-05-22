@@ -30,7 +30,7 @@ mod serde {
     impl<'a> Visitor<'a> for AsteriskVistor {
         type Value = Asterisk;
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(formatter, "Expecting a valid Asterisk URI")
+            write!(formatter, "asterisk Uri")
         }
 
         // This method should be the only one that needs to be implemented, since the
