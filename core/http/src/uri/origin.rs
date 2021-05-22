@@ -486,6 +486,47 @@ impl std::fmt::Display for Origin<'_> {
     }
 }
 
+#[cfg(feature = "serde")]
+mod serde {
+    use std::fmt;
+
+    use super::Origin;
+    use _serde::{ser::{Serialize, Serializer}, de::{Deserialize, Deserializer, Error, Visitor}};
+
+    impl<'a> Serialize for Origin<'a> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(&self.to_string())
+        }
+    }
+
+    struct OriginVistor;
+
+    impl<'a> Visitor<'a> for OriginVistor {
+        type Value = Origin<'a>;
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "Expecting a valid URI string")
+        }
+
+        fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
+            Origin::parse_owned(v.to_string()).map_err(E::custom)
+        }
+
+        fn visit_string<E: Error>(self, v: String) -> Result<Self::Value, E> {
+            Origin::parse_owned(v).map_err(E::custom)
+        }
+
+        fn visit_borrowed_str<E: Error>(self, v: &'a str) -> Result<Self::Value, E> {
+            Origin::parse(v).map_err(E::custom)
+        }
+    }
+
+    impl<'a> Deserialize<'a> for Origin<'a> {
+        fn deserialize<D: Deserializer<'a>>(deserializer: D) -> Result<Self, D::Error> {
+            deserializer.deserialize_str(OriginVistor)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Origin;

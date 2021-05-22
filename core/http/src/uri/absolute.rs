@@ -115,6 +115,42 @@ impl<'a> Absolute<'a> {
         crate::parse::uri::absolute_from_str(string)
     }
 
+    /// Parses the string `string` into an `Absolute`. Parsing will never
+    /// allocate. This method should be used instead of
+    /// [`Absolute::parse()`](crate::uri::Absolute::parse()) when the source URI is
+    /// already a `String`. Returns an `Error` if `string` is not a valid absolute
+    /// URI.
+    pub fn parse_owned(string: String) -> Result<Absolute<'static>, Error<'static>> {
+        // We create a copy of a pointer to `string` to escape the borrow
+        // checker. This is so that we can "move out of the borrow" later.
+        //
+        // For this to be correct and safe, we need to ensure that:
+        //
+        //  1. No `&mut` references to `string` are created after this line.
+        //  2. `string` isn't dropped while `copy_of_str` is live.
+        //
+        // These two facts can be easily verified. An `&mut` can't be created
+        // because `string` isn't `mut`. Then, `string` is clearly not dropped
+        // since it's passed in to `source`.
+        // let copy_of_str = unsafe { &*(string.as_str() as *const str) };
+        let copy_of_str = unsafe { &*(string.as_str() as *const str) };
+        let absolute = Absolute::parse(copy_of_str)?;
+        debug_assert!(absolute.source.is_some(), "Origin source parsed w/o source");
+
+        let absolute = Absolute {
+            scheme: absolute.scheme.into_owned(),
+            authority: absolute.authority.into_owned(),
+            origin: absolute.origin.into_owned(),
+            // At this point, it's impossible for anything to be borrowing
+            // `string` except for `source`, even though Rust doesn't know it.
+            // Because we're replacing `source` here, there can't possibly be a
+            // borrow remaining, it's safe to "move out of the borrow".
+            source: Some(Cow::Owned(string)),
+        };
+
+        Ok(absolute)
+    }
+
     /// Returns the scheme part of the absolute URI.
     ///
     /// # Example
@@ -458,5 +494,46 @@ impl std::fmt::Display for Absolute<'_> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde {
+    use std::fmt;
+
+    use super::Absolute;
+    use _serde::{ser::{Serialize, Serializer}, de::{Deserialize, Deserializer, Error, Visitor}};
+
+    impl<'a> Serialize for Absolute<'a> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(&self.to_string())
+        }
+    }
+
+    struct AbsoluteVistor;
+
+    impl<'a> Visitor<'a> for AbsoluteVistor {
+        type Value = Absolute<'a>;
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "Expecting a valid URI string")
+        }
+
+        fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
+            Absolute::parse_owned(v.to_string()).map_err(Error::custom)
+        }
+
+        fn visit_string<E: Error>(self, v: String) -> Result<Self::Value, E> {
+            Absolute::parse_owned(v).map_err(Error::custom)
+        }
+
+        fn visit_borrowed_str<E: Error>(self, v: &'a str) -> Result<Self::Value, E> {
+            Absolute::parse(v).map_err(Error::custom)
+        }
+    }
+
+    impl<'a> Deserialize<'a> for Absolute<'a> {
+        fn deserialize<D: Deserializer<'a>>(deserializer: D) -> Result<Self, D::Error> {
+            deserializer.deserialize_str(AbsoluteVistor)
+        }
     }
 }
