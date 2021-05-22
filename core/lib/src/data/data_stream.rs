@@ -3,12 +3,12 @@ use std::task::{Context, Poll};
 use std::path::Path;
 use std::io::{self, Cursor};
 
-use tokio::fs::File;
+use tokio::{fs::File, sync::mpsc};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, ReadBuf, Take};
 use futures::stream::Stream;
 use futures::ready;
 
-use crate::http::hyper;
+use crate::{channels::websockets::{IntoMessage, WebsocketMessage}, http::hyper};
 use crate::ext::{PollExt, Chain};
 use crate::data::{Capped, N};
 
@@ -60,7 +60,7 @@ enum State {
 enum StreamKind {
     Body(hyper::Body),
     Multipart(multer::Field),
-    Websocket(),
+    Websocket(mpsc::Receiver<hyper::Bytes>),
 }
 
 impl DataStream {
@@ -245,9 +245,9 @@ impl From<multer::Field> for StreamReader {
     }
 }
 
-impl From<hyper::Bytes> for StreamReader {
-    fn from(bytes: hyper::Bytes) -> Self {
-        Self { inner: StreamKind::Websocket(), state: State::Partial(Cursor::new(bytes)) }
+impl From<WebsocketMessage> for StreamReader {
+    fn from(message: WebsocketMessage) -> Self {
+        Self { inner: StreamKind::Websocket(message.into_message()), state: State::Pending }
     }
 }
 
@@ -274,7 +274,7 @@ impl Stream for StreamKind {
                 .map_err_ext(|e| io::Error::new(io::ErrorKind::Other, e)),
             StreamKind::Multipart(mp) => Pin::new(mp).poll_next(cx)
                 .map_err_ext(|e| io::Error::new(io::ErrorKind::Other, e)),
-            StreamKind::Websocket() => Poll::Ready(None),
+            StreamKind::Websocket(r) => r.poll_recv(cx).map(|b| b.map(|b| Ok(b))),
         }
     }
 
@@ -282,7 +282,7 @@ impl Stream for StreamKind {
         match self {
             StreamKind::Body(body) => body.size_hint(),
             StreamKind::Multipart(mp) => mp.size_hint(),
-            StreamKind::Websocket() => (0, Some(0)),
+            StreamKind::Websocket(r) => (0, None),
         }
     }
 }

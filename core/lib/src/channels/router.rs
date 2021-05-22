@@ -143,7 +143,7 @@ impl WebsocketRouter {
         let _token = rocket.preprocess_request(&mut req, &mut data).await;
 
         let mut response = None;
-        let websocket_channel = WebsocketChannel::new();
+        let (websocket_channel, upgrade_tx) = WebsocketChannel::new();
         req.local_cache(|| Some(Channel::from_websocket(&websocket_channel)));
 
         for route in rocket.websocket_router.route(&req) {
@@ -160,7 +160,7 @@ impl WebsocketRouter {
         }
         if let Some((response, route)) = response {
             rocket.send_response(response, tx).await;
-            Self::websocket_task(rocket.clone(), &req, upgrade, route, websocket_channel).await;
+            Self::websocket_task(rocket.clone(), &req, upgrade, route, websocket_channel, upgrade_tx).await;
         }else {
             let response = Self::handle_error(Status::NotFound);
             rocket.send_response(response, tx).await;
@@ -196,19 +196,21 @@ impl WebsocketRouter {
         on_upgrade: OnUpgrade,
         route: &Route,
         mut ws: WebsocketChannel,
+        upgrade_tx: oneshot::Sender<Upgraded>,
     ) {
         if let Ok(upgrade) = on_upgrade.await {
             //let ws = request.local_cache(|| WebsocketChannel::empty());
             //ws.add_inner(upgrade).await;
-            ws.upgraded(upgrade);
+            let e = upgrade_tx.send(upgrade);
 
             let name = route.name.as_deref();
             let handler = route.websocket_handler.as_ref().unwrap();
             while let Some(message) = ws.next().await {
+                println!("Message received");
                 match message.opcode() {
                     Opcode::Text | Opcode::Binary => {
                         let _res = handle(name, || handler.handle(&request,
-                                                          Some(Data::from(message.into_data()))
+                                                          Some(Data::from(message))
                                                     )).await;
                     }
                     Opcode::Close => break,

@@ -69,7 +69,7 @@ rev = "7e4f0c5f"
 features = ["tokio-io"]
 
 [dependencies.tokio]
-version = "1.0"
+version = "1.6"
 features = ["fs", "io-std", "io-util", "rt-multi-thread", "sync", "signal", "macros"]
 
 [dependencies.tokio-util]

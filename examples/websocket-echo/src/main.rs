@@ -1,10 +1,12 @@
 #[macro_use] extern crate rocket;
 
-use rocket::channels::Websocket;
+use rocket::channels::{WebsocketMessage, Channel};
 use rocket::response::content::Html;
+use rocket::Data;
 
 #[websocket("/echo", "<data>")]
-async fn echo(data: String, websocket: Websocket) {
+async fn echo(data: Data, websocket: Channel) {
+    //println!("Message: {}", data);
     websocket.send(data).await;
 }
 

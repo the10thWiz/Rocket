@@ -10,9 +10,8 @@
 //! and it also allows mutiple channels, depending on the descriptor type.
 
 use tokio::sync::mpsc;
-use websocket_codec::Message;
 
-use super::{WebsocketChannel, websockets::{IntoMessage, to_message}};
+use super::{WebsocketChannel, websockets::{IntoMessage, WebsocketMessage, to_message}};
 
 /// A channel descriptor trait. This allows a `Channel` to have multiple
 /// sub channels, and to control how messages are shared between clients.
@@ -107,22 +106,22 @@ impl<T> Topic for Option<T>
 }
 
 /// Internal enum for sharing messages between clients
-enum WebsocketMessage<T: Topic + 'static> {
+enum BrokerMessage<T: Topic + 'static> {
     /// Registers a websocket to recieve messages from a room
     ///
     /// Note: this should only be sent once per websocket connection
-    Register(T, mpsc::UnboundedSender<Message>),
+    Register(T, mpsc::Sender<WebsocketMessage>),
 
     /// Removes a previously registered listener
     ///
     /// Note, this will remove all matching listeners, since there is no Eq bounds
-    Unregister(T, mpsc::UnboundedSender<Message>),
+    Unregister(T, mpsc::Sender<WebsocketMessage>),
 
     /// Removes all previously registered listeners for this client
-    UnregisterAll(mpsc::UnboundedSender<Message>),
+    UnregisterAll(mpsc::Sender<WebsocketMessage>),
 
     /// Sends a message that should be forwarded to every socket listening
-    Forward(T, Message),
+    Forward(T, WebsocketMessage),
 }
 
 /// A channel for sharing messages between multiple clients, and the central server.
@@ -136,7 +135,7 @@ enum WebsocketMessage<T: Topic + 'static> {
 /// TODO: Create examples
 #[derive(Clone)]
 pub struct Broker<T: Topic> {
-    channels: mpsc::UnboundedSender<WebsocketMessage<T>>,
+    channels: mpsc::UnboundedSender<BrokerMessage<T>>,
 }
 
 impl<T: Topic> Broker<T> {
@@ -153,8 +152,10 @@ impl<T: Topic> Broker<T> {
     /// Sends a message to all clients subscribed to this channel using descriptor `id`
     ///
     /// See ChannelDescriptor for more info on the matching process
+    ///
+    /// ** WIP: NO-OP **
     pub fn send(&self, id: impl Into<T>, message: impl IntoMessage) {
-        let _ = self.channels.send(WebsocketMessage::Forward(id.into(), to_message(message)));
+        let _ = self.channels.send(BrokerMessage::Forward(id.into(), to_message(message)));
     }
 
     /// Subscribes the client to this channel using the descriptor `id`
@@ -162,7 +163,7 @@ impl<T: Topic> Broker<T> {
     /// See ChannelDescriptor for more info on the matching process
     pub fn subscribe(&self, id: impl Into<T>, channel: &WebsocketChannel) {
         let _ = self.channels.send(
-            WebsocketMessage::Register(id.into(), channel.subscribe_handle())
+            BrokerMessage::Register(id.into(), channel.subscribe_handle())
         );
     }
 
@@ -174,7 +175,7 @@ impl<T: Topic> Broker<T> {
     /// See ChannelDescriptor for more info on the matching process
     pub fn unsubscribe(&self, id: impl Into<T>, channel: &WebsocketChannel) {
         let _ = self.channels.send(
-            WebsocketMessage::Unregister(id.into(), channel.subscribe_handle())
+            BrokerMessage::Unregister(id.into(), channel.subscribe_handle())
         );
     }
 
@@ -183,25 +184,25 @@ impl<T: Topic> Broker<T> {
     /// The client is automatically unsubscribed if they are disconnected, so this does not need
     /// to be called when the client is disconnecting
     pub fn unsubscribe_all(&self, channel: &WebsocketChannel) {
-        let _ = self.channels.send(WebsocketMessage::UnregisterAll(channel.subscribe_handle()));
+        let _ = self.channels.send(BrokerMessage::UnregisterAll(channel.subscribe_handle()));
     }
 
     /// Channel task for tracking subscribtions and forwarding messages
-    async fn channel_task(mut rx: mpsc::UnboundedReceiver<WebsocketMessage<T>>) {
+    async fn channel_task(mut rx: mpsc::UnboundedReceiver<BrokerMessage<T>>) {
         let mut subs = ChannelMap::new(100);
         while let Some(wsm) = rx.recv().await {
             match wsm {
-                WebsocketMessage::Register(room, tx) => subs.insert(tx, room),
-                WebsocketMessage::Forward(room, message) => subs.send(room, message),
-                WebsocketMessage::Unregister(room, tx) => subs.remove_value(tx, room),
-                WebsocketMessage::UnregisterAll(tx) => subs.remove_key(tx),
+                BrokerMessage::Register(room, tx) => subs.insert(tx, room),
+                BrokerMessage::Forward(room, message) => (),//subs.send(room, message),
+                BrokerMessage::Unregister(room, tx) => subs.remove_value(tx, room),
+                BrokerMessage::UnregisterAll(tx) => subs.remove_key(tx),
             }
         }
     }
 }
 
 /// Convient struct for holding channel subscribtions
-struct ChannelMap<T: Topic>(Vec<(mpsc::UnboundedSender<Message>, Vec<T>)>);
+struct ChannelMap<T: Topic>(Vec<(mpsc::Sender<WebsocketMessage>, Vec<T>)>);
 
 impl<T: Topic> ChannelMap<T> {
     /// Create map with capactity
@@ -210,7 +211,7 @@ impl<T: Topic> ChannelMap<T> {
     }
 
     /// Add `descriptor` to the list of subscriptions for `tx`
-    fn insert(&mut self, tx: mpsc::UnboundedSender<Message>, descriptor: T) {
+    fn insert(&mut self, tx: mpsc::Sender<WebsocketMessage>, descriptor: T) {
         for (t, v) in self.0.iter_mut() {
             if t.same_channel(&tx) {
                 v.push(descriptor);
@@ -221,12 +222,12 @@ impl<T: Topic> ChannelMap<T> {
     }
 
     /// Remove every descriptor `tx` is subscribed to
-    fn remove_key(&mut self, tx: mpsc::UnboundedSender<Message>) {
+    fn remove_key(&mut self, tx: mpsc::Sender<WebsocketMessage>) {
         self.0.retain(|(t, _)| !t.same_channel(&tx));
     }
 
     /// Remove every descriptor that `descriptor` matches and `tx` is subscribed to
-    fn remove_value(&mut self, tx: mpsc::UnboundedSender<Message>, descriptor: T) {
+    fn remove_value(&mut self, tx: mpsc::Sender<WebsocketMessage>, descriptor: T) {
         for (t, v) in self.0.iter_mut() {
             if t.same_channel(&tx) {
                 v.retain(|d| !d.matches(&descriptor));
@@ -235,19 +236,19 @@ impl<T: Topic> ChannelMap<T> {
         }
     }
 
-    /// Forward a message to every client that is subscribed to a descriptor that matches
-    /// `descriptor`
-    fn send(&mut self, descriptor: T, message: Message) {
-        self.0.retain(|(t, v)| {
-            if v.iter().any(|r| r.matches(&descriptor)) {
-                // message.clone() should be very cheap, since it uses `Bytes` internally to store
-                // the raw data
-                if let Err(_) = t.send(message.clone()) {
-                    // An error is only returned when the websocket has closed
-                    return false;
-                }
-            }
-            true
-        });
-    }
+    // /// Forward a message to every client that is subscribed to a descriptor that matches
+    // /// `descriptor`
+    //fn send(&mut self, descriptor: T, message: WebsocketMessage) {
+        //self.0.retain(|(t, v)| {
+            //if v.iter().any(|r| r.matches(&descriptor)) {
+                //// message.clone() should be very cheap, since it uses `Bytes` internally to store
+                //// the raw data
+                //if let Err(_) = t.send(message.clone()) {
+                    //// An error is only returned when the websocket has closed
+                    //return false;
+                //}
+            //}
+            //true
+        //});
+    //}
 }
