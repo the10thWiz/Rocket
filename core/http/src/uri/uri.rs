@@ -343,3 +343,15 @@ impl_uri_from!(Authority<'a>);
 impl_uri_from!(Absolute<'a>);
 impl_uri_from!(Reference<'a>);
 impl_uri_from!(Asterisk);
+
+#[cfg(feature = "serde")]
+mod serde {
+    use super::Uri;
+    use _serde::ser::{Serialize, Serializer};
+
+    impl<'a> Serialize for Uri<'a> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(&self.to_string())
+        }
+    }
+}
