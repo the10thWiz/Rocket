@@ -1,6 +1,6 @@
 use std::{borrow::Cow, convert::TryFrom};
 
-use crate::RawStr;
+use crate::{RawStr, parse::IndexedBytes};
 use crate::ext::IntoOwned;
 use crate::uri::{Authority, Data, Origin, Absolute, Asterisk};
 use crate::uri::{Path, Query, Error, as_utf8_unchecked, fmt};
@@ -35,7 +35,7 @@ use crate::parse::{Extent, IndexedStr};
 /// let absolute = uri!("http://rocket.rs");
 /// let reference: Reference = absolute.into();
 /// assert_eq!(reference.scheme(), Some("http"));
-/// assert_eq!(reference.authority().unwrap().host(), "rocket.rs");
+/// assert_eq!(reference.host().unwrap(), "rocket.rs");
 ///
 /// let origin = uri!("/foo/bar");
 /// let reference: Reference = origin.into();
@@ -63,7 +63,9 @@ use crate::parse::{Extent, IndexedStr};
 pub struct Reference<'a> {
     source: Option<Cow<'a, str>>,
     scheme: Option<IndexedStr<'a>>,
-    authority: Option<Authority<'a>>,
+    user_info: Option<IndexedStr<'a>>,
+    host: Option<IndexedStr<'a>>,
+    port: Option<u16>,
     path: Data<'a, fmt::Path>,
     query: Option<Data<'a, fmt::Query>>,
     fragment: Option<IndexedStr<'a>>,
@@ -80,12 +82,17 @@ impl<'a> Reference<'a> {
         fragment: Option<Extent<&'a [u8]>>,
     ) -> Reference<'a> {
         Reference {
-            source: Some(as_utf8_unchecked(source)),
             scheme: scheme.map(|s| s.into()),
-            authority: authority.map(|s| s.into()),
+            user_info: authority.as_ref().map(|a|
+                a.user_info().map(|u| IndexedBytes::unchecked_from(u.as_bytes(), &source))
+            ).flatten().map(|b| b.coerce()),
+            host: authority.as_ref().map(|a| IndexedBytes::unchecked_from(a.host().as_bytes(), &source))
+                .map(|h| h.coerce()),
+            port: authority.as_ref().map(|a| a.port()).flatten(),
             path: Data::raw(path),
             query: query.map(Data::raw),
             fragment: fragment.map(|f| f.into()),
+            source: Some(as_utf8_unchecked(source)),
         }
     }
 
@@ -93,19 +100,30 @@ impl<'a> Reference<'a> {
     #[cfg(test)]
     pub fn new(
         scheme: impl Into<Option<&'a str>>,
-        auth: impl Into<Option<Authority<'a>>>,
+        user_info: impl Into<Option<&'a str>>,
+        host: impl Into<Option<&'a str>>,
+        port: impl Into<Option<u16>>,
         path: &'a str,
         query: impl Into<Option<&'a str>>,
         frag: impl Into<Option<&'a str>>,
     ) -> Reference<'a> {
-        Reference::const_new(scheme.into(), auth.into(), path, query.into(), frag.into())
+        Reference::const_new(
+            scheme.into(),
+            user_info.into(),
+            host.into(),
+            port.into(),
+            path,
+            query.into(),
+            frag.into())
     }
 
     /// PRIVATE. Used by codegen.
     #[doc(hidden)]
     pub const fn const_new(
         scheme: Option<&'a str>,
-        authority: Option<Authority<'a>>,
+        user_info: Option<&'a str>,
+        host: Option<&'a str>,
+        port: Option<u16>,
         path: &'a str,
         query: Option<&'a str>,
         fragment: Option<&'a str>,
@@ -116,7 +134,15 @@ impl<'a> Reference<'a> {
                 Some(scheme) => Some(IndexedStr::Concrete(Cow::Borrowed(scheme))),
                 None => None
             },
-            authority,
+            user_info: match user_info {
+                Some(info) => Some(IndexedStr::Concrete(Cow::Borrowed(info))),
+                None => None
+            },
+            host: match host {
+                Some(host) => Some(IndexedStr::Concrete(Cow::Borrowed(host))),
+                None => None,
+            },
+            port,
             path: Data {
                 value: IndexedStr::Concrete(Cow::Borrowed(path)),
                 decoded_segments: state::Storage::new(),
@@ -187,7 +213,9 @@ impl<'a> Reference<'a> {
 
         Ok(Reference {
             scheme: uri_ref.scheme.into_owned(),
-            authority: uri_ref.authority.into_owned(),
+            user_info: uri_ref.user_info.into_owned(),
+            host: uri_ref.host.into_owned(),
+            port: uri_ref.port,
             path: uri_ref.path.into_owned(),
             query: uri_ref.query.into_owned(),
             fragment: uri_ref.fragment.into_owned(),
@@ -215,22 +243,62 @@ impl<'a> Reference<'a> {
         self.scheme.as_ref().map(|s| s.from_cow_source(&self.source))
     }
 
-    /// Returns the authority part.
+    /// Returns the user info part of the absolute URI, if there is one.
+    ///
+    /// # Example
+    /// ```rust
+    /// # #[macro_use] extern crate rocket;
+    /// let uri = uri!("username:password@host");
+    /// assert_eq!(uri.user_info(), Some("username:password"));
+    /// ```
+    pub fn user_info(&self) -> Option<&str> {
+        self.user_info.as_ref().map(|u| u.from_cow_source(&self.source))
+    }
+
+    /// Returns the host part of the absolute URI.
+    ///
+    ///
+    /// If the host was provided in brackets (such as for IPv6 addresses), the
+    /// brackets will not be part of the returned string.
+    ///
+    /// # Example
+    /// ```rust
+    /// # #[macro_use] extern crate rocket;
+    ///
+    /// let uri = uri!("domain.com:123");
+    /// assert_eq!(uri.host(), "domain.com");
+    ///
+    /// let uri = uri!("username:password@host:123");
+    /// assert_eq!(uri.host(), "host");
+    ///
+    /// let uri = uri!("username:password@[1::2]:123");
+    /// assert_eq!(uri.host(), "[1::2]");
+    /// ```
+    #[inline(always)]
+    pub fn host(&self) -> Option<&str> {
+        self.host.as_ref().map(|host| host.from_cow_source(&self.source))
+    }
+
+    /// Returns the port part of the absolute URI, if there is one.
     ///
     /// # Example
     ///
     /// ```rust
     /// # #[macro_use] extern crate rocket;
-    /// let uri = uri!("http://rocket.rs:4444?foo#bar");
-    /// let auth = uri!("rocket.rs:4444");
-    /// assert_eq!(uri.authority().unwrap(), &auth);
+    /// // With a port.
+    /// let uri = uri!("username:password@host:123");
+    /// assert_eq!(uri.port(), Some(123));
     ///
-    /// let uri = uri!("?foo#bar");
-    /// assert_eq!(uri.authority(), None);
+    /// let uri = uri!("domain.com:8181");
+    /// assert_eq!(uri.port(), Some(8181));
+    ///
+    /// // Without a port.
+    /// let uri = uri!("username:password@host");
+    /// assert_eq!(uri.port(), None);
     /// ```
     #[inline(always)]
-    pub fn authority(&self) -> Option<&Authority<'a>> {
-        self.authority.as_ref()
+    pub fn port(&self) -> Option<u16> {
+        self.port
     }
 
     /// Returns the path part. May be empty.
@@ -318,7 +386,7 @@ impl<'a> Reference<'a> {
     /// ```
     pub fn is_normalized(&self) -> bool {
         let normalized_query = self.query().map_or(true, |q| q.is_normalized());
-        if self.authority().is_some() && !self.path().is_empty() {
+        if self.host().is_some() && !self.path().is_empty() {
             self.path().is_normalized(true)
                 && self.path() != "/"
                 && normalized_query
@@ -351,7 +419,7 @@ impl<'a> Reference<'a> {
     /// assert!(uri.is_normalized());
     /// ```
     pub fn normalize(&mut self) {
-        if self.authority().is_some() && !self.path().is_empty() {
+        if self.host().is_some() && !self.path().is_empty() {
             if self.path() == "/" {
                 self.set_path("");
             } else if !self.path().is_normalized(true) {
@@ -419,7 +487,9 @@ impl<'a> Reference<'a> {
 impl PartialEq<Reference<'_>> for Reference<'_> {
     fn eq(&self, other: &Reference<'_>) -> bool {
         self.scheme() == other.scheme()
-            && self.authority() == other.authority()
+            && self.user_info() == other.user_info()
+            && self.host() == other.host()
+            && self.port() == other.port()
             && self.path() == other.path()
             && self.query() == other.query()
             && self.fragment() == other.fragment()
@@ -433,7 +503,9 @@ impl IntoOwned for Reference<'_> {
         Reference {
             source: self.source.into_owned(),
             scheme: self.scheme.into_owned(),
-            authority: self.authority.into_owned(),
+            user_info: self.user_info.into_owned(),
+            host: self.host.into_owned(),
+            port: self.port,
             path: self.path.into_owned(),
             query: self.query.into_owned(),
             fragment: self.fragment.into_owned(),
@@ -446,7 +518,9 @@ impl<'a> From<Absolute<'a>> for Reference<'a> {
         Reference {
             source: absolute.source,
             scheme: Some(absolute.scheme),
-            authority: absolute.authority,
+            user_info: absolute.user_info,
+            host: absolute.host,
+            port: absolute.port,
             path: absolute.path,
             query: absolute.query,
             fragment: None,
@@ -459,7 +533,9 @@ impl<'a> From<Origin<'a>> for Reference<'a> {
         Reference {
             source: origin.source,
             scheme: None,
-            authority: None,
+            user_info: None,
+            host: None,
+            port: None,
             path: origin.path,
             query: origin.query,
             fragment: None,
@@ -474,7 +550,9 @@ impl<'a> From<Authority<'a>> for Reference<'a> {
                 Some(Cow::Borrowed(b)) => Some(Cow::Borrowed(b)),
                 _ => None
             },
-            authority: Some(authority),
+            user_info: authority.user_info,
+            host: Some(authority.host),
+            port: authority.port,
             scheme: None,
             path: Data::new(""),
             query: None,
@@ -487,7 +565,9 @@ impl From<Asterisk> for Reference<'_> {
     fn from(_: Asterisk) -> Self {
         Reference {
             source: None,
-            authority: None,
+            user_info: None,
+            host: None,
+            port: None,
             scheme: None,
             path: Data::new("*"),
             query: None,
@@ -527,8 +607,16 @@ impl std::fmt::Display for Reference<'_> {
             write!(f, "{}:", scheme)?;
         }
 
-        if let Some(authority) = self.authority() {
-            write!(f, "//{}", authority)?;
+        if let Some(host) = self.host() {
+            write!(f, "//")?;
+            if let Some(user_info) = self.user_info() {
+                write!(f, "{}@", user_info)?;
+            }
+
+            write!(f, "{}", host)?;
+            if let Some(port) = self.port {
+                write!(f, ":{}", port)?;
+            }
         }
 
         write!(f, "{}", self.path())?;

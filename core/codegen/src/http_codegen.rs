@@ -182,11 +182,13 @@ impl ToTokens for Absolute<'_> {
         let absolute = absolute.clone().into_normalized();
 
         let scheme = absolute.scheme();
-        let auth = Optional(absolute.authority().map(|a| Authority(a, span)));
+        let user_info = Optional(absolute.user_info());
+        let host = Optional(absolute.host());
+        let port = Optional(absolute.port());
         let path = absolute.path().as_str();
         let query = Optional(absolute.query().map(|q| q.as_str()));
         tokens.extend(quote_spanned! { span =>
-            #_uri::Absolute::const_new(#scheme, #auth, #path, #query)
+            #_uri::Absolute::const_new(#scheme, #user_info, #host, #port, #path, #query)
         });
     }
 }
@@ -212,12 +214,14 @@ impl ToTokens for Reference<'_> {
         let reference = reference.clone().into_normalized();
 
         let scheme = Optional(reference.scheme());
-        let auth = Optional(reference.authority().map(|a| Authority(a, span)));
+        let user_info = Optional(reference.user_info());
+        let host = Optional(reference.host());
+        let port = Optional(reference.port());
         let path = reference.path().as_str();
         let query = Optional(reference.query().map(|q| q.as_str()));
         let frag = Optional(reference.fragment().map(|f| f.as_str()));
         tokens.extend(quote_spanned! { span =>
-            #_uri::Reference::const_new(#scheme, #auth, #path, #query, #frag)
+            #_uri::Reference::const_new(#scheme, #user_info, #host, #port, #path, #query, #frag)
         });
     }
 }

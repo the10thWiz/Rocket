@@ -40,7 +40,7 @@ mod serde {
         fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
             if v == "*" {
                 Ok(Asterisk)
-            }else {
+            } else {
                 Err(E::custom(format!("`{}` is not a valid asterisk uri", v)))
             }
         }

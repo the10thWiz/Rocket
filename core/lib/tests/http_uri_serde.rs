@@ -1,4 +1,4 @@
-use rocket::Config;
+use rocket::{Config, uri};
 use rocket_http::uri::{Absolute, Asterisk, Authority, Origin, Reference};
 use serde::{Serialize, Deserialize};
 use pretty_assertions::assert_eq;
@@ -31,18 +31,10 @@ fn uri_deserialize() {
         let uris: UriContainer<'_> = Config::figment().extract()?;
         assert_eq!(uris, UriContainer {
             asterisk: Asterisk,
-            origin: Origin::new("/foo/bar", Some("baz")),
-            authority: Authority::const_new(Some("user:pass"), "rocket.rs", Some(80)),
-            absolute: Absolute::const_new(
-                "https",
-                Some(Authority::const_new(None, "rocket.rs", None)),
-                "/foo/bar",
-                None),
-            reference: Reference::const_new(
-                Some("https"),
-                Some(Authority::const_new(None, "rocket.rs", Some(8000))),
-                "/index.html",
-                None, None),
+            origin: uri!("/foo/bar?baz"),
+            authority: uri!("user:pass@rocket.rs:80"),
+            absolute: uri!("https://rocket.rs/foo/bar"),
+            reference: uri!("https://rocket.rs:8000/index.html").into(),
         });
         Ok(())
     });

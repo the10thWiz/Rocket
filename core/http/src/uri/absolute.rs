@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::convert::TryFrom;
 
-use crate::ext::IntoOwned;
+use crate::{ext::IntoOwned, parse::IndexedBytes};
 use crate::parse::{Extent, IndexedStr};
 use crate::uri::{Authority, Path, Query, Data, Error, as_utf8_unchecked, fmt};
 
@@ -82,7 +82,9 @@ use crate::uri::{Authority, Path, Query, Data, Error, as_utf8_unchecked, fmt};
 pub struct Absolute<'a> {
     pub(crate) source: Option<Cow<'a, str>>,
     pub(crate) scheme: IndexedStr<'a>,
-    pub(crate) authority: Option<Authority<'a>>,
+    pub(crate) user_info: Option<IndexedStr<'a>>,
+    pub(crate) host: Option<IndexedStr<'a>>,
+    pub(crate) port: Option<u16>,
     pub(crate) path: Data<'a, fmt::Path>,
     pub(crate) query: Option<Data<'a, fmt::Query>>,
 }
@@ -94,7 +96,9 @@ impl IntoOwned for Absolute<'_> {
         Absolute {
             source: self.source.into_owned(),
             scheme: self.scheme.into_owned(),
-            authority: self.authority.into_owned(),
+            user_info: self.user_info.into_owned(),
+            host: self.host.into_owned(),
+            port: self.port,
             path: self.path.into_owned(),
             query: self.query.into_owned(),
         }
@@ -114,14 +118,14 @@ impl<'a> Absolute<'a> {
     /// // Parse a valid authority URI.
     /// let uri = Absolute::parse("https://rocket.rs").expect("valid URI");
     /// assert_eq!(uri.scheme(), "https");
-    /// assert_eq!(uri.authority().unwrap().host(), "rocket.rs");
+    /// assert_eq!(uri.host().unwrap(), "rocket.rs");
     /// assert_eq!(uri.path(), "");
     /// assert!(uri.query().is_none());
     ///
     /// // Prefer to use `uri!()` when the input is statically known:
     /// let uri = uri!("https://rocket.rs");
     /// assert_eq!(uri.scheme(), "https");
-    /// assert_eq!(uri.authority().unwrap().host(), "rocket.rs");
+    /// assert_eq!(uri.host().unwrap(), "rocket.rs");
     /// assert_eq!(uri.path(), "");
     /// assert!(uri.query().is_none());
     /// ```
@@ -140,7 +144,10 @@ impl<'a> Absolute<'a> {
 
         let absolute = Absolute {
             scheme: absolute.scheme.into_owned(),
-            authority: absolute.authority.into_owned(),
+            //authority: absolute.authority.into_owned(),
+            user_info: absolute.user_info.into_owned(),
+            host: absolute.host.into_owned(),
+            port: absolute.port,
             query: absolute.query.into_owned(),
             path: absolute.path.into_owned(),
             source: Some(Cow::Owned(string)),
@@ -163,24 +170,62 @@ impl<'a> Absolute<'a> {
         self.scheme.from_cow_source(&self.source)
     }
 
-    /// Returns the authority part of the absolute URI, if there is one.
+    /// Returns the user info part of the absolute URI, if there is one.
+    ///
+    /// # Example
+    /// ```rust
+    /// # #[macro_use] extern crate rocket;
+    /// let uri = uri!("username:password@host");
+    /// assert_eq!(uri.user_info(), Some("username:password"));
+    /// ```
+    pub fn user_info(&self) -> Option<&str> {
+        self.user_info.as_ref().map(|u| u.from_cow_source(&self.source))
+    }
+
+    /// Returns the host part of the absolute URI.
+    ///
+    ///
+    /// If the host was provided in brackets (such as for IPv6 addresses), the
+    /// brackets will not be part of the returned string.
+    ///
+    /// # Example
+    /// ```rust
+    /// # #[macro_use] extern crate rocket;
+    ///
+    /// let uri = uri!("domain.com:123");
+    /// assert_eq!(uri.host(), "domain.com");
+    ///
+    /// let uri = uri!("username:password@host:123");
+    /// assert_eq!(uri.host(), "host");
+    ///
+    /// let uri = uri!("username:password@[1::2]:123");
+    /// assert_eq!(uri.host(), "[1::2]");
+    /// ```
+    #[inline(always)]
+    pub fn host(&self) -> Option<&str> {
+        self.host.as_ref().map(|host| host.from_cow_source(&self.source))
+    }
+
+    /// Returns the port part of the absolute URI, if there is one.
     ///
     /// # Example
     ///
     /// ```rust
     /// # #[macro_use] extern crate rocket;
-    /// let uri = uri!("https://rocket.rs:80");
-    /// assert_eq!(uri.scheme(), "https");
-    /// let authority = uri.authority().unwrap();
-    /// assert_eq!(authority.host(), "rocket.rs");
-    /// assert_eq!(authority.port(), Some(80));
+    /// // With a port.
+    /// let uri = uri!("username:password@host:123");
+    /// assert_eq!(uri.port(), Some(123));
     ///
-    /// let uri = uri!("file:/web/home");
-    /// assert_eq!(uri.authority(), None);
+    /// let uri = uri!("domain.com:8181");
+    /// assert_eq!(uri.port(), Some(8181));
+    ///
+    /// // Without a port.
+    /// let uri = uri!("username:password@host");
+    /// assert_eq!(uri.port(), None);
     /// ```
     #[inline(always)]
-    pub fn authority(&self) -> Option<&Authority<'a>> {
-        self.authority.as_ref()
+    pub fn port(&self) -> Option<u16> {
+        self.port
     }
 
     /// Returns the path part. May be empty.
@@ -260,7 +305,7 @@ impl<'a> Absolute<'a> {
     /// ```
     pub fn is_normalized(&self) -> bool {
         let normalized_query = self.query().map_or(true, |q| q.is_normalized());
-        if self.authority().is_some() && !self.path().is_empty() {
+        if self.host().is_some() && !self.path().is_empty() {
             self.path().is_normalized(true)
                 && self.path() != "/"
                 && normalized_query
@@ -293,7 +338,7 @@ impl<'a> Absolute<'a> {
     /// assert!(uri.is_normalized());
     /// ```
     pub fn normalize(&mut self) {
-        if self.authority().is_some() && !self.path().is_empty() {
+        if self.host().is_some() && !self.path().is_empty() {
             if self.path() == "/" {
                 self.set_path("");
             } else if !self.path().is_normalized(true) {
@@ -334,50 +379,7 @@ impl<'a> Absolute<'a> {
         self
     }
 
-    /// Sets the authority in `self` to `authority`.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # #[macro_use] extern crate rocket;
-    /// let mut uri = uri!("https://rocket.rs:80");
-    /// let authority = uri.authority().unwrap();
-    /// assert_eq!(authority.host(), "rocket.rs");
-    /// assert_eq!(authority.port(), Some(80));
-    ///
-    /// let new_authority = uri!("rocket.rs:443");
-    /// uri.set_authority(new_authority);
-    /// let authority = uri.authority().unwrap();
-    /// assert_eq!(authority.host(), "rocket.rs");
-    /// assert_eq!(authority.port(), Some(443));
-    /// ```
-    #[inline(always)]
-    pub fn set_authority(&mut self, authority: Authority<'a>) {
-        self.authority = Some(authority);
-    }
-
-    /// Sets the authority in `self` to `authority` and returns `self`.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # #[macro_use] extern crate rocket;
-    /// let uri = uri!("https://rocket.rs:80");
-    /// let authority = uri.authority().unwrap();
-    /// assert_eq!(authority.host(), "rocket.rs");
-    /// assert_eq!(authority.port(), Some(80));
-    ///
-    /// let new_authority = uri!("rocket.rs");
-    /// let uri = uri.with_authority(new_authority);
-    /// let authority = uri.authority().unwrap();
-    /// assert_eq!(authority.host(), "rocket.rs");
-    /// assert_eq!(authority.port(), None);
-    /// ```
-    #[inline(always)]
-    pub fn with_authority(mut self, authority: Authority<'a>) -> Self {
-        self.set_authority(authority);
-        self
-    }
+    // TODO: add methods
 }
 
 /// PRIVATE API.
@@ -396,11 +398,16 @@ impl<'a> Absolute<'a> {
         query: Option<Extent<&'a [u8]>>,
     ) -> Absolute<'a> {
         Absolute {
-            source: Some(as_utf8_unchecked(source)),
             scheme: scheme.into(),
-            authority,
+            user_info: authority.as_ref().map(|a|
+                a.user_info().map(|u| IndexedBytes::unchecked_from(u.as_bytes(), &source))
+            ).flatten().map(|u| u.coerce()),
+            host: authority.as_ref().map(|a| IndexedBytes::unchecked_from(a.host().as_bytes(), &source))
+                .map(|h| h.coerce()),
+            port: authority.as_ref().map(|a| a.port()).flatten(),
             path: Data::raw(path),
-            query: query.map(Data::raw)
+            query: query.map(Data::raw),
+            source: Some(as_utf8_unchecked(source)),
         }
     }
 
@@ -408,26 +415,45 @@ impl<'a> Absolute<'a> {
     #[cfg(test)]
     pub fn new(
         scheme: &'a str,
-        authority: impl Into<Option<Authority<'a>>>,
+        user_info: impl Into<Option<&'a str>>,
+        host: impl Into<Option<&'a str>>,
+        port: impl Into<Option<u16>>,
         path: &'a str,
         query: impl Into<Option<&'a str>>,
     ) -> Absolute<'a> {
         assert!(!scheme.is_empty());
-        Absolute::const_new(scheme, authority.into(), path, query.into())
+        Absolute::const_new(
+            scheme,
+            user_info.into(),
+            host.into(),
+            port.into(),
+            path,
+            query.into())
     }
 
     /// PRIVATE. Used by codegen.
     #[doc(hidden)]
     pub const fn const_new(
         scheme: &'a str,
-        authority: Option<Authority<'a>>,
+        user_info: Option<&'a str>,
+        host: Option<&'a str>,
+        port: Option<u16>,
         path: &'a str,
         query: Option<&'a str>,
     ) -> Absolute<'a> {
+        //debug_assert!(host.is_some() || (user_info.is_none() && port.is_some()));
         Absolute {
             source: None,
             scheme: IndexedStr::Concrete(Cow::Borrowed(scheme)),
-            authority,
+            user_info: match user_info {
+                Some(info) => Some(IndexedStr::Concrete(Cow::Borrowed(info))),
+                None => None
+            },
+            host: match host {
+                Some(host) => Some(IndexedStr::Concrete(Cow::Borrowed(host))),
+                None => None,
+            },
+            port,
             path: Data {
                 value: IndexedStr::Concrete(Cow::Borrowed(path)),
                 decoded_segments: state::Storage::new(),
@@ -474,7 +500,9 @@ impl<'a> TryFrom<&'a str> for Absolute<'a> {
 impl<'a, 'b> PartialEq<Absolute<'b>> for Absolute<'a> {
     fn eq(&self, other: &Absolute<'b>) -> bool {
         self.scheme() == other.scheme()
-            && self.authority() == other.authority()
+            && self.user_info() == other.user_info()
+            && self.host() == other.host()
+            && self.port() == other.port()
             && self.path() == other.path()
             && self.query() == other.query()
     }
@@ -483,8 +511,17 @@ impl<'a, 'b> PartialEq<Absolute<'b>> for Absolute<'a> {
 impl std::fmt::Display for Absolute<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:", self.scheme())?;
-        if let Some(authority) = self.authority() {
-            write!(f, "//{}", authority)?;
+        
+        if let Some(host) = self.host() {
+            write!(f, "//")?;
+            if let Some(user_info) = self.user_info() {
+                write!(f, "{}@", user_info)?;
+            }
+
+            write!(f, "{}", host)?;
+            if let Some(port) = self.port {
+                write!(f, ":{}", port)?;
+            }
         }
 
         write!(f, "{}", self.path())?;

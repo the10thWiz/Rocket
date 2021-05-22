@@ -37,9 +37,9 @@ use crate::uri::{as_utf8_unchecked, error::Error};
 #[derive(Debug, Clone)]
 pub struct Authority<'a> {
     pub(crate) source: Option<Cow<'a, str>>,
-    user_info: Option<IndexedStr<'a>>,
-    host: IndexedStr<'a>,
-    port: Option<u16>,
+    pub(crate) user_info: Option<IndexedStr<'a>>,
+    pub(crate) host: IndexedStr<'a>,
+    pub(crate) port: Option<u16>,
 }
 
 impl IntoOwned for Authority<'_> {
@@ -50,7 +50,7 @@ impl IntoOwned for Authority<'_> {
             source: self.source.into_owned(),
             user_info: self.user_info.into_owned(),
             host: self.host.into_owned(),
-            port: self.port
+            port: self.port,
         }
     }
 }

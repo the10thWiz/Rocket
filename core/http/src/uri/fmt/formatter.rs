@@ -460,7 +460,7 @@ impl<'a> ValidRoutePrefix for Absolute<'a> {
         let mut prefix = self.into_normalized();
         prefix.clear_query();
 
-        if prefix.authority().is_some() {
+        if prefix.host().is_some() {
             // The prefix is normalized. Appending a `/` is a no-op.
             if path == "/" {
                 prefix.set_query(query);

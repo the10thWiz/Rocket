@@ -513,7 +513,7 @@ impl UriExpr {
 
         let lit = input.parse::<StringLit>()?;
         let uri = Reference::parse(&lit).or_else(|e| uri_err(&lit, e))?;
-        if uri.scheme().is_some() || uri.authority().is_some() || !uri.path().is_empty() {
+        if uri.scheme().is_some() || uri.host().is_some() || !uri.path().is_empty() {
             return err(lit.span(), "URI suffix must contain only query and/or fragment");
         }
 
@@ -529,7 +529,7 @@ impl UriExpr {
         let uri = match uri.fragment() {
             None => {
                 let query = uri.query().map(|q| q.as_str());
-                Uri::Absolute(Absolute::const_new("", None, "", query))
+                Uri::Absolute(Absolute::const_new("", None, None, None, "", query))
             }
             Some(_) => Uri::Reference(uri)
         };
