@@ -39,7 +39,8 @@ use crate::uri::error::{Error, TryFromUriError};
 /// For convience, `Uri` implements `Serialize`, although it does not implement
 /// `Deserialize`. If you need to deserialize a Uri, use one of the variants,
 /// since they provide much stricter parsing requirements. See [`Uri::parse`]
-/// for why deserialization is not implemented for `Uri` directly.
+/// for why deserialization is not implemented for `Uri` directly. If you need
+/// a generic Uri, [`Reference`] is likely a better fit.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Uri<'a> {
     /// An asterisk: exactly `*`.
