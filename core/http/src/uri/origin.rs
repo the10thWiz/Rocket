@@ -520,8 +520,8 @@ mod serde {
         }
     }
 
-    impl<'a> Deserialize<'a> for Origin<'a> {
-        fn deserialize<D: Deserializer<'a>>(deserializer: D) -> Result<Self, D::Error> {
+    impl<'a, 'de: 'a> Deserialize<'de> for Origin<'a> {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             deserializer.deserialize_str(OriginVistor)
         }
     }

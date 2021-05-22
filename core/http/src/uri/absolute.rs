@@ -403,6 +403,7 @@ impl<'a> Absolute<'a> {
     }
 
     /// PRIVATE. Used by codegen.
+    #[doc(hidden)]
     pub const fn const_new(
         scheme: &'a str,
         authority: Option<Authority<'a>>,
@@ -515,8 +516,8 @@ mod serde {
         }
     }
 
-    impl<'a> Deserialize<'a> for Absolute<'a> {
-        fn deserialize<D: Deserializer<'a>>(deserializer: D) -> Result<Self, D::Error> {
+    impl<'a, 'de: 'a> Deserialize<'de> for Absolute<'a> {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             deserializer.deserialize_str(AbsoluteVistor)
         }
     }

@@ -42,8 +42,8 @@ mod serde {
         }
     }
 
-    impl<'a> Deserialize<'a> for Asterisk {
-        fn deserialize<D: Deserializer<'a>>(deserializer: D) -> Result<Self, D::Error> {
+    impl<'de> Deserialize<'de> for Asterisk {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             deserializer.deserialize_str(AsteriskVistor)
         }
     }
