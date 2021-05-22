@@ -1,4 +1,5 @@
-use rocket::Config;
+use figment::{Figment, providers::Serialized};
+use rocket::{Config, uri};
 use rocket_http::uri::{Absolute, Asterisk, Authority, Origin, Reference};
 use serde::{Serialize, Deserialize};
 use pretty_assertions::assert_eq;
@@ -17,7 +18,7 @@ struct UriContainer<'a> {
 }
 
 #[test]
-fn uri_deserialize() {
+fn uri_serde() {
     figment::Jail::expect_with(|jail| {
         jail.create_file("Rocket.toml", r#"
             [default]
@@ -44,6 +45,27 @@ fn uri_deserialize() {
                 "/index.html",
                 None, None),
         });
+
         Ok(())
+    });
+}
+
+#[test]
+fn uri_serde_round_trip() {
+    let tmp = Figment::from(Serialized::default("default", UriContainer {
+        asterisk: Asterisk,
+        origin: uri!("/foo/bar?baz"),
+        authority: uri!("user:pass@rocket.rs:80"),
+        absolute: uri!("https://rocket.rs/foo/bar"),
+        reference: uri!("https://rocket.rs:8000/index.html").into(),
+    }));
+
+    let uris: UriContainer<'_> = tmp.extract().expect("Parsing failed");
+    assert_eq!(uris, UriContainer {
+        asterisk: Asterisk,
+        origin: uri!("/foo/bar?baz"),
+        authority: uri!("user:pass@rocket.rs:80"),
+        absolute: uri!("https://rocket.rs/foo/bar"),
+        reference: uri!("https://rocket.rs:8000/index.html").into(),
     });
 }
