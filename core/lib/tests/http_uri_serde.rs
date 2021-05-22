@@ -44,7 +44,7 @@ fn uri_serde() {
 
 #[test]
 fn uri_serde_round_trip() {
-    let tmp = Figment::from(Serialized::default("default", UriContainer {
+    let tmp = Figment::from(Serialized::default("uris", UriContainer {
         asterisk: Asterisk,
         origin: uri!("/foo/bar?baz"),
         authority: uri!("user:pass@rocket.rs:80"),
@@ -52,7 +52,7 @@ fn uri_serde_round_trip() {
         reference: uri!("https://rocket.rs:8000/index.html").into(),
     }));
 
-    let uris: UriContainer<'_> = tmp.extract().expect("Parsing failed");
+    let uris: UriContainer<'_> = tmp.extract_inner("uris").expect("Parsing failed");
     assert_eq!(uris, UriContainer {
         asterisk: Asterisk,
         origin: uri!("/foo/bar?baz"),
