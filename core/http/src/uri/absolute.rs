@@ -134,17 +134,31 @@ impl<'a> Absolute<'a> {
     }
 
     /// Parses the string `string` into an `Absolute`. Parsing will never
-    /// allocate. This method should be used instead of
-    /// [`Absolute::parse()`](crate::uri::Absolute::parse()) when the source URI is
-    /// already a `String`. Returns an `Error` if `string` is not a valid absolute
-    /// URI.
+    /// May allocate on error.
+    ///
+    /// This method should be used instead of [`Absolute::parse()`] when
+    /// the source URI is already a `String`. Returns an `Error` if `string` is
+    /// not a valid absolute URI.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # extern crate rocket;
+    /// use rocket::http::uri::Absolute;
+    ///
+    /// let source = format!("https://rocket.rs/foo/{}/three", 2);
+    /// let uri = Absolute::parse_owned(source).expect("valid URI");
+    /// assert_eq!(uri.scheme(), "https");
+    /// assert_eq!(uri.host(), "rocket.rs");
+    /// assert_eq!(uri.path(), "/foo/2/three");
+    /// assert!(uri.query().is_none());
+    /// ```
     pub fn parse_owned(string: String) -> Result<Absolute<'static>, Error<'static>> {
         let absolute = Absolute::parse(&string).map_err(|e| e.into_owned())?;
         debug_assert!(absolute.source.is_some(), "Origin source parsed w/o source");
 
         let absolute = Absolute {
             scheme: absolute.scheme.into_owned(),
-            //authority: absolute.authority.into_owned(),
             user_info: absolute.user_info.into_owned(),
             host: absolute.host.into_owned(),
             port: absolute.port,
@@ -551,7 +565,7 @@ mod serde {
     impl<'a> Visitor<'a> for AbsoluteVistor {
         type Value = Absolute<'a>;
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(formatter, "Expecting a valid URI string")
+            write!(formatter, "absolute Uri")
         }
 
         fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {

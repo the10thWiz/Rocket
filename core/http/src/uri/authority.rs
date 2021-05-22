@@ -124,10 +124,23 @@ impl<'a> Authority<'a> {
     }
 
     /// Parses the string `string` into an `Authority`. Parsing will never
-    /// allocate. This method should be used instead of
-    /// [`Authority::parse()`](crate::uri::Authority::parse()) when the source URI is
-    /// already a `String`. Returns an `Error` if `string` is not a valid authority
-    /// URI.
+    /// May allocate on error.
+    ///
+    /// This method should be used instead of [`Authority::parse()`] when
+    /// the source URI is already a `String`. Returns an `Error` if `string` is
+    /// not a valid authority URI.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # extern crate rocket;
+    /// use rocket::http::uri::Authority;
+    ///
+    /// let source = format!("/foo/{}/three", 2);
+    /// let uri = Authority::parse_owned(source).expect("valid URI");
+    /// assert_eq!(uri.path(), "/foo/2/three");
+    /// assert!(uri.query().is_none());
+    /// ```
     pub fn parse_owned(string: String) -> Result<Authority<'static>, Error<'static>> {
         let authority = Authority::parse(&string).map_err(|e| e.into_owned())?;
         debug_assert!(authority.source.is_some(), "Origin source parsed w/o source");
