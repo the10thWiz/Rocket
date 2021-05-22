@@ -35,12 +35,9 @@ use crate::uri::error::{Error, TryFromUriError};
 /// [RFC 7230]: https://tools.ietf.org/html/rfc7230
 ///
 /// ## Serde
-///
-/// For convience, `Uri` implements `Serialize`, although it does not implement
-/// `Deserialize`. If you need to deserialize a Uri, use one of the variants,
-/// since they provide much stricter parsing requirements. See [`Uri::parse`]
-/// for why deserialization is not implemented for `Uri` directly. If you need
-/// a generic Uri, [`Reference`] is likely a better fit.
+/// Parsing a string into a `Uri` is ambgious, so `Uri` does not implement `Serialize`
+/// or `Deserialize`, although all of the variants do. See [`Uri::parse_any`] for more
+/// information
 #[derive(Debug, PartialEq, Clone)]
 pub enum Uri<'a> {
     /// An asterisk: exactly `*`.
@@ -351,15 +348,3 @@ impl_uri_from!(Authority<'a>);
 impl_uri_from!(Absolute<'a>);
 impl_uri_from!(Reference<'a>);
 impl_uri_from!(Asterisk);
-
-#[cfg(feature = "serde")]
-mod serde {
-    use super::Uri;
-    use _serde::ser::{Serialize, Serializer};
-
-    impl<'a> Serialize for Uri<'a> {
-        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serializer.serialize_str(&self.to_string())
-        }
-    }
-}
