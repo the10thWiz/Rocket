@@ -504,7 +504,7 @@ mod serde {
     impl<'a> Visitor<'a> for OriginVistor {
         type Value = Origin<'a>;
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(formatter, "Expecting a valid URI string")
+            write!(formatter, "Expecting a valid Origin URI")
         }
 
         fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
