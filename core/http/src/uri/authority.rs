@@ -259,7 +259,7 @@ mod serde {
     impl<'a> Visitor<'a> for AuthorityVistor {
         type Value = Authority<'a>;
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(formatter, "Expecting a valid Authority URI")
+            write!(formatter, "authority Uri")
         }
 
         fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
