@@ -20,6 +20,20 @@ use crate::uri::{as_utf8_unchecked, error::Error};
 /// ```
 ///
 /// Only the host part of the URI is required.
+///
+/// ## Serde
+///
+/// For convience, `Authority` implements `Serialize` and `Deserialize`.
+/// Because `Authority` has a lifetime parameter, serde requires a borrow
+/// attribute for the derive macro to work.
+///
+/// ```ignore
+/// #[derive(Deserialize)]
+/// struct Uris<'a> {
+///     #[serde(borrow)]
+///     authority: Authority<'a>,
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Authority<'a> {
     pub(crate) source: Option<Cow<'a, str>>,

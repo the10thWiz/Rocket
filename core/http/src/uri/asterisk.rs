@@ -1,4 +1,8 @@
 /// The literal `*` URI.
+///
+/// ## Serde
+///
+/// For convience, `Asterisk` implements `Serialize` and `Deserialize`.
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
 pub struct Asterisk;
 

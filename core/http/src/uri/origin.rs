@@ -85,6 +85,20 @@ use crate::{RawStr, RawStrBuf};
 /// #     assert_eq!(abnormal.into_normalized(), expected);
 /// # }
 /// ```
+///
+/// ## Serde
+///
+/// For convience, `Origin` implements `Serialize` and `Deserialize`.
+/// Because `Origin` has a lifetime parameter, serde requires a borrow
+/// attribute for the derive macro to work.
+///
+/// ```ignore
+/// #[derive(Deserialize)]
+/// struct Uris<'a> {
+///     #[serde(borrow)]
+///     origin: Origin<'a>,
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Origin<'a> {
     pub(crate) source: Option<Cow<'a, str>>,

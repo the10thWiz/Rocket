@@ -33,6 +33,13 @@ use crate::uri::error::{Error, TryFromUriError};
 /// methods of the internal structure.
 ///
 /// [RFC 7230]: https://tools.ietf.org/html/rfc7230
+///
+/// ## Serde
+///
+/// For convience, `Uri` implements `Serialize`, although it does not implement
+/// `Deserialize`. If you need to deserialize a Uri, use one of the variants,
+/// since they provide much stricter parsing requirements. See [`Uri::parse`]
+/// for why deserialization is not implemented for `Uri` directly.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Uri<'a> {
     /// An asterisk: exactly `*`.

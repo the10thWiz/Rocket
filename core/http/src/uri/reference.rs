@@ -45,6 +45,20 @@ use crate::parse::{Extent, IndexedStr};
 /// Note that `uri!()` macro _always_ prefers the more specific URI variant to
 /// `Reference` when possible, as is demonstrated above for `absolute` and
 /// `origin`.
+///
+/// ## Serde
+///
+/// For convience, `Reference` implements `Serialize` and `Deserialize`.
+/// Because `Reference` has a lifetime parameter, serde requires a borrow
+/// attribute for the derive macro to work.
+///
+/// ```ignore
+/// #[derive(Deserialize)]
+/// struct Uris<'a> {
+///     #[serde(borrow)]
+///     reference: Reference<'a>,
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Reference<'a> {
     source: Option<Cow<'a, str>>,

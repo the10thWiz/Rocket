@@ -64,6 +64,20 @@ use crate::uri::{Authority, Path, Query, Data, Error, as_utf8_unchecked, fmt};
 /// #   assert!(!Absolute::parse(uri).unwrap().is_normalized());
 /// # }
 /// ```
+///
+/// ## Serde
+///
+/// For convience, `Absolute` implements `Serialize` and `Deserialize`.
+/// Because `Absolute` has a lifetime parameter, serde requires a borrow
+/// attribute for the derive macro to work.
+///
+/// ```ignore
+/// #[derive(Deserialize)]
+/// struct Uris<'a> {
+///     #[serde(borrow)]
+///     absolute: Absolute<'a>,
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Absolute<'a> {
     pub(crate) source: Option<Cow<'a, str>>,
