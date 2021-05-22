@@ -1,8 +1,7 @@
-//use figment::{Figment, Profile};
 use rocket::Config;
 use rocket_http::uri::{Absolute, Asterisk, Authority, Origin, Reference};
 use serde::{Serialize, Deserialize};
-//use pretty_assertions::assert_eq;
+use pretty_assertions::assert_eq;
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 struct UriContainer<'a> {
