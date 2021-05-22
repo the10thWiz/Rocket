@@ -86,8 +86,9 @@ impl<'a> Reference<'a> {
             user_info: authority.as_ref().map(|a|
                 a.user_info().map(|u| IndexedBytes::unchecked_from(u.as_bytes(), &source))
             ).flatten().map(|b| b.coerce()),
-            host: authority.as_ref().map(|a| IndexedBytes::unchecked_from(a.host().as_bytes(), &source))
-                .map(|h| h.coerce()),
+            host: authority.as_ref().map(|a|
+                IndexedBytes::unchecked_from(a.host().as_bytes(), &source)
+            ).map(|h| h.coerce()),
             port: authority.as_ref().map(|a| a.port()).flatten(),
             path: Data::raw(path),
             query: query.map(Data::raw),

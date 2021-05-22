@@ -416,8 +416,9 @@ impl<'a> Absolute<'a> {
             user_info: authority.as_ref().map(|a|
                 a.user_info().map(|u| IndexedBytes::unchecked_from(u.as_bytes(), &source))
             ).flatten().map(|u| u.coerce()),
-            host: authority.as_ref().map(|a| IndexedBytes::unchecked_from(a.host().as_bytes(), &source))
-                .map(|h| h.coerce()),
+            host: authority.as_ref().map(|a|
+                IndexedBytes::unchecked_from(a.host().as_bytes(), &source)
+            ).map(|h| h.coerce()),
             port: authority.as_ref().map(|a| a.port()).flatten(),
             path: Data::raw(path),
             query: query.map(Data::raw),
@@ -525,7 +526,7 @@ impl<'a, 'b> PartialEq<Absolute<'b>> for Absolute<'a> {
 impl std::fmt::Display for Absolute<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:", self.scheme())?;
-        
+
         if let Some(host) = self.host() {
             write!(f, "//")?;
             if let Some(user_info) = self.user_info() {
