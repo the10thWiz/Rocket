@@ -115,30 +115,13 @@ impl<'a> Authority<'a> {
     /// already a `String`. Returns an `Error` if `string` is not a valid authority
     /// URI.
     pub fn parse_owned(string: String) -> Result<Authority<'static>, Error<'static>> {
-        // We create a copy of a pointer to `string` to escape the borrow
-        // checker. This is so that we can "move out of the borrow" later.
-        //
-        // For this to be correct and safe, we need to ensure that:
-        //
-        //  1. No `&mut` references to `string` are created after this line.
-        //  2. `string` isn't dropped while `copy_of_str` is live.
-        //
-        // These two facts can be easily verified. An `&mut` can't be created
-        // because `string` isn't `mut`. Then, `string` is clearly not dropped
-        // since it's passed in to `source`.
-        // let copy_of_str = unsafe { &*(string.as_str() as *const str) };
-        let copy_of_str = unsafe { &*(string.as_str() as *const str) };
-        let authority = Authority::parse(copy_of_str)?;
+        let authority = Authority::parse(&string).map_err(|e| e.into_owned())?;
         debug_assert!(authority.source.is_some(), "Origin source parsed w/o source");
 
         let authority = Authority {
             host: authority.host.into_owned(),
             user_info: authority.user_info.into_owned(),
             port: authority.port,
-            // At this point, it's impossible for anything to be borrowing
-            // `string` except for `source`, even though Rust doesn't know it.
-            // Because we're replacing `source` here, there can't possibly be a
-            // borrow remaining, it's safe to "move out of the borrow".
             source: Some(Cow::Owned(string)),
         };
 
@@ -262,7 +245,7 @@ mod serde {
     impl<'a> Visitor<'a> for AuthorityVistor {
         type Value = Authority<'a>;
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(formatter, "Expecting a valid URI string")
+            write!(formatter, "Expecting a valid Authority URI")
         }
 
         fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {

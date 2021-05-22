@@ -121,30 +121,14 @@ impl<'a> Absolute<'a> {
     /// already a `String`. Returns an `Error` if `string` is not a valid absolute
     /// URI.
     pub fn parse_owned(string: String) -> Result<Absolute<'static>, Error<'static>> {
-        // We create a copy of a pointer to `string` to escape the borrow
-        // checker. This is so that we can "move out of the borrow" later.
-        //
-        // For this to be correct and safe, we need to ensure that:
-        //
-        //  1. No `&mut` references to `string` are created after this line.
-        //  2. `string` isn't dropped while `copy_of_str` is live.
-        //
-        // These two facts can be easily verified. An `&mut` can't be created
-        // because `string` isn't `mut`. Then, `string` is clearly not dropped
-        // since it's passed in to `source`.
-        // let copy_of_str = unsafe { &*(string.as_str() as *const str) };
-        let copy_of_str = unsafe { &*(string.as_str() as *const str) };
-        let absolute = Absolute::parse(copy_of_str)?;
+        let absolute = Absolute::parse(&string).map_err(|e| e.into_owned())?;
         debug_assert!(absolute.source.is_some(), "Origin source parsed w/o source");
 
         let absolute = Absolute {
             scheme: absolute.scheme.into_owned(),
             authority: absolute.authority.into_owned(),
-            origin: absolute.origin.into_owned(),
-            // At this point, it's impossible for anything to be borrowing
-            // `string` except for `source`, even though Rust doesn't know it.
-            // Because we're replacing `source` here, there can't possibly be a
-            // borrow remaining, it's safe to "move out of the borrow".
+            query: absolute.query.into_owned(),
+            path: absolute.path.into_owned(),
             source: Some(Cow::Owned(string)),
         };
 
