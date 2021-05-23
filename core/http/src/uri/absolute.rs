@@ -132,6 +132,8 @@ impl<'a> Absolute<'a> {
     /// Parses the string `string` into an `Absolute`. Parsing will never
     /// May allocate on error.
     ///
+    /// TODO: avoid allocation
+    ///
     /// This method should be used instead of [`Absolute::parse()`] when
     /// the source URI is already a `String`. Returns an `Error` if `string` is
     /// not a valid absolute URI.

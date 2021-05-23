@@ -165,6 +165,8 @@ impl<'a> Reference<'a> {
     /// Parses the string `string` into a `Reference`. Never allocates on
     /// success. May allocate on error.
     ///
+    /// TODO: Avoid allocation
+    ///
     /// This method should be used instead of [`Reference::parse()`] when the
     /// source URI is already a `String`. Returns an `Error` if `string` is not
     /// a valid URI reference.
