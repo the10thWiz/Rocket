@@ -570,9 +570,12 @@ impl Permission {
 
         for allow in &allow {
             if let Allow::Origin(absolute) = allow {
-                let auth = absolute.authority();
-                if auth.is_none() || matches!(auth, Some(a) if a.host().is_empty()) {
-                    panic!("...")
+                if let Some(s) = absolute.host() {
+                    // If the absolute uri has user_info or a port, but no host,
+                    // it will be an empty string
+                    assert_ne!(s, "", "Allow requires Absolute Uri to have a host");
+                } else {
+                    panic!("Allow requires Absolute Uri to have a host");
                 }
             }
         }
@@ -706,11 +709,11 @@ impl Allow {
 
                 // This should never fail when rendering a header for `Shield`
                 // due to `panic` in `.allow()`.
-                if let Some(auth) = uri.authority() {
+                if let Some(host) = uri.host() {
                     use std::fmt::Write;
 
-                    let _ = write!(string, "://{}", auth.host());
-                    if let Some(port) = auth.port() {
+                    let _ = write!(string, "://{}", host);
+                    if let Some(port) = uri.port() {
                         let _ = write!(string, ":{}", port);
                     }
                 }
