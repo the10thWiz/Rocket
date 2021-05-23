@@ -123,7 +123,7 @@ impl<'a> Authority<'a> {
         crate::parse::uri::authority_from_str(string)
     }
 
-    /// Parses the string `string` into an `Authority`. Parsing will never
+    /// Parses the string `string` into an `Authority`. Parsing will never allocate.
     /// May allocate on error.
     ///
     /// This method should be used instead of [`Authority::parse()`] when
