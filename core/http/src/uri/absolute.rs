@@ -146,8 +146,7 @@ impl<'a> Absolute<'a> {
     ///
     /// let source = format!("https://rocket.rs/foo/{}/three", 2);
     /// let uri = Absolute::parse_owned(source).expect("valid URI");
-    /// assert_eq!(uri.scheme(), "https");
-    /// assert_eq!(uri.host(), "rocket.rs");
+    /// assert_eq!(uri.authority().unwrap().host(), "rocket.rs");
     /// assert_eq!(uri.path(), "/foo/2/three");
     /// assert!(uri.query().is_none());
     /// ```

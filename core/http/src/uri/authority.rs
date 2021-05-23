@@ -136,10 +136,11 @@ impl<'a> Authority<'a> {
     /// # extern crate rocket;
     /// use rocket::http::uri::Authority;
     ///
-    /// let source = format!("/foo/{}/three", 2);
+    /// let source = format!("rocket.rs:8000");
     /// let uri = Authority::parse_owned(source).expect("valid URI");
-    /// assert_eq!(uri.path(), "/foo/2/three");
-    /// assert!(uri.query().is_none());
+    /// assert!(uri.user_info().is_none());
+    /// assert_eq!(uri.host(), "rocket.rs");
+    /// assert_eq!(uri.port(), Some(8000));
     /// ```
     pub fn parse_owned(string: String) -> Result<Authority<'static>, Error<'static>> {
         let authority = Authority::parse(&string).map_err(|e| e.into_owned())?;
