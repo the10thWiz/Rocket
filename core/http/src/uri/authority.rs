@@ -25,7 +25,8 @@ use crate::uri::{as_utf8_unchecked, error::Error};
 ///
 /// For convience, `Authority` implements `Serialize` and `Deserialize`.
 /// Because `Authority` has a lifetime parameter, serde requires a borrow
-/// attribute for the derive macro to work.
+/// attribute for the derive macro to work. If you want to own the Uri,
+/// rather than borrow from the deserializer, use `'static`.
 ///
 /// ```ignore
 /// #[derive(Deserialize)]

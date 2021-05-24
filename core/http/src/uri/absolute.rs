@@ -69,7 +69,8 @@ use crate::uri::{Authority, Path, Query, Data, Error, as_utf8_unchecked, fmt};
 ///
 /// For convience, `Absolute` implements `Serialize` and `Deserialize`.
 /// Because `Absolute` has a lifetime parameter, serde requires a borrow
-/// attribute for the derive macro to work.
+/// attribute for the derive macro to work. If you want to own the Uri,
+/// rather than borrow from the deserializer, use `'static`.
 ///
 /// ```ignore
 /// #[derive(Deserialize)]

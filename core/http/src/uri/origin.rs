@@ -90,7 +90,8 @@ use crate::{RawStr, RawStrBuf};
 ///
 /// For convience, `Origin` implements `Serialize` and `Deserialize`.
 /// Because `Origin` has a lifetime parameter, serde requires a borrow
-/// attribute for the derive macro to work.
+/// attribute for the derive macro to work. If you want to own the Uri,
+/// rather than borrow from the deserializer, use `'static`.
 ///
 /// ```ignore
 /// #[derive(Deserialize)]
