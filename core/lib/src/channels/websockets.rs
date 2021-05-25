@@ -1,14 +1,14 @@
-use std::{convert::TryInto, pin::Pin, sync::Arc, task::Poll};
+use std::convert::TryInto;
 
-use bytes::{BufMut, Bytes, BytesMut};
-use futures::{Future, FutureExt, SinkExt, StreamExt, future::{pending, poll_fn}};
-use rocket_http::{Status, hyper::upgrade::{Parts, Upgraded}};
+use bytes::{Bytes, BytesMut};
+use futures::future::pending;
+use rocket_http::{Status, hyper::upgrade::Upgraded};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::{net::TcpStream, select, sync::{Mutex, mpsc, oneshot}};
-use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
+use tokio::{select, sync::{mpsc, oneshot}};
+use tokio_util::codec::{Decoder, Encoder, FramedParts};
 use ubyte::ByteUnit;
-use websocket_codec::{Error, Message, MessageCodec, Opcode};
-use websocket_codec::protocol::{DataLength, FrameHeader, FrameHeaderCodec};
+use websocket_codec::Opcode;
+use websocket_codec::protocol::{FrameHeader, FrameHeaderCodec};
 
 use crate::{Data, Request, request::{FromRequest, Outcome}};
 
@@ -23,7 +23,7 @@ use crate::{Data, Request, request::{FromRequest, Outcome}};
 /// into binary or text, but it is possible for a type to be either text or binary depending on the
 /// contents.
 ///
-/// TODO: After contrib-graduation, implement `IntoMessage` on `Json`
+// TODO: After contrib-graduation, implement `IntoMessage` on `Json`
 pub trait IntoMessage {
     fn is_binary(&self) -> bool;
     fn into_message(self) -> mpsc::Receiver<Bytes>;
@@ -33,7 +33,8 @@ impl IntoMessage for Data {
     fn is_binary(&self) -> bool {
         true
     }
-    fn into_message(mut self) -> mpsc::Receiver<Bytes> {
+
+    fn into_message(self) -> mpsc::Receiver<Bytes> {
         self.open(ByteUnit::Byte(1024)).into_message()
     }
 }
@@ -42,6 +43,7 @@ impl<T: AsyncRead + Send + Unpin + 'static> IntoMessage for T {
     fn is_binary(&self) -> bool {
         true
     }
+
     fn into_message(mut self) -> mpsc::Receiver<Bytes> {
         let (tx, rx) = mpsc::channel(1);
         tokio::spawn(async move {
@@ -51,7 +53,7 @@ impl<T: AsyncRead + Send + Unpin + 'static> IntoMessage for T {
                     break;
                 }
                 let tmp = buf.split();
-                let e = tx.send(tmp.into()).await;
+                let _e = tx.send(tmp.into()).await;
             }
         });
         rx
@@ -83,10 +85,9 @@ impl WebsocketMessage {
     }
 
     fn close(status: Option<Status>) -> Self {
-            //Message::close(Some((status.code, status.reason().unwrap_or("").to_string())))
         let (tx, data) = mpsc::channel(1);
         if let Some(status) = status {
-            let e = tx.try_send(status.to_string().into());
+            let _e = tx.try_send(status.to_string().into());
         }
         Self {
             header: FrameHeader::new(true, 0, Opcode::Close.into(), None, 0usize.into()),
@@ -97,7 +98,17 @@ impl WebsocketMessage {
     pub(crate) fn opcode(&self) -> Opcode {
         Opcode::try_from(self.header.opcode()).unwrap_or(Opcode::Text)
     }
-    pub(crate) fn into_bytes(self) -> mpsc::Receiver<Bytes> {
+}
+
+impl IntoMessage for WebsocketMessage {
+    fn is_binary(&self) -> bool {
+        match Opcode::try_from(self.header.opcode()) {
+            Some(Opcode::Text) => false,
+            _ => true,
+        }
+    }
+
+    fn into_message(self) -> mpsc::Receiver<Bytes> {
         self.data
     }
 }
@@ -107,12 +118,8 @@ impl WebsocketMessage {
 /// Messages sent with the `send` method are only sent to one client, the one who sent the message.
 /// This is also nessecary for subscribing clients to specific channels.
 pub struct WebsocketChannel {
-    //inner: Arc<Mutex<Option<InnerChannel>>>,
     inner: mpsc::Receiver<WebsocketMessage>,
-    //channels: Option<()>,
-    //reciever: Arc<Mutex<mpsc::UnboundedReceiver<Message>>>,
     sender: mpsc::Sender<WebsocketMessage>,
-    //upgrade_tx: oneshot::Sender<Upgraded>
 }
 
 /// Soft maximum buffer size
@@ -136,7 +143,7 @@ impl WebsocketChannel {
                              mut broker_rx: mpsc::Receiver<WebsocketMessage>,
                              message_tx: mpsc::Sender<WebsocketMessage>) {
         // Get upgrade object (basically just a boxed handle to the tcp or tls stream)
-        if let Ok(mut upgrade) = upgrade_rx.await {
+        if let Ok(upgrade) = upgrade_rx.await {
             // build codec
             let tmp = websocket_codec::protocol::FrameHeaderCodec;
             let mut raw_ws = tmp.framed(upgrade).into_parts();
@@ -158,7 +165,7 @@ impl WebsocketChannel {
                             let fin = header.fin();
                             // Don't send continue frames
                             if let Some(data) = data_rx.take() {
-                                message_tx.send(WebsocketMessage {
+                                let _e = message_tx.send(WebsocketMessage {
                                     header, data,
                                 }).await;
                             }else if header.opcode() == 0x01 {
@@ -179,7 +186,7 @@ impl WebsocketChannel {
                                         cur = (cur + 1) % 4;
                                     }
                                 }
-                                if let Err(b) = data_tx.send(message.into()).await {
+                                if let Err(_b) = data_tx.send(message.into()).await {
                                     // TODO handle error
                                 }
 
@@ -190,7 +197,7 @@ impl WebsocketChannel {
                         // should be a noop - but I don't know if it is. If reserve(0) is a noop,
                         // the check should be unnessecary
                                     raw_ws.read_buf.reserve(remaining.min(MAX_BUFFER_SIZE));
-                                    raw_ws.io.read_buf(&mut raw_ws.read_buf).await;
+                                    let _e = raw_ws.io.read_buf(&mut raw_ws.read_buf).await;
                                 }
                             }
                             // If this is the final frame, reset data_tx and data_rx
@@ -230,9 +237,9 @@ impl WebsocketChannel {
                                                                   message.header.opcode(),
                                                                   message.header.mask(),
                                                                   data.len().into());
-                                let e = raw_ws.codec.encode(int_header, &mut raw_ws.write_buf);
-                                let e = raw_ws.io.write_all_buf(&mut raw_ws.write_buf).await;
-                                let e = raw_ws.io.write_all(&data).await;
+                                let _e = raw_ws.codec.encode(int_header, &mut raw_ws.write_buf);
+                                let _e = raw_ws.io.write_all_buf(&mut raw_ws.write_buf).await;
+                                let _e = raw_ws.io.write_all(&data).await;
                                 outgoing_message = Some(WebsocketMessage {
                                     // Next message will be a continue frame
                                     header: FrameHeader::new(false,
@@ -253,8 +260,8 @@ impl WebsocketChannel {
                                                                   message.header.opcode(),
                                                                   message.header.mask(),
                                                                   0usize.into());
-                                let e = raw_ws.codec.encode(int_header, &mut raw_ws.write_buf);
-                                let e = raw_ws.io.write_all_buf(&mut raw_ws.write_buf).await;
+                                let _e = raw_ws.codec.encode(int_header, &mut raw_ws.write_buf);
+                                let _e = raw_ws.io.write_all_buf(&mut raw_ws.write_buf).await;
                             }
                         }
                     }
@@ -286,10 +293,6 @@ impl WebsocketChannel {
     pub(crate) fn subscribe_handle(&self) -> mpsc::Sender<WebsocketMessage> {
         self.sender.clone()
     }
-
-    //pub(crate) fn upgraded(&self, upgrade: Upgraded) {
-        //self.upgrade_tx.send(upgrade);
-    //}
 
     /// Get the next message from this client.
     ///

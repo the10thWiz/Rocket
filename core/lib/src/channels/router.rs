@@ -3,11 +3,11 @@
 use std::{io::Cursor, sync::Arc};
 
 use futures::{Future, FutureExt};
-use rocket_http::{Header, Status, hyper::upgrade::{Parts, Upgraded}, uri::Origin};
+use rocket_http::{Header, Status, hyper::upgrade::Upgraded, uri::Origin};
 use rocket_http::hyper::{self, header::{CONNECTION, UPGRADE}, upgrade::OnUpgrade};
-use tokio::{net::TcpStream, sync::oneshot};
-use tokio_util::codec::Decoder;
-use websocket_codec::{ClientRequest, Message, MessageCodec, Opcode};
+use tokio::sync::oneshot;
+
+use websocket_codec::{ClientRequest, Opcode};
 
 use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
 use crate::router::{Collide, Collisions};
@@ -204,7 +204,7 @@ impl WebsocketRouter {
         upgrade_tx: oneshot::Sender<Upgraded>,
     ) {
         if let Ok(upgrade) = on_upgrade.await {
-            let e = upgrade_tx.send(upgrade);
+            let _e = upgrade_tx.send(upgrade);
 
             let name = route.name.as_deref();
             let handler = route.websocket_handler.as_ref().unwrap();

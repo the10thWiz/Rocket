@@ -282,7 +282,7 @@ impl Stream for StreamKind {
         match self {
             StreamKind::Body(body) => body.size_hint(),
             StreamKind::Multipart(mp) => mp.size_hint(),
-            StreamKind::Websocket(r) => (0, None),
+            StreamKind::Websocket(_r) => (0, None),
         }
     }
 }

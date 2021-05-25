@@ -193,7 +193,7 @@ impl<T: Topic> Broker<T> {
         while let Some(wsm) = rx.recv().await {
             match wsm {
                 BrokerMessage::Register(room, tx) => subs.insert(tx, room),
-                BrokerMessage::Forward(room, message) => (),//subs.send(room, message),
+                BrokerMessage::Forward(_room, _message) => (),//subs.send(room, message),
                 BrokerMessage::Unregister(room, tx) => subs.remove_value(tx, room),
                 BrokerMessage::UnregisterAll(tx) => subs.remove_key(tx),
             }
