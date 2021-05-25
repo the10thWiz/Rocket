@@ -3,10 +3,12 @@ use std::{convert::TryInto, pin::Pin, sync::Arc, task::Poll};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Future, FutureExt, SinkExt, StreamExt, future::{pending, poll_fn}};
 use rocket_http::{Status, hyper::upgrade::{Parts, Upgraded}};
-use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWriteExt}, net::TcpStream, select, sync::{Mutex, mpsc, oneshot}};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::{net::TcpStream, select, sync::{Mutex, mpsc, oneshot}};
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use ubyte::ByteUnit;
-use websocket_codec::{Error, Message, MessageCodec, Opcode, protocol::{DataLength, FrameHeader, FrameHeaderCodec}};
+use websocket_codec::{Error, Message, MessageCodec, Opcode};
+use websocket_codec::protocol::{DataLength, FrameHeader, FrameHeaderCodec};
 
 use crate::{Data, Request, request::{FromRequest, Outcome}};
 
@@ -71,7 +73,11 @@ pub struct WebsocketMessage {
 impl WebsocketMessage {
     pub fn new(binary: bool, data: mpsc::Receiver<Bytes>) -> Self {
         Self {
-            header: FrameHeader::new(false, 0, if binary {Opcode::Binary.into()}else{Opcode::Text.into()}, None, 0usize.into()),
+            header: FrameHeader::new(false, 0, if binary {
+                    Opcode::Binary.into()
+                }else{
+                    Opcode::Text.into()
+                }, None, 0usize.into()),
             data,
         }
     }
@@ -126,7 +132,9 @@ impl WebsocketChannel {
         }, upgrade_tx)
     }
 
-    async fn message_handler(upgrade_rx: oneshot::Receiver<Upgraded>, mut broker_rx: mpsc::Receiver<WebsocketMessage>, message_tx: mpsc::Sender<WebsocketMessage>) {
+    async fn message_handler(upgrade_rx: oneshot::Receiver<Upgraded>,
+                             mut broker_rx: mpsc::Receiver<WebsocketMessage>,
+                             message_tx: mpsc::Sender<WebsocketMessage>) {
         // Get upgrade object (basically just a boxed handle to the tcp or tls stream)
         if let Ok(mut upgrade) = upgrade_rx.await {
             // build codec
@@ -144,8 +152,8 @@ impl WebsocketChannel {
                         println!("Raw message: {:?}", message);
                         if let Some(Ok(header)) = message {
                             let mask = header.mask().map(|u| u32::from(u).to_le_bytes());
-                            // TODO avoid unwrap -> I think this should always succeed, although it might fail
-                            // on 32 bit platforms or something.
+                            // TODO avoid unwrap -> I think this should always succeed,
+                            // although it might fail on 32 bit platforms or something.
                             let mut remaining = header.data_len().try_into().unwrap();
                             let fin = header.fin();
                             // Don't send continue frames
@@ -157,10 +165,12 @@ impl WebsocketChannel {
                                 // TODO: handle error
                             }
                             let mut cur: usize = 0;
-                            // Message contains ready bytes. For short messages, this might be the entire
-                            // message
+                            // Message contains ready bytes. For short messages,
+                            // this might be the entire message
                             while remaining > 0 {
-                                let mut message = raw_ws.read_buf.split_to(raw_ws.read_buf.len().min(remaining));
+                                let mut message = raw_ws.read_buf.split_to(
+                                    raw_ws.read_buf.len().min(remaining)
+                                );
                                 // TODO unmask message
                                 remaining-= message.len();
                                 if let Some(mask) = mask {
@@ -174,11 +184,11 @@ impl WebsocketChannel {
                                 }
 
                                 if remaining > 0 {
-                                    // The check shouldn't matter, but I think there are edge cases where
-                                    // attempting to read could be bad. In theory, I would expect the capacity
-                                    // of the read_buf to be zero, since we just took it all, and reserve(0)
-                                    // should be a noop - but I don't know if it is. If reserve(0) is a noop,
-                                    // the check should be unnessecary
+                        // The check shouldn't matter, but I think there are edge cases where
+                        // attempting to read could be bad. In theory, I would expect the capacity
+                        // of the read_buf to be zero, since we just took it all, and reserve(0)
+                        // should be a noop - but I don't know if it is. If reserve(0) is a noop,
+                        // the check should be unnessecary
                                     raw_ws.read_buf.reserve(remaining.min(MAX_BUFFER_SIZE));
                                     raw_ws.io.read_buf(&mut raw_ws.read_buf).await;
                                 }
@@ -193,23 +203,43 @@ impl WebsocketChannel {
                             break;
                         }
                     }
-                    message = async {if broker_ready {broker_rx.recv().await} else {pending().await}} => {
+                    message = async {
+                        if broker_ready {
+                            broker_rx.recv().await
+                        } else {
+                            pending().await
+                        }
+                    } => {
                         if let Some(message) = message {
                             outgoing_message = Some(message);
                         }else {
                             // TODO handle error
                         }
                     }
-                    data = async {if let Some(data_rx) = &mut outgoing_message {data_rx.data.recv().await} else {pending().await}} => {
+                    data = async {
+                        if let Some(data_rx) = &mut outgoing_message {
+                            data_rx.data.recv().await
+                        } else {
+                            pending().await
+                        }
+                    } => {
                         if let Some(data) = data {
                             if let Some(message) = outgoing_message.take() {
-                                let int_header = FrameHeader::new(false /*message.header.fin()*/, message.header.rsv(), message.header.opcode(), message.header.mask(), data.len().into());
+                                let int_header = FrameHeader::new(false,
+                                                                  message.header.rsv(),
+                                                                  message.header.opcode(),
+                                                                  message.header.mask(),
+                                                                  data.len().into());
                                 let e = raw_ws.codec.encode(int_header, &mut raw_ws.write_buf);
                                 let e = raw_ws.io.write_all_buf(&mut raw_ws.write_buf).await;
                                 let e = raw_ws.io.write_all(&data).await;
                                 outgoing_message = Some(WebsocketMessage {
                                     // Next message will be a continue frame
-                                    header: FrameHeader::new(false, message.header.rsv(), 0x0, message.header.mask(), 0usize.into()),
+                                    header: FrameHeader::new(false,
+                                                             message.header.rsv(),
+                                                             0x0,
+                                                             message.header.mask(),
+                                                             0usize.into()),
                                     data: message.data,
                                 });
                             }
@@ -218,7 +248,11 @@ impl WebsocketChannel {
                             // the Bytes in an enum to indicate if we are done? This should work
                             // though
                             if let Some(message) = outgoing_message.take() {
-                                let int_header = FrameHeader::new(true, message.header.rsv(), message.header.opcode(), message.header.mask(), 0usize.into());
+                                let int_header = FrameHeader::new(true,
+                                                                  message.header.rsv(),
+                                                                  message.header.opcode(),
+                                                                  message.header.mask(),
+                                                                  0usize.into());
                                 let e = raw_ws.codec.encode(int_header, &mut raw_ws.write_buf);
                                 let e = raw_ws.io.write_all_buf(&mut raw_ws.write_buf).await;
                             }
@@ -229,7 +263,9 @@ impl WebsocketChannel {
         }
     }
 
-    async fn read_header(raw_ws: &mut FramedParts<Upgraded, FrameHeaderCodec>) -> Option<Result<FrameHeader, websocket_codec::Error>> {
+    async fn read_header(raw_ws: &mut FramedParts<Upgraded, FrameHeaderCodec>)
+        -> Option<Result<FrameHeader, websocket_codec::Error>>
+    {
         loop {
             match raw_ws.codec.decode(&mut raw_ws.read_buf) {
                 Ok(Some(header)) => return Some(Ok(header)),

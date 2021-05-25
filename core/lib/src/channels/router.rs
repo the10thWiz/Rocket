@@ -160,7 +160,12 @@ impl WebsocketRouter {
         }
         if let Some((response, route)) = response {
             rocket.send_response(response, tx).await;
-            Self::websocket_task(rocket.clone(), &req, upgrade, route, websocket_channel, upgrade_tx).await;
+            Self::websocket_task(rocket.clone(),
+                &req,
+                upgrade,
+                route,
+                websocket_channel,
+                upgrade_tx).await;
         }else {
             let response = Self::handle_error(Status::NotFound);
             rocket.send_response(response, tx).await;
@@ -199,8 +204,6 @@ impl WebsocketRouter {
         upgrade_tx: oneshot::Sender<Upgraded>,
     ) {
         if let Ok(upgrade) = on_upgrade.await {
-            //let ws = request.local_cache(|| WebsocketChannel::empty());
-            //ws.add_inner(upgrade).await;
             let e = upgrade_tx.send(upgrade);
 
             let name = route.name.as_deref();
@@ -217,6 +220,9 @@ impl WebsocketRouter {
                     _ => (),
                 }
             }
+            // TODO implement Ping/Pong (not exposed to the user)
+            // TODO handle Close correctly (we should reply with Close,
+            // unless we initiated it)
         }
     }
 }
