@@ -1,3 +1,37 @@
+# Version 0.4.10 (May 21, 2021)
+
+## Core
+
+  * [[`3276b8`]] Removed used of `unsafe` in `Origin::parse_owned()`, fixing a
+    soundness issue.
+
+[`3276b8`]: https://github.com/SergioBenitez/Rocket/commit/3276b8
+
+# Version 0.4.9 (May 19, 2021)
+
+## Core
+
+  * [[`#1645`], [`f2a56f`]] Fixed `Try` `impl FromResidual<Result> for Outcome`.
+
+[`#1645`]: https://github.com/SergioBenitez/Rocket/issues/1645
+[`f2a56f`]: https://github.com/SergioBenitez/Rocket/commit/f2a56f
+
+# Version 0.4.8 (May 18, 2021)
+
+## Core
+
+  * [[`#1548`], [`93e88b0`]] Fixed an issue that prevented compilation under
+    Windows Subsystem for Linux v1.
+  * Updated `Outcome` `Try` implementation to v2 in latest nightly.
+  * Minimum required `rustc` is `1.54.0-nightly (2021-05-18)`.
+
+## Internal
+
+  * Updated `base64` dependency to `0.13`.
+
+[`#1548`]: https://github.com/SergioBenitez/Rocket/issues/1548
+[`93e88b0`]: https://github.com/SergioBenitez/Rocket/commit/93e88b0
+
 # Version 0.4.7 (Feb 09, 2021)
 
 ## Core
