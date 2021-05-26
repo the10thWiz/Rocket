@@ -1,4 +1,5 @@
 use std::convert::TryInto;
+use std::io;
 
 use bytes::{Bytes, BytesMut};
 use futures::future::pending;
@@ -125,6 +126,13 @@ pub struct WebsocketChannel {
 /// Soft maximum buffer size
 const MAX_BUFFER_SIZE: usize = 1024;
 
+struct RunningMessage {
+    current: BytesMut,
+    remaining: usize,
+    cur: usize,
+    mask: [u8; 4],
+}
+
 impl WebsocketChannel {
     pub(crate) fn new() -> (Self, oneshot::Sender<Upgraded>) {
         let (broker_tx, broker_rx) = mpsc::channel(50);
@@ -133,15 +141,27 @@ impl WebsocketChannel {
         tokio::spawn(Self::message_handler(upgrade_rx, broker_rx, message_tx));
         (Self {
                 inner: message_rx,
-                //channels: Some(()),
-                //reciever: Arc::new(Mutex::new(reciever)),
                 sender: broker_tx,
         }, upgrade_tx)
     }
 
-    async fn message_handler(upgrade_rx: oneshot::Receiver<Upgraded>,
-                             mut broker_rx: mpsc::Receiver<WebsocketMessage>,
-                             message_tx: mpsc::Sender<WebsocketMessage>) {
+    /// Gets the handle to subscribe this channel to a descriptor
+    pub(crate) fn subscribe_handle(&self) -> mpsc::Sender<WebsocketMessage> {
+        self.sender.clone()
+    }
+
+    /// Get the next message from this client.
+    ///
+    /// This method also forwards messages sent from any channels the client is subscribed to
+    pub(crate) async fn next(&mut self) -> Option<WebsocketMessage> {
+        self.inner.recv().await
+    }
+
+    async fn message_handler(
+        upgrade_rx: oneshot::Receiver<Upgraded>,
+        mut broker_rx: mpsc::Receiver<WebsocketMessage>,
+        message_tx: mpsc::Sender<WebsocketMessage>
+    ) {
         // Get upgrade object (basically just a boxed handle to the tcp or tls stream)
         if let Ok(upgrade) = upgrade_rx.await {
             // build codec
@@ -152,63 +172,40 @@ impl WebsocketChannel {
             let mut data_rx = Some(data_rx);
 
             let mut outgoing_message: Option<WebsocketMessage> = None;
+            let mut running_message: Option<RunningMessage> = None;
             loop {
                 let broker_ready = outgoing_message.is_none();
+                let next_message = running_message.is_none();
                 select! {
-                    message = Self::read_header(&mut raw_ws) => {
-                        println!("Raw message: {:?}", message);
-                        if let Some(Ok(header)) = message {
-                            let mask = header.mask().map(|u| u32::from(u).to_le_bytes());
-                            // TODO avoid unwrap -> I think this should always succeed,
-                            // although it might fail on 32 bit platforms or something.
-                            let mut remaining = header.data_len().try_into().unwrap();
-                            let fin = header.fin();
-                            // Don't send continue frames
-                            if let Some(data) = data_rx.take() {
-                                let _e = message_tx.send(WebsocketMessage {
-                                    header, data,
-                                }).await;
-                            }else if header.opcode() == 0x01 {
-                                // TODO: handle error
-                            }
-                            let mut cur: usize = 0;
-                            // Message contains ready bytes. For short messages,
-                            // this might be the entire message
-                            while remaining > 0 {
-                                let mut message = raw_ws.read_buf.split_to(
-                                    raw_ws.read_buf.len().min(remaining)
-                                );
-                                // TODO unmask message
-                                remaining-= message.len();
-                                if let Some(mask) = mask {
-                                    for b in message.iter_mut() {
-                                        *b ^= mask[cur];
-                                        cur = (cur + 1) % 4;
-                                    }
-                                }
-                                if let Err(_b) = data_tx.send(message.into()).await {
-                                    // TODO handle error
-                                }
-
-                                if remaining > 0 {
-                        // The check shouldn't matter, but I think there are edge cases where
-                        // attempting to read could be bad. In theory, I would expect the capacity
-                        // of the read_buf to be zero, since we just took it all, and reserve(0)
-                        // should be a noop - but I don't know if it is. If reserve(0) is a noop,
-                        // the check should be unnessecary
-                                    raw_ws.read_buf.reserve(remaining.min(MAX_BUFFER_SIZE));
-                                    let _e = raw_ws.io.read_buf(&mut raw_ws.read_buf).await;
-                                }
-                            }
-                            // If this is the final frame, reset data_tx and data_rx
-                            if fin {
-                                let (ndata_tx, ndata_rx) = mpsc::channel(1);
-                                data_tx = ndata_tx;
-                                data_rx = Some(ndata_rx);
-                            }
+                    message = async {
+                        if next_message {
+                            Self::read_header(&mut raw_ws).await
                         }else {
+                            pending().await
+                        }
+                    } => {
+                        if let Some(Ok(header)) = message {
+                            Self::send_message(
+                                header,
+                                &mut raw_ws,
+                                &message_tx,
+                                &mut data_tx,
+                                &mut data_rx,
+                                &mut running_message
+                            ).await;
+                        }else {
+                            // TODO handle close
                             break;
                         }
+                    }
+                    _ = async {
+                        if let Some(running) = &mut running_message {
+                            Self::continue_message(running, &data_tx).await
+                        } else {
+                            pending().await
+                        }
+                    } => {
+                        let _e = Self::read_next_part(&mut running_message, &mut raw_ws).await;
                     }
                     message = async {
                         if broker_ready {
@@ -289,16 +286,72 @@ impl WebsocketChannel {
         }
     }
 
-    /// Gets the handle to subscribe this channel to a descriptor
-    pub(crate) fn subscribe_handle(&self) -> mpsc::Sender<WebsocketMessage> {
-        self.sender.clone()
+    async fn send_message(
+        header: FrameHeader,
+        raw_ws: &mut FramedParts<Upgraded, FrameHeaderCodec>,
+        message_tx: &mpsc::Sender<WebsocketMessage>,
+        data_tx: &mut mpsc::Sender<Bytes>,
+        data_rx: &mut Option<mpsc::Receiver<Bytes>>,
+        running_message: &mut Option<RunningMessage>,
+    ) {
+        let mask = header.mask().map(|u| u32::from(u).to_le_bytes());
+        // TODO avoid unwrap -> I think this should always succeed,
+        // although it might fail on 32 bit platforms or something.
+        let remaining = header.data_len().try_into().unwrap();
+        let fin = header.fin();
+        // Don't send continue frames
+        if let Some(data) = data_rx.take() {
+            let _e = message_tx.send(WebsocketMessage {
+                header, data,
+            }).await;
+        }else if header.opcode() == 0x01 {
+            // TODO: handle error
+        }
+        *running_message = Some(
+            RunningMessage {
+                current: raw_ws.read_buf.split_to(
+                    raw_ws.read_buf.len().min(remaining)
+                ),
+                remaining,
+                cur: 0,
+                mask: mask.unwrap_or([0; 4]),
+            }
+        );
+        // If this is the final frame, reset data_tx and data_rx
+        if fin {
+            let (ndata_tx, ndata_rx) = mpsc::channel(1);
+            *data_tx = ndata_tx;
+            *data_rx = Some(ndata_rx);
+        }
     }
 
-    /// Get the next message from this client.
-    ///
-    /// This method also forwards messages sent from any channels the client is subscribed to
-    pub(crate) async fn next(&mut self) -> Option<WebsocketMessage> {
-        self.inner.recv().await
+    async fn continue_message(
+        running_message: &mut RunningMessage,
+        data_tx: &mpsc::Sender<Bytes>,
+    ) {
+        for b in running_message.current.iter_mut() {
+            *b ^= running_message.mask[running_message.cur];
+            running_message.cur = (running_message.cur + 1) % 4;
+        }
+        let _e = data_tx.send(running_message.current.split_to(
+                running_message.current.len().min(running_message.remaining)
+            ).into()).await;
+    }
+
+    async fn read_next_part(
+        running_message: &mut Option<RunningMessage>,
+        raw_ws: &mut FramedParts<Upgraded, FrameHeaderCodec>,
+    ) -> io::Result<()> {
+        if let Some(running) = running_message {
+            if running.remaining > 0 {
+                // Reserve more space
+                raw_ws.read_buf.reserve(running.remaining.min(MAX_BUFFER_SIZE));
+                raw_ws.io.read_buf(&mut raw_ws.read_buf).await?;
+            }else {
+                *running_message = None;
+            }
+        }
+        Ok(())
     }
 }
 
