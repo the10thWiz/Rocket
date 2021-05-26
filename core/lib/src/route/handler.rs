@@ -10,7 +10,7 @@ pub type Outcome<'r> = crate::outcome::Outcome<Response<'r>, Status, Data>;
 /// [`Handler`].
 pub type BoxFuture<'r, T = Outcome<'r>> = futures::future::BoxFuture<'r, T>;
 
-type WsRet = Result<(), ()>;
+type WsRet = Result<(), Data>;
 /// Type alias for the return type of a _raw_ Websocket Route
 pub type BoxFutureWs<'r, T = WsRet> = futures::future::BoxFuture<'r, T>;
 
@@ -183,18 +183,18 @@ pub trait WebsocketHandler: CloneableWs + Send + Sync + 'static {
     /// generate a response. Otherwise, if the return value is `Forward(Data)`,
     /// the next matching route is attempted. If there are no other matching
     /// routes, the `404` error catcher is invoked.
-    async fn handle<'r>(&self, request: &'r Request<'_>, data: Option<Data>) -> WsRet;
+    async fn handle<'r>(&self, request: &'r Request<'_>, data: Data) -> WsRet;
 }
 
 // We write this manually to avoid double-boxing.
 impl<F: Clone + Sync + Send + 'static> WebsocketHandler for F
-    where for<'x> F: Fn(&'x Request<'_>, Option<Data>) -> BoxFutureWs<'x>,
+    where for<'x> F: Fn(&'x Request<'_>, Data) -> BoxFutureWs<'x>,
 {
     #[inline(always)]
     fn handle<'r, 'life0, 'life1, 'async_trait>(
         &'life0 self,
         req: &'r Request<'life1>,
-        data: Option<Data>,
+        data: Data,
     ) -> BoxFutureWs<'r>
         where 'r: 'async_trait,
               'life0: 'async_trait,

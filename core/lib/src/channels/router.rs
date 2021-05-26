@@ -1,5 +1,7 @@
 //! Internal Routing structs
 
+use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::{io::Cursor, sync::Arc};
 
 use futures::{Future, FutureExt};
@@ -9,6 +11,7 @@ use tokio::sync::oneshot;
 
 use websocket_codec::{ClientRequest, Opcode};
 
+use crate::route::WebsocketEvent;
 use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
 use crate::router::{Collide, Collisions};
 use yansi::Paint;
@@ -51,25 +54,43 @@ async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
         .ok()
 }
 
+enum Protocol {
+    Naked,
+    Multiplexed,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+enum Event {
+    Join,
+    Message,
+    Leave,
+}
+
 #[derive(Debug)]
 pub struct WebsocketRouter {
-    routes: Vec<Route>,
+    routes: HashMap<Event, Vec<Route>>,
 }
 
 impl WebsocketRouter {
     pub fn new() -> Self {
         Self {
-            routes: vec![],
+            routes: HashMap::new(),
         }
     }
 
     pub fn routes(&self) -> impl Iterator<Item = &Route> + Clone {
-        self.routes.iter()
+        self.routes.iter().flat_map(|(_, r)| r.iter())
     }
 
     pub fn add_route(&mut self, route: Route) {
-        if route.websocket_handler.is_some() {
-            self.routes.push(route);
+        //if route.websocket_handler.is_some() {
+            //self.routes.push(route);
+        //}
+        match route.websocket_handler {
+            WebsocketEvent::None => (),
+            WebsocketEvent::Join(_) => self.routes.entry(Event::Join).or_default().push(route),
+            WebsocketEvent::Message(_) => self.routes.entry(Event::Message).or_default().push(route),
+            WebsocketEvent::Leave(_) => self.routes.entry(Event::Leave).or_default().push(route),
         }
     }
 
@@ -97,10 +118,44 @@ impl WebsocketRouter {
 
     fn route<'r, 'a: 'r>(
         &'a self,
+        event: Event,
         req: &'r Request<'r>,
     ) -> impl Iterator<Item = &'a Route> + 'r {
         // Note that routes are presorted by ascending rank on each `add`.
-        self.routes.iter().filter(move |r| r.matches(req))
+        self.routes.get(&event)
+            .into_iter()
+            .flat_map(move |routes| routes.iter().filter(move |r| r.matches(req)))
+    }
+
+    fn has_route(
+        &self,
+        event: Event,
+        req: &Request<'_>,
+    ) -> bool {
+        // Note that routes are presorted by ascending rank on each `add`.
+        self.routes.get(&event)
+            .into_iter()
+            .flat_map(move |routes| routes.iter().filter(move |r| r.matches(req))).nth(0).is_some()
+    }
+
+    async fn handle_message<'r, 'a: 'r>(
+        &'a self,
+        event: Event,
+        req: &'r Request<'r>,
+        mut message: Data,
+    ) {
+        for route in self.route(event, &req) {
+            req.set_route(route);
+
+            let name = route.name.as_deref();
+            let handler = route.websocket_handler.unwrap_ref();
+            let res = handle(name, || handler.handle(&req, message)).await;
+            // Successfully ran
+            match res {
+                Some(Err(d)) => message = d,
+                _ => break,
+            }
+        }
     }
 
     pub fn is_upgrade(&self, hyper_request: &hyper::Request<hyper::Body>) -> bool {
@@ -134,7 +189,8 @@ impl WebsocketRouter {
                 // handler) instead of doing this.
                 let dummy = Request::new(&rocket, rocket_http::Method::Get, Origin::ROOT);
                 let r = rocket.handle_error(Status::BadRequest, &dummy).await;
-                return rocket.send_response(r, tx).await;
+                rocket.send_response(r, tx).await;
+                return;
             }
         };
         let mut data = Data::from(h_body);
@@ -142,41 +198,33 @@ impl WebsocketRouter {
         // Dispatch the request to get a response, then write that response out.
         let _token = rocket.preprocess_request(&mut req, &mut data).await;
 
-        let mut response = None;
+        //let mut response = None;
         let (websocket_channel, upgrade_tx) = WebsocketChannel::new();
         req.local_cache(|| Some(Channel::from_websocket(&websocket_channel)));
 
-        for route in rocket.websocket_router.route(&req) {
-            req.set_route(route);
-
-            let name = route.name.as_deref();
-            let handler = route.websocket_handler.as_ref().unwrap();
-            let res = handle(name, || handler.handle(&req, None)).await;
-            // Successfully ran
-            if let Some(Ok(_)) = res {
-                response = Some((Self::create_reponse(&req), route));
-                break;
-            }
-        }
-        if let Some((response, route)) = response {
+        if rocket.websocket_router.has_route(Event::Message, &req) {
+            let (response, protocol) = Self::create_reponse(&req);
             rocket.send_response(response, tx).await;
-            Self::websocket_task(rocket.clone(),
-                &req,
-                upgrade,
-                route,
-                websocket_channel,
-                upgrade_tx).await;
+            match protocol {
+                Protocol::Naked => Self::websocket_task_naked(
+                        &req,
+                        upgrade,
+                        websocket_channel,
+                        upgrade_tx
+                    ).await,
+                Protocol::Multiplexed => unimplemented!(),
+            }
         }else {
             let response = Self::handle_error(Status::NotFound);
             rocket.send_response(response, tx).await;
         }
     }
 
-    fn create_reponse<'r>(req: &'r Request<'r>) -> Response<'r> {
+    fn create_reponse<'r>(req: &'r Request<'r>) -> (Response<'r>, Protocol) {
         // Use websocket-codec to parse the client request
         let cl_req = match ClientRequest::parse(|n| req.headers().get_one(n)) {
             Ok(v) => v,
-            Err(_e) => return Self::handle_error(Status::UpgradeRequired),
+            Err(_e) => return (Self::handle_error(Status::UpgradeRequired), Protocol::Naked),
         };
 
         let mut response = Response::build();
@@ -185,7 +233,7 @@ impl WebsocketRouter {
         response.header(Header::new(UPGRADE.as_str(), "websocket"));
         response.header(Header::new("Sec-WebSocket-Accept", cl_req.ws_accept()));
         response.sized_body(None, Cursor::new("Switching to websocket"));
-        response.finalize()
+        (response.finalize(), Protocol::Naked)
     }
 
     /// Construct a rocket response from the given hyper request
@@ -195,38 +243,75 @@ impl WebsocketRouter {
         response.finalize()
     }
 
-    async fn websocket_task(
-        _rocket: Arc<Rocket<Orbit>>,
-        request: &Request<'_>,
+    async fn websocket_task_naked<'r>(
+        request: &'r Request<'r>,
         on_upgrade: OnUpgrade,
-        route: &Route,
         mut ws: WebsocketChannel,
         upgrade_tx: oneshot::Sender<Upgraded>,
     ) {
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
-
-            let name = route.name.as_deref();
-            let handler = route.websocket_handler.as_ref().unwrap();
+            
+            request.state.rocket.websocket_router.handle_message(Event::Join, request, Data::local(vec![])).await;
             while let Some(message) = ws.next().await {
                 match message.opcode() {
-                    Opcode::Binary => {
-                        let _res = handle(name, || handler.handle(&request,
-                                                          Some(Data::from_ws(message, Some(true)))
-                                                    )).await;
-                    }
-                    Opcode::Text => {
-                        let _res = handle(name, || handler.handle(&request,
-                                                          Some(Data::from_ws(message, Some(false)))
-                                                    )).await;
-                    }
+                    Opcode::Text => 
+                        request.state.rocket.websocket_router.handle_message(
+                            Event::Message,
+                            request,
+                            Data::from_ws(message, Some(false))
+                        ).await,
+                    Opcode::Binary => 
+                        request.state.rocket.websocket_router.handle_message(
+                            Event::Message,
+                            request,
+                            Data::from_ws(message, Some(true))
+                        ).await,
+                    Opcode::Ping => (),
+                    Opcode::Pong => (),
                     Opcode::Close => break,
-                    _ => (),
                 }
             }
+            request.state.rocket.websocket_router.handle_message(Event::Leave, request, Data::local(vec![])).await;
             // TODO implement Ping/Pong (not exposed to the user)
             // TODO handle Close correctly (we should reply with Close,
             // unless we initiated it)
         }
     }
+
+    //async fn websocket_task_multiplexed<'r>(
+        //request: &'r Request<'r>,
+        //on_upgrade: OnUpgrade,
+        //mut ws: WebsocketChannel,
+        //upgrade_tx: oneshot::Sender<Upgraded>,
+    //) {
+        //if let Ok(upgrade) = on_upgrade.await {
+            //let _e = upgrade_tx.send(upgrade);
+            
+            //request.state.rocket.websocket_router.handle_message(Event::Join, request, Data::local(vec![])).await;
+            //while let Some(message) = ws.next().await {
+                //match message.opcode() {
+                    //Opcode::Text => 
+                        //request.state.rocket.websocket_router.handle_message(
+                            //Event::Message,
+                            //request,
+                            //Data::from_ws(message, Some(false))
+                        //).await,
+                    //Opcode::Binary => 
+                        //request.state.rocket.websocket_router.handle_message(
+                            //Event::Message,
+                            //request,
+                            //Data::from_ws(message, Some(true))
+                        //).await,
+                    //Opcode::Ping => (),
+                    //Opcode::Pong => (),
+                    //Opcode::Close => break,
+                //}
+            //}
+            //request.state.rocket.websocket_router.handle_message(Event::Leave, request, Data::local(vec![])).await;
+            //// TODO implement Ping/Pong (not exposed to the user)
+            //// TODO handle Close correctly (we should reply with Close,
+            //// unless we initiated it)
+        //}
+    //}
 }

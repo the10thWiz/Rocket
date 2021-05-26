@@ -13,6 +13,8 @@ use crate::attribute::param::Guard;
 
 use self::parse::{Route, Attribute, MethodAttribute, WebsocketRoute, WebsocketAttribute};
 
+pub use self::parse::WebsocketEvent;
+
 impl Route {
     pub fn guards(&self) -> impl Iterator<Item = &Guard> {
         self.param_guards()
@@ -349,7 +351,7 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
                     method: #method,
                     uri: #uri,
                     handler: monomorphized_function,
-                    websocket_handler: #_None,
+                    websocket_handler: #WebsocketEvent::None,
                     format: #format,
                     rank: #rank,
                     sentinels: #sentinels,
@@ -511,7 +513,7 @@ fn websocket_query_decls(route: &WebsocketRoute) -> Option<TokenStream> {
         if !_e.is_empty() {
             #_log::warn_!("query string failed to match declared route");
             for _err in _e { #_log::warn_!("{}", _err); }
-            return #_Err(());// #Outcome::Forward(#__data);
+            return #_Err(#__data);// #Outcome::Forward(#__data);
         }
 
         #(let #ident = #ident.unwrap();)*
@@ -521,7 +523,7 @@ fn websocket_query_decls(route: &WebsocketRoute) -> Option<TokenStream> {
 fn websocket_request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, _log, FromRequest, _Err, Outcome
+        __req, __data, _request, _log, FromRequest, _Err, Outcome, _Some
     );
 
     quote_spanned! { ty.span() =>
@@ -529,11 +531,11 @@ fn websocket_request_guard_decl(guard: &Guard) -> TokenStream {
             #Outcome::Success(__v) => __v,
             #Outcome::Forward(_) => {
                 #_log::warn_!("`{}` request guard is forwarding.", stringify!(#ty));
-                return #_Err(());// #Outcome::Forward(#__data);
+                return #_Err(#__data);// #Outcome::Forward(#__data);
             },
             #Outcome::Failure((__c, _e)) => {
                 #_log::warn_!("`{}` request guard failed: {:?}.", stringify!(#ty), _e);
-                return #_Err(());// #Outcome::Failure(__c);
+                return #_Err(#__data);// #Outcome::Failure(__c);
             }
         };
     }
@@ -551,7 +553,7 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
         #_log::warn_!("`{}: {}` param guard parsed forwarding with error {:?}",
             #name, stringify!(#ty), __error);
 
-        #_Err(())
+        #_Err(#__data)
     });
 
     // All dynamic parameters should be found if this function is being called;
@@ -567,7 +569,7 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
                     #_log::error_!("Internal invariant broken: dyn param not found.");
                     #_log::error_!("Please report this to the Rocket issue tracker.");
                     #_log::error_!("https://github.com/SergioBenitez/Rocket/issues");
-                    return #_Err(());// #Outcome::Forward(#__data);
+                    return #_Err(#__data);// #Outcome::Forward(#__data);
                 }
             }
         },
@@ -585,17 +587,17 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn websocket_data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, _Err);
+    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, _Err, _Ok);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
             #Outcome::Success(_m) => _m,
             #Outcome::Forward(_d) => {
-                return #_Err(());
+                return #_Err(_d);
             }
             #Outcome::Failure(_e) => {
                 #_log::error_!("`{}` message conversion failed: {:?}.", stringify!(#ty), _e);
-                return #_Err(());
+                return #_Ok(());
             }
         };
     }
@@ -703,7 +705,7 @@ fn websocket_sentinels_expr(route: &WebsocketRoute) -> TokenStream {
     quote!(::std::vec![#(#sentinel),*])
 }
 
-fn codegen_websocket(route: WebsocketRoute) -> Result<TokenStream> {
+fn codegen_websocket(event: WebsocketEvent, route: WebsocketRoute) -> Result<TokenStream> {
     use crate::exports::*;
 
     // Generate the declarations for all of the guards.
@@ -727,6 +729,18 @@ fn codegen_websocket(route: WebsocketRoute) -> Result<TokenStream> {
     let rank = Optional(route.attr.rank);
     let format = Optional(route.attr.format.as_ref());
 
+    let event = match event {
+        WebsocketEvent::Join => quote! {
+            #WebsocketEvent::Join
+        },
+        WebsocketEvent::Message => quote! {
+            #WebsocketEvent::Message
+        },
+        WebsocketEvent::Leave => quote! {
+            #WebsocketEvent::Leave
+        },
+    };
+
     Ok(quote! {
         #handler_fn
 
@@ -741,19 +755,15 @@ fn codegen_websocket(route: WebsocketRoute) -> Result<TokenStream> {
             fn into_info(self) -> #_route::StaticInfo {
                 fn monomorphized_function<'_b>(
                     #__req: &'_b #Request<'_>,
-                    #__data: #_Option<#Data>
+                    #__data: #Data
                 ) -> #_route::BoxFutureWs<'_b> {
                     #_Box::pin(async move {
                         #(#request_guards)*
                         #(#param_guards)*
                         #query_guards
-                        if let #_Some(#__data) = #__data {
-                            #data_guard
+                        #data_guard
 
-                            #responder_outcome
-                        }else {
-                            #_Ok(())
-                        }
+                        #responder_outcome
                     })
                 }
 
@@ -771,7 +781,7 @@ fn codegen_websocket(route: WebsocketRoute) -> Result<TokenStream> {
                     method: #_http::Method::Get,
                     uri: #uri,
                     handler: route_handler,
-                    websocket_handler: #_Some(monomorphized_function),
+                    websocket_handler: #event(monomorphized_function),
                     format: #format,
                     rank: #rank,
                     sentinels: #sentinels,
@@ -789,7 +799,7 @@ fn codegen_websocket(route: WebsocketRoute) -> Result<TokenStream> {
     }.into())
 }
 /// Websocket handler attribute
-pub fn websocket_parse(args: TokenStream, input: TokenStream) -> Result<TokenStream> {
+pub fn websocket_parse(event: WebsocketEvent, args: TokenStream, input: TokenStream) -> Result<TokenStream> {
     let function: syn::ItemFn = syn::parse2(input)
         .map_err(|e| Diagnostic::from(e))
         .map_err(|d| d.help(format!("#[websocket] can only be used on functions")))?;
@@ -797,9 +807,9 @@ pub fn websocket_parse(args: TokenStream, input: TokenStream) -> Result<TokenStr
     let full_attr = quote!(websocket(#args));
     let attribute = WebsocketAttribute::from_meta(&syn::parse2(full_attr)?)?;
 
-    codegen_websocket(WebsocketRoute::from(attribute, function)?)
+    codegen_websocket(event, WebsocketRoute::from(attribute, function)?)
 }
 
-pub fn websocket(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> TokenStream {
-    websocket_parse(args.into(), input.into()).unwrap_or_else(|diag| diag.emit_as_item_tokens())
+pub fn websocket(event: WebsocketEvent, args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> TokenStream {
+    websocket_parse(event.into(), args.into(), input.into()).unwrap_or_else(|diag| diag.emit_as_item_tokens())
 }

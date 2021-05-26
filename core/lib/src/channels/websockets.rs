@@ -24,7 +24,7 @@ use crate::{Data, Request, request::{FromRequest, Outcome}};
 /// into binary or text, but it is possible for a type to be either text or binary depending on the
 /// contents.
 ///
-// TODO: After contrib-graduation, implement `IntoMessage` on `Json`
+// TODO: implement `IntoMessage` on `Json` and other convience types
 pub trait IntoMessage {
     fn is_binary(&self) -> bool;
     fn into_message(self) -> mpsc::Receiver<Bytes>;

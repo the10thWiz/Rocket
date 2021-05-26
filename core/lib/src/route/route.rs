@@ -185,7 +185,7 @@ pub struct Route {
     /// The function that should be called when the route matches.
     pub handler: Box<dyn Handler>,
     /// The function that should be called when the route matches for websocket connection
-    pub websocket_handler: Option<Box<dyn WebsocketHandler>>,
+    pub websocket_handler: WebsocketEvent<Box<dyn WebsocketHandler>>,
     /// The route URI.
     pub uri: RouteUri<'static>,
     /// The rank of this route. Lower ranks have higher priorities.
@@ -256,7 +256,7 @@ impl Route {
             format: None,
             sentinels: Vec::new(),
             handler: Box::new(handler),
-            websocket_handler: None,
+            websocket_handler: WebsocketEvent::None,
             rank, uri, method,
         }
     }
@@ -346,8 +346,8 @@ pub struct StaticInfo {
     /// The route's handler, i.e, the annotated function.
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFuture<'r>,
     /// The route's websocket handler, i.e, the annotated function.
-    pub websocket_handler: Option<
-        for<'r> fn(&'r crate::Request<'_>, Option<crate::Data>) -> BoxFutureWs<'r>
+    pub websocket_handler: WebsocketEvent<
+        for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFutureWs<'r>
     >,
     /// The route's rank, if any.
     pub rank: Option<isize>,
@@ -372,6 +372,34 @@ impl From<StaticInfo> for Route {
             format: info.format,
             sentinels: info.sentinels.into_iter().collect(),
             uri,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum WebsocketEvent<T> {
+    None,
+    Join(T),
+    Message(T),
+    Leave(T),
+}
+
+impl<T> WebsocketEvent<T> {
+    fn map<F>(self, f: impl Fn(T) -> F) -> WebsocketEvent<F> {
+        match self {
+            Self::None => WebsocketEvent::None,
+            Self::Join(t) => WebsocketEvent::Join(f(t)),
+            Self::Message(t) => WebsocketEvent::Message(f(t)),
+            Self::Leave(t) => WebsocketEvent::Leave(f(t)),
+        }
+    }
+
+    pub(crate) fn unwrap_ref(&self) -> &T {
+        match self {
+            Self::None => panic!(),
+            Self::Join(t) => &t,
+            Self::Message(t) => &t,
+            Self::Leave(t) => &t,
         }
     }
 }

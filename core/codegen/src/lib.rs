@@ -70,6 +70,7 @@ mod name;
 
 use crate::http::Method;
 use proc_macro::TokenStream;
+use attribute::route::WebsocketEvent;
 
 static URI_MACRO_PREFIX: &str = "rocket_uri_macro_";
 static ROCKET_IDENT_PREFIX: &str = "__rocket_";
@@ -291,8 +292,26 @@ route_attribute!(options => Method::Options);
 /// Very similar to the other route macros
 ///
 #[proc_macro_attribute]
-pub fn websocket(args: TokenStream, input: TokenStream) -> TokenStream {
-    emit!(attribute::route::websocket(args, input))
+pub fn join(args: TokenStream, input: TokenStream) -> TokenStream {
+    emit!(attribute::route::websocket(WebsocketEvent::Join, args, input))
+}
+
+/// Route attribute for websocket connections.
+///
+/// Very similar to the other route macros
+///
+#[proc_macro_attribute]
+pub fn message(args: TokenStream, input: TokenStream) -> TokenStream {
+    emit!(attribute::route::websocket(WebsocketEvent::Message, args, input))
+}
+
+/// Route attribute for websocket connections.
+///
+/// Very similar to the other route macros
+///
+#[proc_macro_attribute]
+pub fn leave(args: TokenStream, input: TokenStream) -> TokenStream {
+    emit!(attribute::route::websocket(WebsocketEvent::Leave, args, input))
 }
 
 /// Attribute to generate a [`Catcher`] and associated metadata.

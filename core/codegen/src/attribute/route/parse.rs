@@ -223,6 +223,12 @@ impl std::ops::Deref for RouteUri {
     }
 }
 
+pub enum WebsocketEvent {
+    Join,
+    Message,
+    Leave,
+}
+
 /// The parsed `#[websocket(..)]`
 #[derive(Debug, FromMeta)]
 pub struct WebsocketAttribute {
@@ -236,7 +242,7 @@ pub struct WebsocketAttribute {
 }
 
 pub struct WebsocketRoute {
-    /// The attribute: `#[websocket(path, ...)]`.
+    /// The attribute: `#[message(path, ...)]`.
     pub attr: WebsocketAttribute,
     /// The static and dynamic path parameters.
     pub path_params: Vec<Parameter>,

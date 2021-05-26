@@ -101,6 +101,7 @@ define_exported_paths! {
     Catcher => ::rocket::Catcher,
     SmallVec => ::rocket::http::private::SmallVec,
     Status => ::rocket::http::Status,
+    WebsocketEvent => ::rocket::route::WebsocketEvent,
 }
 
 macro_rules! define_spanned_export {
