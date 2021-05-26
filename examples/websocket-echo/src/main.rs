@@ -6,7 +6,6 @@ use rocket::Data;
 
 #[websocket("/echo", "<data>")]
 async fn echo(data: Data, websocket: Channel) {
-    //println!("Message: {}", data);
     websocket.send(data).await;
 }
 

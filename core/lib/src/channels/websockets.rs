@@ -32,7 +32,7 @@ pub trait IntoMessage {
 
 impl IntoMessage for Data {
     fn is_binary(&self) -> bool {
-        true
+        self.websocket_is_binary().unwrap_or(true)
     }
 
     fn into_message(self) -> mpsc::Receiver<Bytes> {
@@ -131,6 +131,7 @@ struct RunningMessage {
     remaining: usize,
     cur: usize,
     mask: [u8; 4],
+    fin: bool,
 }
 
 impl WebsocketChannel {
@@ -205,7 +206,12 @@ impl WebsocketChannel {
                             pending().await
                         }
                     } => {
-                        let _e = Self::read_next_part(&mut running_message, &mut raw_ws).await;
+                        let _e = Self::read_next_part(
+                                &mut running_message,
+                                &mut raw_ws,
+                                &mut data_tx,
+                                &mut data_rx,
+                            ).await;
                     }
                     message = async {
                         if broker_ready {
@@ -290,7 +296,7 @@ impl WebsocketChannel {
         header: FrameHeader,
         raw_ws: &mut FramedParts<Upgraded, FrameHeaderCodec>,
         message_tx: &mpsc::Sender<WebsocketMessage>,
-        data_tx: &mut mpsc::Sender<Bytes>,
+        _data_tx: &mut mpsc::Sender<Bytes>,
         data_rx: &mut Option<mpsc::Receiver<Bytes>>,
         running_message: &mut Option<RunningMessage>,
     ) {
@@ -315,14 +321,9 @@ impl WebsocketChannel {
                 remaining,
                 cur: 0,
                 mask: mask.unwrap_or([0; 4]),
+                fin,
             }
         );
-        // If this is the final frame, reset data_tx and data_rx
-        if fin {
-            let (ndata_tx, ndata_rx) = mpsc::channel(1);
-            *data_tx = ndata_tx;
-            *data_rx = Some(ndata_rx);
-        }
     }
 
     async fn continue_message(
@@ -333,14 +334,19 @@ impl WebsocketChannel {
             *b ^= running_message.mask[running_message.cur];
             running_message.cur = (running_message.cur + 1) % 4;
         }
-        let _e = data_tx.send(running_message.current.split_to(
-                running_message.current.len().min(running_message.remaining)
-            ).into()).await;
+        let len = running_message.current.len().min(running_message.remaining);
+        if len > 0 {
+            let _e = data_tx.send(running_message.current.split_to(len).into()).await;
+            // Record how much was sent
+            running_message.remaining-= len;
+        }
     }
 
     async fn read_next_part(
         running_message: &mut Option<RunningMessage>,
         raw_ws: &mut FramedParts<Upgraded, FrameHeaderCodec>,
+        data_tx: &mut mpsc::Sender<Bytes>,
+        data_rx: &mut Option<mpsc::Receiver<Bytes>>,
     ) -> io::Result<()> {
         if let Some(running) = running_message {
             if running.remaining > 0 {
@@ -348,6 +354,12 @@ impl WebsocketChannel {
                 raw_ws.read_buf.reserve(running.remaining.min(MAX_BUFFER_SIZE));
                 raw_ws.io.read_buf(&mut raw_ws.read_buf).await?;
             }else {
+                // If the current frame is final, reset the data params
+                if running.fin {
+                    let (ndata_tx, ndata_rx) = mpsc::channel(1);
+                    *data_tx = ndata_tx;
+                    *data_rx = Some(ndata_rx);
+                }
                 *running_message = None;
             }
         }

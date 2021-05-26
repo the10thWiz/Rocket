@@ -41,6 +41,7 @@ pub struct Data {
     buffer: Vec<u8>,
     is_complete: bool,
     stream: StreamReader,
+    ws_binary: Option<bool>,
 }
 
 impl Data {
@@ -52,7 +53,18 @@ impl Data {
 
         let stream = stream.into();
         let buffer = Vec::with_capacity(PEEK_BYTES / 8);
-        Data { buffer, stream, is_complete: false }
+        Data { buffer, stream, is_complete: false, ws_binary: None }
+    }
+
+    /// Create a `Data` from a recognized `stream`.
+    pub(crate) fn from_ws<S: Into<StreamReader>>(stream: S, ws_binary: Option<bool>) -> Data {
+        // TODO.async: This used to also set the read timeout to 5 seconds.
+        // Such a short read timeout is likely no longer necessary, but some
+        // kind of idle timeout should be implemented.
+
+        let stream = stream.into();
+        let buffer = Vec::with_capacity(PEEK_BYTES / 8);
+        Data { buffer, stream, is_complete: false, ws_binary }
     }
 
     /// This creates a `data` object from a local data source `data`.
@@ -62,6 +74,7 @@ impl Data {
             buffer: data,
             stream: StreamReader::empty(),
             is_complete: true,
+            ws_binary: None,
         }
     }
 
@@ -188,5 +201,13 @@ impl Data {
     #[inline(always)]
     pub fn peek_complete(&self) -> bool {
         self.is_complete
+    }
+
+    /// Returns Some if this data was created from a websocket, and None otherwise
+    ///
+    /// The inner boolean is true when the websocket message was sent as binary, while
+    /// it is false if the type was text
+    pub fn websocket_is_binary(&self) -> Option<bool> {
+        self.ws_binary
     }
 }

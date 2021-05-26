@@ -209,11 +209,15 @@ impl WebsocketRouter {
             let name = route.name.as_deref();
             let handler = route.websocket_handler.as_ref().unwrap();
             while let Some(message) = ws.next().await {
-                println!("Message received");
                 match message.opcode() {
-                    Opcode::Text | Opcode::Binary => {
+                    Opcode::Binary => {
                         let _res = handle(name, || handler.handle(&request,
-                                                          Some(Data::from(message))
+                                                          Some(Data::from_ws(message, Some(true)))
+                                                    )).await;
+                    }
+                    Opcode::Text => {
+                        let _res = handle(name, || handler.handle(&request,
+                                                          Some(Data::from_ws(message, Some(false)))
                                                     )).await;
                     }
                     Opcode::Close => break,
