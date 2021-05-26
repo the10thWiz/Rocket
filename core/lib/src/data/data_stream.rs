@@ -59,7 +59,7 @@ enum State {
 /// The kinds of streams we accept as `Data`.
 enum StreamKind {
     Body(hyper::Body),
-    Multipart(multer::Field<'static>)
+    Multipart(multer::Field<'static>),
     Websocket(mpsc::Receiver<hyper::Bytes>),
 }
 
