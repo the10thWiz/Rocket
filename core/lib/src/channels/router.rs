@@ -222,12 +222,12 @@ impl WebsocketRouter {
             Err(_e) => return (Self::handle_error(Status::UpgradeRequired), Protocol::Naked),
         };
 
-        let protocol = if let Some(protocol_request) = req.headers().get_one("Sec-WebSocket-Protocol") {
-            if protocol_request.split(",").any(|s| s.trim().to_lowercase() == "rocket-multiplex") {
-                Protocol::Multiplexed
-            } else {
-                Protocol::Naked
-            }
+        let protocol = if req.headers()
+            .get("Sec-WebSocket-Protocol")
+            .flat_map(|s| s.split(",").map(|s| s.trim()))
+            .any(|s| s.eq_ignore_ascii_case("rocket-multiplex"))
+        {
+            Protocol::Multiplexed
         } else {
             Protocol::Naked
         };
