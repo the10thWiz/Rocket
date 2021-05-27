@@ -213,8 +213,8 @@ impl WebsocketChannel {
             loop {
                 let broker_ready = outgoing_message.is_none();
                 let next_message = running_message.is_none();
-                println!("Sending Ready: {}", broker_ready);
-                println!("Recv Ready: {}", next_message);
+                //println!("Sending Ready: {}", broker_ready);
+                //println!("Recv Ready: {}", next_message);
                 select! {
                     message = async {
                         if next_message {
@@ -224,7 +224,7 @@ impl WebsocketChannel {
                         }
                     } => {
                         if let Some(Ok(header)) = message {
-                            println!("Recv: {:?}", header);
+                            //println!("Recv: {:?}", header);
                             Self::send_message(
                                 header,
                                 &mut raw_ws,
@@ -235,7 +235,7 @@ impl WebsocketChannel {
                             ).await;
                         }else {
                             // TODO handle close
-                            println!("Closing ws");
+                            //println!("Closing ws");
                             break;
                         }
                     }
@@ -261,7 +261,7 @@ impl WebsocketChannel {
                         }
                     } => {
                         if let Some(message) = message {
-                            println!("Send: {:?}", message);
+                            //println!("Send: {:?}", message);
                             outgoing_message = Some(message);
                         }else {
                             // TODO handle error
@@ -275,7 +275,7 @@ impl WebsocketChannel {
                         }
                     } => {
                         if let Some(data) = data {
-                            println!("Forwarding {} bytes of data", data.len());
+                            //println!("Forwarding {} bytes of data", data.len());
                             if let Some(message) = outgoing_message.take() {
                                 let int_header = FrameHeader::new(false,
                                                                   message.header.rsv(),
@@ -299,7 +299,7 @@ impl WebsocketChannel {
                             // TODO fid potential fix for sending zero size frame, maybe wrapping
                             // the Bytes in an enum to indicate if we are done? This should work
                             // though
-                            println!("Compeleting message");
+                            //println!("Compeleting message");
                             if let Some(message) = outgoing_message.take() {
                                 let int_header = FrameHeader::new(true,
                                                                   message.header.rsv(),
@@ -313,7 +313,7 @@ impl WebsocketChannel {
                     }
                 }
             }
-            println!("Loop completed");
+            //println!("Loop completed");
         }
     }
 
@@ -375,7 +375,7 @@ impl WebsocketChannel {
         data_tx: &mpsc::Sender<Bytes>,
     ) {
         let len = running_message.current.len();
-        println!("{} Bytes of {} available to send", len, running_message.remaining);
+        //println!("{} Bytes of {} available to send", len, running_message.remaining);
         if running_message.current.len() > 0 {
             // Record how much will be sent
             let _e = data_tx.send(running_message.current.clone().into()).await;
@@ -383,7 +383,7 @@ impl WebsocketChannel {
             running_message.remaining-= running_message.current.len();
             let _ = running_message.current.split();
             if let Err(e) = _e {
-                println!("Reciever hung up");
+                //println!("Reciever hung up");
             }
         }
     }
@@ -399,14 +399,14 @@ impl WebsocketChannel {
                 // Reserve more space
                 raw_ws.read_buf.reserve(running.remaining.min(MAX_BUFFER_SIZE));
                 let tmp = raw_ws.read_buf.len();
-                println!("Reading with {} bytes in buffer", tmp);
+                //println!("Reading with {} bytes in buffer", tmp);
                 let len = raw_ws.io.read_buf(&mut raw_ws.read_buf).await?;
-                println!("Read {} bytes, advanced buf by {}", len, raw_ws.read_buf.len() - tmp);
+                //println!("Read {} bytes, advanced buf by {}", len, raw_ws.read_buf.len() - tmp);
                 running.current = raw_ws.read_buf.split_to(
                     raw_ws.read_buf.len().min(running.remaining)
                 );
                 running.handle_xor();
-                println!("Current is {} bytes", running.current.len());
+                //println!("Current is {} bytes", running.current.len());
             }else {
                 // If the current frame is final, reset the data params
                 if running.fin {

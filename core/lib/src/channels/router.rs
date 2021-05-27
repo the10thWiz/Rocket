@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::{io::Cursor, sync::Arc};
 
 use futures::{Future, FutureExt};
+use rocket_codegen::uri;
 use rocket_http::uri::Uri;
 use rocket_http::{Header, Status, hyper::upgrade::Upgraded, uri::Origin};
 use rocket_http::hyper::{self, header::{CONNECTION, UPGRADE}, upgrade::OnUpgrade};
@@ -45,7 +46,7 @@ async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
     }
 
     let run = AssertUnwindSafe(run);
-    let fut = std::panic::catch_unwind(move || run())
+    let fut = std::panic::catch_unwind(run)
         .map_err(|e| panic_info!(name, e))
         .ok()?;
 
@@ -251,8 +252,8 @@ impl WebsocketRouter {
         response.finalize()
     }
 
-    async fn websocket_task_naked<'r>(
-        request: &'r mut Request<'r>,
+    async fn websocket_task_naked<'r, 'a: 'r>(
+        request: &'a mut Request<'r>,
         on_upgrade: OnUpgrade,
         mut ws: WebsocketChannel,
         upgrade_tx: oneshot::Sender<Upgraded>,
@@ -285,7 +286,7 @@ impl WebsocketRouter {
                     Opcode::Close => break,
                 }
             }
-            broker.unsubscribe(request.uri(), &ws);
+            broker.unsubscribe_all(&ws);
             request.state.rocket.websocket_router.handle_message(Event::Leave, request, &None, Data::local(vec![])).await;
             // TODO implement Ping/Pong (not exposed to the user)
             // TODO handle Close correctly (we should reply with Close,
@@ -293,39 +294,47 @@ impl WebsocketRouter {
         }
     }
 
-    //async fn websocket_task_multiplexed<'r>(
-        //request: &'r mut Request<'r>,
-        //on_upgrade: OnUpgrade,
-        //mut ws: WebsocketChannel,
-        //upgrade_tx: oneshot::Sender<Upgraded>,
-    //) {
-        //if let Ok(upgrade) = on_upgrade.await {
-            //let _e = upgrade_tx.send(upgrade);
+    async fn websocket_task_multiplexed<'r>(
+        request: &'r mut Request<'r>,
+        on_upgrade: OnUpgrade,
+        mut ws: WebsocketChannel,
+        upgrade_tx: oneshot::Sender<Upgraded>,
+    ) {
+        let broker = request.rocket().state::<Broker>().unwrap().clone();
+        if let Ok(upgrade) = on_upgrade.await {
+            let _e = upgrade_tx.send(upgrade);
             
-            //request.state.rocket.websocket_router.handle_message(Event::Join, request, Data::local(vec![])).await;
-            //while let Some(message) = ws.next().await {
-                //match message.opcode() {
-                    //Opcode::Text => 
-                        //request.state.rocket.websocket_router.handle_message(
-                            //Event::Message,
-                            //request,
-                            //Data::from_ws(message, Some(false))
-                        //).await,
-                    //Opcode::Binary => 
-                        //request.state.rocket.websocket_router.handle_message(
-                            //Event::Message,
-                            //request,
-                            //Data::from_ws(message, Some(true))
-                        //).await,
-                    //Opcode::Ping => (),
-                    //Opcode::Pong => (),
-                    //Opcode::Close => break,
-                //}
-            //}
-            //request.state.rocket.websocket_router.handle_message(Event::Leave, request, Data::local(vec![])).await;
-            //// TODO implement Ping/Pong (not exposed to the user)
-            //// TODO handle Close correctly (we should reply with Close,
-            //// unless we initiated it)
-        //}
-    //}
+            request.state.rocket.websocket_router.handle_message(Event::Join, request, &None, Data::local(vec![])).await;
+            broker.subscribe(request.uri(), &ws);
+            while let Some(message) = ws.next().await {
+                match message.opcode() {
+                    Opcode::Text => 
+                        request.state.rocket.websocket_router.handle_message(
+                            Event::Message,
+                            request,
+                            &None,
+                            Data::from_ws(message, Some(false))
+                        ).await,
+                    Opcode::Binary => 
+                    {
+                        //request.set_uri(Origin::parse("/echo").unwrap());
+                        request.state.rocket.websocket_router.handle_message(
+                            Event::Message,
+                            request,
+                            &None,
+                            Data::from_ws(message, Some(true))
+                        ).await;
+                    }
+                    Opcode::Ping => (),
+                    Opcode::Pong => (),
+                    Opcode::Close => break,
+                }
+            }
+            broker.unsubscribe_all(&ws);
+            request.state.rocket.websocket_router.handle_message(Event::Leave, request, &None, Data::local(vec![])).await;
+            // TODO implement Ping/Pong (not exposed to the user)
+            // TODO handle Close correctly (we should reply with Close,
+            // unless we initiated it)
+        }
+    }
 }
