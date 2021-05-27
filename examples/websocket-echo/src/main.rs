@@ -47,9 +47,17 @@ fn index() -> Html<&'static str> {
                 text.value = '';
                 console.log(e);
             };
+            // JS code to trigger race condition in webscoket implementation
             var arr = [];
             for(let i = 0; i < 100; i++) {
                 arr.push(i);
+            }
+            function trigger_race() {
+                for(let i = 0; i < 10; i++) {
+                    window.setTimeout(() => {
+                        ws.send(JSON.stringify(arr));
+                    }, i * 10);
+                }
             }
         </script>
     </body>
