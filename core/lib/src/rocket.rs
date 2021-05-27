@@ -6,6 +6,7 @@ use yansi::Paint;
 use either::Either;
 use figment::{Figment, Provider};
 
+use crate::channels::broker::Broker;
 use crate::{Catcher, Config, Route, Shutdown, channels::WebsocketRouter, sentinel};
 use crate::router::Router;
 use crate::trip_wire::TripWire;
@@ -461,6 +462,8 @@ impl Rocket<Build> {
     /// }
     /// ```
     pub async fn ignite(mut self) -> Result<Rocket<Ignite>, Error> {
+        // Add Websocket broker to managed state
+        self = self.manage(Broker::new());
         // We initialize the logger here so that logging from fairings are
         // visible but change the max-log-level when we have a final config.
         crate::log::init(&Config::debug_default());
@@ -489,6 +492,7 @@ impl Rocket<Build> {
         let mut websocket_router = WebsocketRouter::new();
         self.routes.clone().into_iter().for_each(|r| websocket_router.add_route(r));
         websocket_router.finalize().map_err(ErrorKind::Collisions)?;
+
 
         // Initialize the router; check for collisions.
         let mut router = Router::new();

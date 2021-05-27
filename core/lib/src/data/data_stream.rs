@@ -8,7 +8,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, ReadBuf, Take};
 use futures::stream::Stream;
 use futures::ready;
 
-use crate::{channels::websockets::{IntoMessage, WebsocketMessage}, http::hyper};
+use crate::{channels::channel::{IntoMessage, WebsocketMessage}, http::hyper};
 use crate::ext::{PollExt, Chain};
 use crate::data::{Capped, N};
 

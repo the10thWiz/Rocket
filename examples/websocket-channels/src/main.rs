@@ -5,12 +5,8 @@ use rocket::response::content::Html;
 use rocket::State;
 
 #[websocket("/listen", "<data>")]
-async fn listen(data: String, websocket: Websocket, channel: &State<Channel<String>>) {
-    if data.starts_with("listen:") {
-        channel.subscribe(data.split(":").nth(1).unwrap_or("").to_string(), &websocket);
-    }else {
-        channel.send("global".to_string(), data);
-    }
+async fn listen(data: String, websocket: Websocket, channel: &State<Channel>) {
+    channel.broadcast(data);
 }
 
 #[get("/")]
@@ -55,5 +51,5 @@ fn index() -> Html<&'static str> {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().manage(Channel::<String>::new()).mount("/", routes![listen, index])
+    rocket::build().mount("/", routes![listen, index])
 }

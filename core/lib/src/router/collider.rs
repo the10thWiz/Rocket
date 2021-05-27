@@ -1,3 +1,5 @@
+use rocket_http::uri::{Origin, Uri};
+
 use crate::catcher::Catcher;
 use crate::route::{Route, Color};
 
@@ -98,15 +100,40 @@ impl Route {
     ///     in the route, requests with/without queries match.
     pub(crate) fn matches(&self, req: &Request<'_>) -> bool {
         self.method == req.method()
-            && paths_match(self, req)
-            && queries_match(self, req)
+            && paths_match(self, req.uri())
+            && queries_match(self, req.uri())
             && formats_match(self, req)
+    }
+
+    /// Determines if this route matches against the given request.
+    ///
+    /// This means that:
+    ///
+    ///   * The route's method matches that of the incoming request.
+    ///   * The route's format (if any) matches that of the incoming request.
+    ///     - If route specifies format, it only gets requests for that format.
+    ///     - If route doesn't specify format, it gets requests for any format.
+    ///   * All static components in the route's path match the corresponding
+    ///     components in the same position in the incoming request.
+    ///   * All static components in the route's query string are also in the
+    ///     request query string, though in any position. If there is no query
+    ///     in the route, requests with/without queries match.
+    pub(crate) fn matches_topic(&self, req: &Request<'_>, topic: &Option<Origin<'_>>) -> bool {
+        if let Some(topic) = topic {
+            self.method == req.method()
+                && paths_match(self, topic)
+                && queries_match(self, topic)
+        }else {
+            self.method == req.method()
+                && paths_match(self, req.uri())
+                && queries_match(self, req.uri())
+        }
     }
 }
 
-fn paths_match(route: &Route, req: &Request<'_>) -> bool {
+fn paths_match(route: &Route, req: &Origin<'_>) -> bool {
     let route_segments = &route.uri.metadata.path_segs;
-    let req_segments = req.uri().path().segments();
+    let req_segments = req.path().segments();
 
     if route.uri.metadata.trailing_path {
         // The last route segment can be trailing, which is allowed to be empty.
@@ -136,7 +163,7 @@ fn paths_match(route: &Route, req: &Request<'_>) -> bool {
     true
 }
 
-fn queries_match(route: &Route, req: &Request<'_>) -> bool {
+fn queries_match(route: &Route, req: &Origin<'_>) -> bool {
     if matches!(route.uri.metadata.query_color, None | Some(Color::Wild)) {
         return true;
     }
@@ -145,7 +172,7 @@ fn queries_match(route: &Route, req: &Request<'_>) -> bool {
         .map(|(k, v)| (k.as_str(), v.as_str()));
 
     for route_seg in route_query_fields {
-        if let Some(query) = req.uri().query() {
+        if let Some(query) = req.query() {
             if !query.segments().any(|req_seg| req_seg == route_seg) {
                 trace_!("request {} missing static query {:?}", req, route_seg);
                 return false;

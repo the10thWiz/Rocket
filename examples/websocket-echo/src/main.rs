@@ -5,7 +5,7 @@ use rocket::response::content::Html;
 use rocket::Data;
 
 #[message("/echo", "<data>")]
-async fn echo(data: Data, websocket: Channel) {
+async fn echo(data: Data, websocket: Channel<'_>) {
     websocket.send(data).await;
 }
 
@@ -47,6 +47,10 @@ fn index() -> Html<&'static str> {
                 text.value = '';
                 console.log(e);
             };
+            var arr = [];
+            for(let i = 0; i < 100; i++) {
+                arr.push(i);
+            }
         </script>
     </body>
 </html>"#)

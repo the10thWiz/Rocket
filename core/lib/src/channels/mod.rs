@@ -1,9 +1,9 @@
 
 mod router;
-pub mod websockets;
+pub mod broker;
 pub mod channel;
 
 pub(crate) use router::WebsocketRouter;
 
-pub use websockets::{Channel, WebsocketMessage, WebsocketChannel};
-pub use channel::{Broker, Topic};
+pub use channel::{Channel, WebsocketMessage, WebsocketChannel};
+//pub use broker::Broker;
