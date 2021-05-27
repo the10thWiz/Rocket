@@ -64,6 +64,17 @@ impl<T: AsyncRead + Send + Unpin + 'static> IntoMessage for T {
     }
 }
 
+// Compliler error, since AsyncRead could be implemented on String in future versions
+//impl IntoMessage for String {
+    //fn is_binary(&self) -> bool {
+        //false
+    //}
+
+    //fn into_message(self) -> mpsc::Receiver<Bytes> {
+        //unimplemented!()
+    //}
+//}
+
 
 /// Convience function to convert an `impl IntoMessage` into a `Message`
 pub(crate) fn to_message(message: impl IntoMessage) -> WebsocketMessage {
@@ -210,6 +221,7 @@ impl WebsocketChannel {
                             ).await;
                         }else {
                             // TODO handle close
+                            println!("Closing ws");
                             break;
                         }
                     }
@@ -287,6 +299,7 @@ impl WebsocketChannel {
                     }
                 }
             }
+            println!("Loop completed");
         }
     }
 
