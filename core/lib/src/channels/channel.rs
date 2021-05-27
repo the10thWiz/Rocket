@@ -156,6 +156,20 @@ struct RunningMessage {
     fin: bool,
 }
 
+impl RunningMessage {
+    fn handle_xor(&mut self) {
+        for b in self.current.iter_mut() {
+            *b ^= self.mask[self.cur];
+            self.cur = (self.cur + 1) % 4;
+        }
+    }
+
+    fn xored(mut self) -> Self {
+        self.handle_xor();
+        self
+    }
+}
+
 impl WebsocketChannel {
     pub(crate) fn new() -> (Self, oneshot::Sender<Upgraded>) {
         let (broker_tx, broker_rx) = mpsc::channel(50);
@@ -352,7 +366,7 @@ impl WebsocketChannel {
                 cur: 0,
                 mask: mask.unwrap_or([0; 4]),
                 fin,
-            }
+            }.xored()
         );
     }
 
@@ -360,10 +374,6 @@ impl WebsocketChannel {
         running_message: &mut RunningMessage,
         data_tx: &mpsc::Sender<Bytes>,
     ) {
-        for b in running_message.current.iter_mut() {
-            *b ^= running_message.mask[running_message.cur];
-            running_message.cur = (running_message.cur + 1) % 4;
-        }
         let len = running_message.current.len();
         println!("{} Bytes of {} available to send", len, running_message.remaining);
         if running_message.current.len() > 0 {
@@ -395,6 +405,7 @@ impl WebsocketChannel {
                 running.current = raw_ws.read_buf.split_to(
                     raw_ws.read_buf.len().min(running.remaining)
                 );
+                running.handle_xor();
                 println!("Current is {} bytes", running.current.len());
             }else {
                 // If the current frame is final, reset the data params
