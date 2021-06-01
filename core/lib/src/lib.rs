@@ -7,6 +7,7 @@
 #![cfg_attr(nightly, feature(decl_macro))]
 
 #![warn(rust_2018_idioms)]
+#![warn(missing_docs)]
 
 //! # Rocket - Core API Documentation
 //!
@@ -17,27 +18,14 @@
 //! detailed guide]. If you'd like pointers on getting started, see the
 //! [quickstart] or [getting started] chapters of the guide.
 //!
-//! You may also be interested in looking at the
-//! [`rocket_contrib`](../rocket_contrib) documentation, which contains
-//! automatic JSON (de)serialiazation, templating support, static file serving,
-//! and other useful features.
-//!
 //! [overview]: https://rocket.rs/master/overview
 //! [full, detailed guide]: https://rocket.rs/master/guide
 //! [quickstart]: https://rocket.rs/master/guide/quickstart
 //! [getting started]: https://rocket.rs/master/guide/getting-started
 //!
-//! ## Libraries
-//!
-//! Rocket's functionality is split into two crates:
-//!
-//!   1. Core - This core library. Needed by every Rocket application.
-//!   2. [Contrib](../rocket_contrib) - Provides useful functionality for many
-//!      Rocket applications. Completely optional.
-//!
 //! ## Usage
 //!
-//! Depend on `rocket` in `Rocket.toml`:
+//! Depend on `rocket` in `Cargo.toml`:
 //!
 //! ```toml
 //! [dependencies]
@@ -68,39 +56,46 @@
 //!
 //! ## Features
 //!
-//! There are two optional, disabled-by-default features:
+//! To avoid compiling unused dependencies, Rocket gates certain features, all
+//! of which are disabled by default:
 //!
-//!   * **secrets:** Enables support for [private cookies].
-//!   * **tls:** Enables support for [TLS].
+//! | Feature   | Description                                             |
+//! |-----------|---------------------------------------------------------|
+//! | `secrets` | Support for authenticated, encrypted [private cookies]. |
+//! | `tls`     | Support for [TLS] encrypted connections.                |
+//! | `json`    | Support for [JSON (de)serialization].                   |
+//! | `msgpack` | Support for [MessagePack (de)serialization].            |
+//! | `uuid`    | Support for [UUID value parsing and (de)serialization]. |
 //!
-//! The features can be enabled in `Rocket.toml`:
+//! Features can be selectively enabled in `Cargo.toml`:
 //!
 //! ```toml
 //! [dependencies]
-//! rocket = { version = "0.5.0-dev", features = ["secrets", "tls"] }
+//! rocket = { version = "0.5.0-dev", features = ["secrets", "tls", "json"] }
 //! ```
 //!
+//! [JSON (de)serialization]: crate::serde::json
+//! [MessagePack (de)serialization]: crate::serde::msgpack
+//! [UUID value parsing and (de)serialization]: crate::serde::uuid
 //! [private cookies]: https://rocket.rs/master/guide/requests/#private-cookies
 //! [TLS]: https://rocket.rs/master/guide/configuration/#tls
 //!
 //! ## Configuration
 //!
-//! By default, Rocket applications are configured via a `Rocket.toml` file
-//! and/or `ROCKET_{PARAM}` environment variables. For more information on how
-//! to configure Rocket, including how to completely customize configuration
-//! sources, see the [configuration section] of the guide as well as the
-//! [`config`] module documentation.
-//!
-//! [configuration section]: https://rocket.rs/master/guide/configuration/
+//! Rocket offers a rich, extensible configuration system built on [Figment]. By
+//! default, Rocket applications are configured via a `Rocket.toml` file
+//! and/or `ROCKET_{PARAM}` environment variables, but applications may
+//! configure their own sources. See the [configuration guide] for full details.
 //!
 //! ## Testing
 //!
 //! The [`local`] module contains structures that facilitate unit and
 //! integration testing of a Rocket application. The top-level [`local`] module
-//! documentation and the [testing chapter of the guide] include detailed
-//! examples.
+//! documentation and the [testing guide] include detailed examples.
 //!
-//! [testing chapter of the guide]: https://rocket.rs/master/guide/testing/#testing
+//! [configuration guide]: https://rocket.rs/master/guide/configuration/
+//! [testing guide]: https://rocket.rs/master/guide/testing/#testing
+//! [Figment]: https://docs.rs/figment
 
 /// These are public dependencies! Update docs if these are changed, especially
 /// figment's version number in docs.
@@ -125,6 +120,9 @@ pub mod error;
 pub mod catcher;
 pub mod route;
 pub mod channels;
+pub mod serde;
+pub mod shield;
+pub mod fs;
 
 // Reexport of HTTP everything.
 pub mod http {
@@ -211,7 +209,8 @@ pub use async_trait::async_trait;
 #[doc(hidden)]
 pub fn async_test<R>(fut: impl std::future::Future<Output = R>) -> R {
     tokio::runtime::Builder::new_multi_thread()
-        .thread_name("rocket-test-worker-thread")
+        // NOTE: graceful shutdown depends on the "rocket-worker" prefix.
+        .thread_name("rocket-worker-test-thread")
         .worker_threads(1)
         .enable_all()
         .build()
@@ -227,6 +226,7 @@ pub fn async_main<R>(fut: impl std::future::Future<Output = R> + Send) -> R {
     // See tokio-rs/tokio#3329 for a necessary solution in `tokio`.
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(Config::from(Config::figment()).workers)
+        // NOTE: graceful shutdown depends on the "rocket-worker" prefix.
         .thread_name("rocket-worker-thread")
         .enable_all()
         .build()

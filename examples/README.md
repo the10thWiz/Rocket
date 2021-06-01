@@ -59,16 +59,16 @@ This directory contains projects showcasing Rocket's features.
     derived `Responder`.
 
   * **[`serialization`](./serialization)** - Showcases JSON and MessagePack
-    (de)serialization support in `contrib` by implementing a CRUD-like message
-    API in JSON and a simply read/echo API in MessagePack.
+    (de)serialization support by implementing a CRUD-like message API in JSON
+    and a simply read/echo API in MessagePack. Showcases UUID parsing support.
 
   * **[`state`](./state)** - Illustrates the use of request-local state and
     managed state. Uses request-local state to cache "expensive" per-request
     operations. Uses managed state to implement a simple index hit counter. Also
     uses managed state to store, retrieve, and push/pop from a concurrent queue.
 
-  * **[`static-files`](./static-files)** - Uses `contrib` `StaticFiles` serve
-    static files. Also creates a `second` manual yet safe version.
+  * **[`static-files`](./static-files)** - Uses `FileServer` to serve static
+    files. Also creates a `second` manual yet safe version.
 
   * **[`templating`](./templating)** - Illustrates using `contrib` `templates`
     support with identical examples for handlebars and tera.
@@ -80,6 +80,3 @@ This directory contains projects showcasing Rocket's features.
 
   * **[`tls`](./tls)** - Illustrates configuring TLS with a variety of key pair
     kinds.
-
-  * **[`uuid`](./uuid)** - Uses UUID support in `contrib`, converting between
-    `contrib::Uuid` type and the `uuid` crate `Uuid`.

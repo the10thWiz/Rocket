@@ -45,6 +45,30 @@ use crate::parse::{Extent, IndexedStr};
 /// Note that `uri!()` macro _always_ prefers the more specific URI variant to
 /// `Reference` when possible, as is demonstrated above for `absolute` and
 /// `origin`.
+///
+/// # (De)serialization
+///
+/// `Reference` is both `Serialize` and `Deserialize`:
+///
+/// ```rust
+/// # #[cfg(feature = "serde")] mod serde {
+/// # use _serde as serde;
+/// use serde::{Serialize, Deserialize};
+/// use rocket::http::uri::Reference;
+///
+/// #[derive(Deserialize, Serialize)]
+/// # #[serde(crate = "_serde")]
+/// struct UriOwned {
+///     uri: Reference<'static>,
+/// }
+///
+/// #[derive(Deserialize, Serialize)]
+/// # #[serde(crate = "_serde")]
+/// struct UriBorrowed<'a> {
+///     uri: Reference<'a>,
+/// }
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Reference<'a> {
     source: Option<Cow<'a, str>>,
@@ -144,12 +168,12 @@ impl<'a> Reference<'a> {
     /// assert_eq!(uri.query().unwrap(), "query");
     /// assert_eq!(uri.fragment().unwrap(), "fragment");
     /// ```
-    pub fn parse(string: &'a str) -> Result<Self, Error<'a>> {
+    pub fn parse(string: &'a str) -> Result<Reference<'a>, Error<'a>> {
         crate::parse::uri::reference_from_str(string)
     }
 
-    /// Parses the string `string` into a `Reference`. Never allocates on
-    /// success. May allocate on error.
+    /// Parses the string `string` into a `Reference`. Allocates minimally on
+    /// success and error.
     ///
     /// This method should be used instead of [`Reference::parse()`] when the
     /// source URI is already a `String`. Returns an `Error` if `string` is not
@@ -167,9 +191,10 @@ impl<'a> Reference<'a> {
     /// assert_eq!(uri.query().unwrap(), "2");
     /// assert_eq!(uri.fragment().unwrap(), "3");
     /// ```
-    pub fn parse_owned(string: String) -> Result<Self, Error<'a>> {
+    // TODO: Avoid all allocations.
+    pub fn parse_owned(string: String) -> Result<Reference<'static>, Error<'static>> {
         let uri_ref = Reference::parse(&string).map_err(|e| e.into_owned())?;
-        debug_assert!(uri_ref.source.is_some(), "UriRef parsed w/o source");
+        debug_assert!(uri_ref.source.is_some(), "Reference parsed w/o source");
 
         Ok(Reference {
             scheme: uri_ref.scheme.into_owned(),
@@ -530,3 +555,5 @@ impl std::fmt::Display for Reference<'_> {
         Ok(())
     }
 }
+
+impl_serde!(Reference<'a>, "a URI-reference");

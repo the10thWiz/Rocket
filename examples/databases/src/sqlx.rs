@@ -1,11 +1,10 @@
 use rocket::{Rocket, State, Build, futures};
 use rocket::fairing::{self, AdHoc};
 use rocket::response::status::Created;
-use rocket_contrib::json::Json;
+use rocket::serde::{Serialize, Deserialize, json::Json};
 
 use futures::stream::TryStreamExt;
 use futures::future::TryFutureExt;
-use serde::{Serialize, Deserialize};
 use sqlx::ConnectOptions;
 
 type Db = sqlx::SqlitePool;
@@ -13,6 +12,7 @@ type Db = sqlx::SqlitePool;
 type Result<T, E = rocket::response::Debug<sqlx::Error>> = std::result::Result<T, E>;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
 struct Post {
     #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
     id: Option<i64>,
@@ -67,7 +67,7 @@ async fn destroy(db: &State<Db>) -> Result<()> {
 }
 
 async fn init_db(rocket: Rocket<Build>) -> fairing::Result {
-    use rocket_contrib::databases::Config;
+    use rocket_sync_db_pools::Config;
 
     let config = match Config::from("sqlx", &rocket) {
         Ok(config) => config,

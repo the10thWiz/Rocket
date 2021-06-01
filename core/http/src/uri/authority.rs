@@ -20,6 +20,30 @@ use crate::uri::{as_utf8_unchecked, error::Error};
 /// ```
 ///
 /// Only the host part of the URI is required.
+///
+/// # (De)serialization
+///
+/// `Authority` is both `Serialize` and `Deserialize`:
+///
+/// ```rust
+/// # #[cfg(feature = "serde")] mod serde {
+/// # use _serde as serde;
+/// use serde::{Serialize, Deserialize};
+/// use rocket::http::uri::Authority;
+///
+/// #[derive(Deserialize, Serialize)]
+/// # #[serde(crate = "_serde")]
+/// struct UriOwned {
+///     uri: Authority<'static>,
+/// }
+///
+/// #[derive(Deserialize, Serialize)]
+/// # #[serde(crate = "_serde")]
+/// struct UriBorrowed<'a> {
+///     uri: Authority<'a>,
+/// }
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Authority<'a> {
     pub(crate) source: Option<Cow<'a, str>>,
@@ -107,6 +131,39 @@ impl<'a> Authority<'a> {
     /// ```
     pub fn parse(string: &'a str) -> Result<Authority<'a>, Error<'a>> {
         crate::parse::uri::authority_from_str(string)
+    }
+
+    /// Parses the string `string` into an `Authority`. Parsing never allocates
+    /// on success. May allocate on error.
+    ///
+    /// This method should be used instead of [`Authority::parse()`] when
+    /// the source URI is already a `String`. Returns an `Error` if `string` is
+    /// not a valid authority URI.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # extern crate rocket;
+    /// use rocket::http::uri::Authority;
+    ///
+    /// let source = format!("rocket.rs:8000");
+    /// let uri = Authority::parse_owned(source).expect("valid URI");
+    /// assert!(uri.user_info().is_none());
+    /// assert_eq!(uri.host(), "rocket.rs");
+    /// assert_eq!(uri.port(), Some(8000));
+    /// ```
+    pub fn parse_owned(string: String) -> Result<Authority<'static>, Error<'static>> {
+        let authority = Authority::parse(&string).map_err(|e| e.into_owned())?;
+        debug_assert!(authority.source.is_some(), "Authority parsed w/o source");
+
+        let authority = Authority {
+            host: authority.host.into_owned(),
+            user_info: authority.user_info.into_owned(),
+            port: authority.port,
+            source: Some(Cow::Owned(string)),
+        };
+
+        Ok(authority)
     }
 
     /// Returns the user info part of the authority URI, if there is one.
@@ -207,3 +264,5 @@ impl<'a> TryFrom<&'a str> for Authority<'a> {
         Authority::parse(value)
     }
 }
+
+impl_serde!(Authority<'a>, "an authority-form URI");

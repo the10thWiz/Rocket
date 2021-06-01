@@ -64,6 +64,30 @@ use crate::uri::{Authority, Path, Query, Data, Error, as_utf8_unchecked, fmt};
 /// #   assert!(!Absolute::parse(uri).unwrap().is_normalized());
 /// # }
 /// ```
+///
+/// # (De)serialization
+///
+/// `Absolute` is both `Serialize` and `Deserialize`:
+///
+/// ```rust
+/// # #[cfg(feature = "serde")] mod serde {
+/// # use _serde as serde;
+/// use serde::{Serialize, Deserialize};
+/// use rocket::http::uri::Absolute;
+///
+/// #[derive(Deserialize, Serialize)]
+/// # #[serde(crate = "_serde")]
+/// struct UriOwned {
+///     uri: Absolute<'static>,
+/// }
+///
+/// #[derive(Deserialize, Serialize)]
+/// # #[serde(crate = "_serde")]
+/// struct UriBorrowed<'a> {
+///     uri: Absolute<'a>,
+/// }
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Absolute<'a> {
     pub(crate) source: Option<Cow<'a, str>>,
@@ -113,6 +137,41 @@ impl<'a> Absolute<'a> {
     /// ```
     pub fn parse(string: &'a str) -> Result<Absolute<'a>, Error<'a>> {
         crate::parse::uri::absolute_from_str(string)
+    }
+
+    /// Parses the string `string` into an `Absolute`. Allocates minimally on
+    /// success and error.
+    ///
+    /// This method should be used instead of [`Absolute::parse()`] when the
+    /// source URI is already a `String`. Returns an `Error` if `string` is not
+    /// a valid absolute URI.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # extern crate rocket;
+    /// use rocket::http::uri::Absolute;
+    ///
+    /// let source = format!("https://rocket.rs/foo/{}/three", 2);
+    /// let uri = Absolute::parse_owned(source).expect("valid URI");
+    /// assert_eq!(uri.authority().unwrap().host(), "rocket.rs");
+    /// assert_eq!(uri.path(), "/foo/2/three");
+    /// assert!(uri.query().is_none());
+    /// ```
+    // TODO: Avoid all allocations.
+    pub fn parse_owned(string: String) -> Result<Absolute<'static>, Error<'static>> {
+        let absolute = Absolute::parse(&string).map_err(|e| e.into_owned())?;
+        debug_assert!(absolute.source.is_some(), "Absolute parsed w/o source");
+
+        let absolute = Absolute {
+            scheme: absolute.scheme.into_owned(),
+            authority: absolute.authority.into_owned(),
+            query: absolute.query.into_owned(),
+            path: absolute.path.into_owned(),
+            source: Some(Cow::Owned(string)),
+        };
+
+        Ok(absolute)
     }
 
     /// Returns the scheme part of the absolute URI.
@@ -383,6 +442,7 @@ impl<'a> Absolute<'a> {
     }
 
     /// PRIVATE. Used by codegen.
+    #[doc(hidden)]
     pub const fn const_new(
         scheme: &'a str,
         authority: Option<Authority<'a>>,
@@ -460,3 +520,5 @@ impl std::fmt::Display for Absolute<'_> {
         Ok(())
     }
 }
+
+impl_serde!(Absolute<'a>, "an absolute-form URI");

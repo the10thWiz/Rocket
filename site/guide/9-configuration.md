@@ -57,7 +57,7 @@ selected profile doesn't contain a requested values, while values in the
 [`Toml`]: @figment/providers/struct.Toml.html
 [`Json`]: @figment/providers/struct.Json.html
 [`Figment`]: @api/rocket/struct.Figment.html
-[`Deserialize`]: @serde/trait.Deserialize.html
+[`Deserialize`]: @api/rocket/serde/trait.Deserialize.html
 [`Limits::default()`]: @api/rocket/data/struct.Limits.html#impl-Default
 
 ### Secret Key
@@ -85,9 +85,8 @@ bytes Rocket should accept for that type. Rocket can parse both integers
 By default, Rocket specifies a `32 KiB` limit for incoming forms. Since Rocket
 requires specifying a read limit whenever data is read, external data guards may
 also choose to have a configure limit via the `limits` parameter. The
-[`rocket_contrib::Json`] type, for instance, uses the `limits.json` parameter.
-
-[`rocket_contrib::Json`]: @api/rocket_contrib/json/struct.Json.html
+[`Json`](@api/rocket/serde/json/struct.Json.html) type, for instance, uses the
+`limits.json` parameter.
 
 ### TLS
 
@@ -205,10 +204,8 @@ from the configured provider, which is exposed via [`Rocket::figment()`]:
 
 ```rust
 # #[macro_use] extern crate rocket;
-# extern crate serde;
 
-use serde::Deserialize;
-
+use rocket::serde::Deserialize;
 
 #[launch]
 fn rocket() -> _ {
@@ -242,8 +239,7 @@ Because it is common to store configuration in managed state, Rocket provides an
 
 ```rust
 # #[macro_use] extern crate rocket;
-# extern crate serde;
-# use serde::Deserialize;
+# use rocket::serde::Deserialize;
 # #[derive(Deserialize)]
 # struct Config {
 #     port: u16,
@@ -278,19 +274,13 @@ more complex cases.
 
 ! note: You may need to depend on `figment` and `serde` directly.
 
-  Rocket reexports `figment` from its crate root, so you can refer to `figment`
-  types via `rocket::figment`. However, Rocket does not enable all features from
-  the figment crate. As such, you may need to import `figment` directly:
+  Rocket reexports `figment` and `serde` from its crate root, so you can refer
+  to `figment` types via `rocket::figment` and `serde` types via
+  `rocket::serde`. However, Rocket does not enable all features from either
+  crate. As such, you may need to import crates directly:
 
   `
   figment = { version = "0.9", features = ["env", "toml", "json"] }
-  `
-
-  Furthermore, you should directly depend on `serde` when using its `derive`
-  feature, which is also not enabled by Rocket:
-
-  `
-  serde = { version = "1", features = ["derive"] }
   `
 
 As a first example, we override configuration values at runtime by merging
@@ -320,9 +310,10 @@ and `APP_PROFILE` to configure the selected profile:
 ```rust
 # #[macro_use] extern crate rocket;
 
-use serde::{Serialize, Deserialize};
-use figment::{Figment, Profile, providers::{Format, Toml, Serialized, Env}};
+use rocket::serde::{Serialize, Deserialize};
 use rocket::fairing::AdHoc;
+
+use figment::{Figment, Profile, providers::{Format, Toml, Serialized, Env}};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Config {

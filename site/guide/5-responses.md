@@ -63,7 +63,7 @@ fn json() -> content::Json<&'static str> {
 }
 ```
 
-! warning: This is _not_ the same as the [`Json`] in [`rocket_contrib`]!
+! warning: This is _not_ the same as the [`Json`] in [`serde`]!
 
 [`Accepted`]: @api/rocket/response/status/struct.Accepted.html
 [`content::Json`]: @api/rocket/response/content/struct.Json.html
@@ -227,7 +227,7 @@ found and a `404` when a file is not found in just 4, idiomatic lines:
 # fn main() {}
 
 # use std::path::{Path, PathBuf};
-use rocket::response::NamedFile;
+use rocket::fs::NamedFile;
 
 #[get("/<file..>")]
 async fn files(file: PathBuf) -> Option<NamedFile> {
@@ -252,7 +252,7 @@ follows:
 # fn main() {}
 
 # use std::path::{Path, PathBuf};
-use rocket::response::NamedFile;
+use rocket::fs::NamedFile;
 use rocket::response::status::NotFound;
 
 #[get("/<file..>")]
@@ -264,9 +264,8 @@ async fn files(file: PathBuf) -> Result<NamedFile, NotFound<String>> {
 
 ## Rocket Responders
 
-Some of Rocket's best features are implemented through responders. You can find
-many of these responders in the [`response`] module and [`rocket_contrib`]
-library. Among these are:
+Some of Rocket's best features are implemented through responders. Among these
+are:
 
   * [`Content`] - Used to override the Content-Type of a response.
   * [`NamedFile`] - Streams a file to the client; automatically sets the
@@ -286,8 +285,8 @@ library. Among these are:
 [`Redirect`]: @api/rocket/response/struct.Redirect.html
 [`Stream`]: @api/rocket/response/struct.Stream.html
 [`Flash`]: @api/rocket/response/struct.Flash.html
-[`MsgPack`]: @api/rocket_contrib/msgpack/struct.MsgPack.html
-[`rocket_contrib`]: @api/rocket_contrib/
+[`MsgPack`]: @api/rocket/serde/msgpack/struct.MsgPack.html
+[`Template`]: @api/rocket_dyn_templates/struct.Template.html
 
 ### Async Streams
 
@@ -346,21 +345,18 @@ how to detect and handle graceful shutdown requests.
 
 ### JSON
 
-The [`Json`] responder in [`rocket_contrib`] allows you to easily respond with
-well-formed JSON data: simply return a value of type `Json<T>` where `T` is the
-type of a structure to serialize into JSON. The type `T` must implement the
-[`Serialize`] trait from [`serde`], which can be automatically derived.
+The [`Json`] responder in allows you to easily respond with well-formed JSON
+data: simply return a value of type `Json<T>` where `T` is the type of a
+structure to serialize into JSON. The type `T` must implement the [`Serialize`]
+trait from [`serde`], which can be automatically derived.
 
 As an example, to respond with the JSON value of a `Task` structure, we might
 write:
 
 ```rust
 # #[macro_use] extern crate rocket;
-# #[macro_use] extern crate rocket_contrib;
-# fn main() {}
 
-use serde::Serialize;
-use rocket_contrib::json::Json;
+use rocket::serde::{Serialize, json::Json};
 
 #[derive(Serialize)]
 struct Task { /* .. */ }
@@ -377,23 +373,23 @@ fails, a **500 - Internal Server Error** is returned.
 
 The [serialization example] provides further illustration.
 
-[`Json`]: @api/rocket_contrib/json/struct.Json.html
+[`Json`]: @api/rocket/serde/json/struct.Json.html
 [`Serialize`]: https://docs.serde.rs/serde/trait.Serialize.html
-[`serde`]: https://docs.serde.rs/serde/
+[`serde`]: https://serde.rs
 [serialization example]: @example/serialization
 
 ## Templates
 
-Rocket includes built-in templating support that works largely through a
-[`Template`] responder in `rocket_contrib`. To render a template named "index",
-for instance, you might return a value of type `Template` as follows:
+Rocket has first-class templating support that works largely through a
+[`Template`] responder in the `rocket_dyn_templates` contrib library. To render
+a template named "index", for instance, you might return a value of type
+`Template` as follows:
 
 ```rust
 # #[macro_use] extern crate rocket;
-# #[macro_use] extern crate rocket_contrib;
 # fn main() {}
 
-use rocket_contrib::templates::Template;
+use rocket_dyn_templates::Template;
 
 #[get("/")]
 fn index() -> Template {
@@ -418,7 +414,7 @@ fairings. To attach the template fairing, simply call
 ```rust
 # #[macro_use] extern crate rocket;
 
-# use rocket_contrib::templates::Template;
+use rocket_dyn_templates::Template;
 
 #[launch]
 fn rocket() -> _ {
@@ -453,7 +449,6 @@ including how to customize a template engine to add custom helpers and filters.
 The [templating example](@example/templating) uses both Tera and Handlebars
 templating to implement the same application.
 
-[`Template`]: @api/rocket_contrib/templates/struct.Template.html
 [configurable]: ../configuration/#extras
 
 ## Typed URIs

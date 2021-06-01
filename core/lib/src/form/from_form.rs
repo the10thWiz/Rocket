@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use crate::form::prelude::*;
 use crate::http::uncased::AsUncased;
 
-/// Trait for implementing form guards: types parseable from HTTP form fields.
+/// Trait implemented by form guards: types parseable from HTTP forms.
 ///
 /// Only form guards that are _collections_, that is, collect more than one form
 /// field while parsing, should implement `FromForm`. All other types should
@@ -129,7 +129,7 @@ use crate::http::uncased::AsUncased;
 /// [`Lenient<T>`]: crate::form::Lenient
 /// [`HashMap<K, V>`]: std::collections::HashMap
 /// [`BTreeMap<K, V>`]: std::collections::BTreeMap
-/// [`TempFile`]: crate::data::TempFile
+/// [`TempFile`]: crate::fs::TempFile
 /// [`Capped<C>`]: crate::data::Capped
 /// [`time::DateTime`]: time::PrimitiveDateTime
 /// [`IpAddr`]: std::net::IpAddr

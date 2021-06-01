@@ -85,6 +85,30 @@ use crate::{RawStr, RawStrBuf};
 /// #     assert_eq!(abnormal.into_normalized(), expected);
 /// # }
 /// ```
+///
+/// # (De)serialization
+///
+/// `Origin` is both `Serialize` and `Deserialize`:
+///
+/// ```rust
+/// # #[cfg(feature = "serde")] mod serde {
+/// # use _serde as serde;
+/// use serde::{Serialize, Deserialize};
+/// use rocket::http::uri::Origin;
+///
+/// #[derive(Deserialize, Serialize)]
+/// # #[serde(crate = "_serde")]
+/// struct UriOwned {
+///     uri: Origin<'static>,
+/// }
+///
+/// #[derive(Deserialize, Serialize)]
+/// # #[serde(crate = "_serde")]
+/// struct UriBorrowed<'a> {
+///     uri: Origin<'a>,
+/// }
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Origin<'a> {
     pub(crate) source: Option<Cow<'a, str>>,
@@ -268,7 +292,7 @@ impl<'a> Origin<'a> {
     /// ```
     pub fn parse_owned(string: String) -> Result<Origin<'static>, Error<'static>> {
         let origin = Origin::parse(&string).map_err(|e| e.into_owned())?;
-        debug_assert!(origin.source.is_some(), "Origin source parsed w/o source");
+        debug_assert!(origin.source.is_some(), "Origin parsed w/o source");
 
         Ok(Origin {
             path: origin.path.into_owned(),
@@ -485,6 +509,8 @@ impl std::fmt::Display for Origin<'_> {
         Ok(())
     }
 }
+
+impl_serde!(Origin<'a>, "an origin-form URI");
 
 #[cfg(test)]
 mod tests {
