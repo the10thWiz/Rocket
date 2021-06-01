@@ -1,6 +1,7 @@
 use std::fmt;
 use std::convert::From;
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use yansi::Paint;
 
@@ -347,7 +348,7 @@ pub struct StaticInfo {
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFuture<'r>,
     /// The route's websocket handler, i.e, the annotated function.
     pub websocket_handler: WebsocketEvent<
-        for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFutureWs<'r>
+        for<'r> fn(Arc<crate::Request<'r>>, crate::Data) -> BoxFutureWs<'r>
     >,
     /// The route's rank, if any.
     pub rank: Option<isize>,

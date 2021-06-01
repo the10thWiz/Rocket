@@ -1,5 +1,7 @@
+use std::borrow::Cow;
 use std::convert::TryInto;
 use std::io;
+use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use futures::future::pending;
@@ -42,6 +44,7 @@ impl IntoMessage for Data {
         self.open(ByteUnit::Byte(1024)).into_message()
     }
 }
+
 
 impl<T: AsyncRead + Send + Unpin + 'static> IntoMessage for T {
     fn is_binary(&self) -> bool {
@@ -277,28 +280,48 @@ impl WebsocketChannel {
                         if let Some(data) = data {
                             //println!("Forwarding {} bytes of data", data.len());
                             if let Some(message) = outgoing_message.take() {
-                                let int_header = FrameHeader::new(false,
+                                let mut data = vec![data];
+                                let mut fin = false;
+                                if let Some(data_rx) = &mut outgoing_message {
+                                    loop {
+                                        // We only wait 10ms for each chunk to be sent
+                                        let tmp = tokio::time::timeout(Duration::from_millis(10), data_rx.data.recv()).await;
+                                        if let Ok(Some(next)) = tmp {
+                                            data.push(next);
+                                        } else if let Ok(None) = tmp {
+                                            fin = true;
+                                            break;
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                }
+                                let int_header = FrameHeader::new(fin,
                                                                   message.header.rsv(),
                                                                   message.header.opcode(),
                                                                   message.header.mask(),
-                                                                  data.len().into());
+                                                                  data.iter().map(|s| s.len()).sum::<usize>().into());
                                 let _e = raw_ws.codec.encode(int_header, &mut raw_ws.write_buf);
                                 let _e = raw_ws.io.write_all_buf(&mut raw_ws.write_buf).await;
-                                let _e = raw_ws.io.write_all(&data).await;
-                                outgoing_message = Some(WebsocketMessage {
-                                    // Next message will be a continue frame
-                                    header: FrameHeader::new(false,
-                                                             message.header.rsv(),
-                                                             0x0,
-                                                             message.header.mask(),
-                                                             0usize.into()),
-                                    data: message.data,
-                                });
+                                for data in data {
+                                    let _e = raw_ws.io.write_all(&data).await;
+                                }
+                                if !fin {
+                                    outgoing_message = Some(WebsocketMessage {
+                                        // Next message will be a continue frame
+                                        header: FrameHeader::new(false,
+                                                                 message.header.rsv(),
+                                                                 0x0,
+                                                                 message.header.mask(),
+                                                                 0usize.into()),
+                                        data: message.data,
+                                    });
+                                }
                             }
-                        }else {
-                            // TODO fid potential fix for sending zero size frame, maybe wrapping
-                            // the Bytes in an enum to indicate if we are done? This should work
-                            // though
+                        } else {
+                            // This will sometimes send an empty frame to end a message. However,
+                            // if the sending half of the data channel is dropped immediately after
+                            // the final block was sent, this might be avoided
                             //println!("Compeleting message");
                             if let Some(message) = outgoing_message.take() {
                                 let int_header = FrameHeader::new(true,
