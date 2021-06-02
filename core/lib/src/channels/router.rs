@@ -256,15 +256,6 @@ impl WebsocketRouter {
                 ).await;
             },
         }
-
-        //let req_copy = req.clone();
-        //if rocket.websocket_router.route(Event::Message, &req_copy, &None).nth(0).is_some() {
-            //let (response, protocol) = Self::create_reponse(&req_copy);
-            //rocket.send_response(response, tx).await;
-        //}else {
-            //let response = Self::handle_error(Status::NotFound);
-            //rocket.send_response(response, tx).await;
-        //}
     }
 
     fn protocol(req: &Request<'_>) -> Protocol {
@@ -414,7 +405,10 @@ impl WebsocketRouter {
                                     let new_request = Arc::new(new_request);
                                     let join = rocket.websocket_router.handle_message(Event::Join, new_request.clone(), &None, Data::local(vec![])).await;
                                     match join {
-                                        Ok(()) => subscriptions.push(new_request),
+                                        Ok(()) => {
+                                            broker.subscribe(new_request.uri(), &ws);
+                                            subscriptions.push(new_request);
+                                        },
                                         Err(s) => {
                                             error_message(format!("ERR\u{b7}{}", s), ws.subscribe_handle()).await;
                                         }
@@ -425,6 +419,7 @@ impl WebsocketRouter {
                             },
                             Ok(MultiplexAction::Unsubscribe(topic)) => {
                                 if let Some(leave_req) = Self::remove_topic(subscriptions, topic) {
+                                    broker.unsubscribe(leave_req.uri(), &ws);
                                     let leave = rocket.websocket_router.handle_message(Event::Leave, leave_req.clone(), &None, Data::local(vec![])).await;
                                 } else {
                                     error_message("ERR\u{b7}Not Subscribed", ws.subscribe_handle()).await;

@@ -21,4 +21,5 @@ members = [
 
   "websocket-echo",
   "websocket-channels",
+  "websocket-channels-multiplex",
 ]
