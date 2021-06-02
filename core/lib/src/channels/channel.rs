@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::convert::TryInto;
 use std::io;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
@@ -146,6 +148,7 @@ impl IntoMessage for WebsocketMessage {
 pub struct WebsocketChannel {
     inner: mpsc::Receiver<WebsocketMessage>,
     sender: mpsc::Sender<WebsocketMessage>,
+    should_send_close: Arc<AtomicBool>,
 }
 
 /// Soft maximum buffer size
@@ -178,10 +181,12 @@ impl WebsocketChannel {
         let (broker_tx, broker_rx) = mpsc::channel(50);
         let (upgrade_tx, upgrade_rx) = oneshot::channel();
         let (message_tx, message_rx) = mpsc::channel(1);
-        tokio::spawn(Self::message_handler(upgrade_rx, broker_rx, message_tx));
+        let should_send_close = Arc::new(AtomicBool::new(true));
+        tokio::spawn(Self::message_handler(upgrade_rx, broker_rx, message_tx, should_send_close.clone()));
         (Self {
                 inner: message_rx,
                 sender: broker_tx,
+                should_send_close,
         }, upgrade_tx)
     }
 
@@ -197,10 +202,17 @@ impl WebsocketChannel {
         self.inner.recv().await
     }
 
+    /// Gets the should_send_close flag. This is set to false if we have already sent a close
+    /// message
+    pub(crate) fn should_send_close(&self) -> bool {
+        self.should_send_close.load(atomic::Ordering::Acquire)
+    }
+
     async fn message_handler(
         upgrade_rx: oneshot::Receiver<Upgraded>,
         mut broker_rx: mpsc::Receiver<WebsocketMessage>,
-        message_tx: mpsc::Sender<WebsocketMessage>
+        message_tx: mpsc::Sender<WebsocketMessage>,
+        should_send_close: Arc<AtomicBool>,
     ) {
         // Get upgrade object (basically just a boxed handle to the tcp or tls stream)
         if let Ok(upgrade) = upgrade_rx.await {
@@ -264,6 +276,9 @@ impl WebsocketChannel {
                         }
                     } => {
                         if let Some(message) = message {
+                            if message.header.opcode() == u8::from(Opcode::Close) {
+                                should_send_close.store(false, atomic::Ordering::Release);
+                            }
                             //println!("Send: {:?}", message);
                             outgoing_message = Some(message);
                         }else {
@@ -497,6 +512,7 @@ impl<'r> Channel<'r> {
     }
 
     pub async fn broadcast(&self, message: impl IntoMessage) {
+        println!("Broadcasting");
         self.broker.send(&self.uri, to_message(message));
     }
 }

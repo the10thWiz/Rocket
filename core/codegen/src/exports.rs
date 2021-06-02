@@ -85,6 +85,7 @@ define_exported_paths! {
     _Box => ::std::boxed::Box,
     _Vec => ::std::vec::Vec,
     _Cow => ::std::borrow::Cow,
+    _Arc => ::std::sync::Arc,
     BorrowMut => ::std::borrow::BorrowMut,
     Outcome => ::rocket::outcome::Outcome,
     FromForm => ::rocket::form::FromForm,

@@ -448,7 +448,7 @@ fn websocket_query_decls(route: &WebsocketRoute) -> Option<TokenStream> {
     }
 
     define_spanned_export!(Span::call_site() =>
-        __req, __data, _log, _form, _Ok, _Err, _Some, _None
+        __req, __data, _log, _form, _Ok, _Err, _Some, _None, Outcome
     );
 
     // Record all of the static parameters for later filtering.
@@ -513,7 +513,7 @@ fn websocket_query_decls(route: &WebsocketRoute) -> Option<TokenStream> {
         if !_e.is_empty() {
             #_log::warn_!("query string failed to match declared route");
             for _err in _e { #_log::warn_!("{}", _err); }
-            return #_Err(#__data);// #Outcome::Forward(#__data);
+            return #Outcome::Forward(#__data);
         }
 
         #(let #ident = #ident.unwrap();)*
@@ -527,15 +527,15 @@ fn websocket_request_guard_decl(guard: &Guard) -> TokenStream {
     );
 
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromRequest>::from_request(#__req).await {
+        let #ident: #ty = match <#ty as #FromRequest>::from_request(#__req.as_ref()).await {
             #Outcome::Success(__v) => __v,
             #Outcome::Forward(_) => {
                 #_log::warn_!("`{}` request guard is forwarding.", stringify!(#ty));
-                return #_Err(#__data);// #Outcome::Forward(#__data);
+                return #Outcome::Forward(#__data);
             },
             #Outcome::Failure((__c, _e)) => {
                 #_log::warn_!("`{}` request guard failed: {:?}.", stringify!(#ty), _e);
-                return #_Err(#__data);// #Outcome::Failure(__c);
+                return #Outcome::Failure(__c);
             }
         };
     }
@@ -545,7 +545,7 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
     let (i, name, ty) = (guard.index, &guard.name, &guard.ty);
     define_spanned_export!(ty.span() =>
         __req, __data, _log, _None, _Some, _Ok, _Err,
-        FromSegments, FromParam
+        FromSegments, FromParam, Outcome
     );
 
     // Returned when a dynamic parameter fails to parse.
@@ -553,7 +553,7 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
         #_log::warn_!("`{}: {}` param guard parsed forwarding with error {:?}",
             #name, stringify!(#ty), __error);
 
-        #_Err(#__data)
+        #Outcome::Forward(#__data)
     });
 
     // All dynamic parameters should be found if this function is being called;
@@ -569,7 +569,7 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
                     #_log::error_!("Internal invariant broken: dyn param not found.");
                     #_log::error_!("Please report this to the Rocket issue tracker.");
                     #_log::error_!("https://github.com/SergioBenitez/Rocket/issues");
-                    return #_Err(#__data);// #Outcome::Forward(#__data);
+                    return #Outcome::Forward(#__data);
                 }
             }
         },
@@ -587,17 +587,17 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn websocket_data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, _Err, _Ok);
+    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, Status);
 
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
+        let #ident: #ty = match <#ty as #FromData>::from_data(#__req.as_ref(), #__data).await {
             #Outcome::Success(_m) => _m,
             #Outcome::Forward(_d) => {
-                return #_Err(_d);
+                return #Outcome::Forward(_d);
             }
-            #Outcome::Failure(_e) => {
+            #Outcome::Failure((_c, _e)) => {
                 #_log::error_!("`{}` message conversion failed: {:?}.", stringify!(#ty), _e);
-                return #_Ok(());
+                return #Outcome::Failure(_c);
             }
         };
     }
@@ -642,7 +642,7 @@ fn websocket_responder_outcome_expr(route: &WebsocketRoute) -> TokenStream {
     };
 
     let user_handler_fn_name = &route.handler.sig.ident;
-    define_spanned_export!(ret_span => __req, _route, _Ok);
+    define_spanned_export!(ret_span => __req, _route, Outcome);
     let parameter_names = route.arguments.map.values()
         .map(|(ident, _)| ident.rocketized());
 
@@ -650,8 +650,8 @@ fn websocket_responder_outcome_expr(route: &WebsocketRoute) -> TokenStream {
         .map(|a| quote_spanned!(a.span().into() => .await));
 
     quote_spanned! { ret_span =>
-        let res = #user_handler_fn_name(#(#parameter_names),*) #_await;
-        #_Ok(res)
+        let _res = #user_handler_fn_name(#(#parameter_names),*) #_await;
+        #Outcome::Success(())
     }
 }
 
@@ -754,7 +754,7 @@ fn codegen_websocket(event: WebsocketEvent, route: WebsocketRoute) -> Result<Tok
             #[allow(non_snake_case, unreachable_patterns, unreachable_code)]
             fn into_info(self) -> #_route::StaticInfo {
                 fn monomorphized_function<'_b>(
-                    #__req: &'_b #Request<'_>,
+                    #__req: #_Arc<#Request<'_b>>,
                     #__data: #Data
                 ) -> #_route::BoxFutureWs<'_b> {
                     #_Box::pin(async move {

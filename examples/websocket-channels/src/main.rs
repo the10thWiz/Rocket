@@ -1,12 +1,12 @@
 #[macro_use] extern crate rocket;
 
-use rocket::channels::{Websocket, Channel};
+use rocket::channels::Channel;
 use rocket::response::content::Html;
-use rocket::State;
+use rocket::{State, Data};
 
-#[websocket("/listen", "<data>")]
-async fn listen(data: String, websocket: Websocket, channel: &State<Channel>) {
-    channel.broadcast(data);
+#[message("/listen", "<data>")]
+async fn listen(data: Data, ws: Channel<'_>) {
+    ws.broadcast(data).await;
 }
 
 #[get("/")]
@@ -14,10 +14,11 @@ fn index() -> Html<&'static str> {
     Html(r#"<!DOCTYPE html>
 <html lang="en">
     <head>
-        <title>WebSocket Echo Server</title>
+        <title>WebSocket Channel Server</title>
     </head>
     <body>
-        <h1>Echo Server</h1>
+        <h1>Channel Server</h1>
+        <p>Messages sent from here will be sent to every connected client</p>
         <p id="status">Connecting...</p>
         <input type="text" id="text" />
         <button type="button" id="send">Send</button>
@@ -29,7 +30,7 @@ fn index() -> Html<&'static str> {
             const ws = new WebSocket('ws://' + location.host + '/listen');
             ws.onopen = function(e) {
                 status.innerText = 'Connected :)';
-                ws.send("listen:global");
+                //ws.send("listen:global");
             };
             ws.onclose = function(e) {
                 status.innerText = 'Disconnected :(';

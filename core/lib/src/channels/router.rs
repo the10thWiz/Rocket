@@ -11,8 +11,12 @@ use futures::{Future, FutureExt};
 use rocket_http::ext::IntoOwned;
 use rocket_http::{Header, Status, hyper::upgrade::Upgraded, uri::Origin};
 use rocket_http::hyper::{self, header::{CONNECTION, UPGRADE}, upgrade::OnUpgrade};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::channel;
 use tokio::sync::oneshot;
 
+use websocket_codec::protocol::FrameHeader;
 use websocket_codec::{ClientRequest, Opcode};
 
 use crate::channels::WebsocketMessage;
@@ -144,7 +148,7 @@ impl WebsocketRouter {
         topic: &'r Option<Origin<'_>>,
         mut message: Data,
     ) -> Result<(), Status> {
-        let req_copy = req.clone();
+        //let req_copy = req.clone();
         for route in self.routes.get(&event)
             .into_iter()
             .flat_map(|routes| routes.iter()) {
@@ -163,7 +167,15 @@ impl WebsocketRouter {
                 }
             }
         }
-        Err(Status::NotFound)
+        if event == Event::Join && self.routes.get(&Event::Message)
+            .into_iter()
+            .flat_map(|routes| routes.iter()).next().is_some()
+        {
+            // Succeed if no matching join handlers failed
+            Ok(())
+        } else {
+            Err(Status::NotFound)
+        }
     }
 
     pub fn is_upgrade(&self, hyper_request: &hyper::Request<hyper::Body>) -> bool {
@@ -308,11 +320,26 @@ impl WebsocketRouter {
                 let data = match message.opcode() {
                     Opcode::Text => Data::from_ws(message, Some(false)),
                     Opcode::Binary => Data::from_ws(message, Some(true)),
-                    Opcode::Ping => continue,
+                    Opcode::Ping => {
+                        let (h, d) = message.into_parts();
+                        let message = WebsocketMessage::from_parts(FrameHeader::new(h.fin(), h.rsv(), Opcode::Pong.into(), h.mask(), h.data_len()), d);
+                        let _e = ws.subscribe_handle().send(message).await;
+                        continue;
+                    },
                     Opcode::Pong => continue,
-                    Opcode::Close => break,
+                    Opcode::Close => {
+                        if ws.should_send_close() {
+                            let (tx, rx) = channel(1);
+                            std::mem::drop(tx);
+                            let _e = ws.subscribe_handle().send(WebsocketMessage::from_parts(
+                                    FrameHeader::new(true, 0x0, Opcode::Close.into(), None, 0usize.into()),
+                                    rx
+                                )).await;
+                        }
+                        break;
+                    },
                 };
-                let res = request.state.rocket.websocket_router.handle_message(
+                let _res = request.state.rocket.websocket_router.handle_message(
                         Event::Message,
                         request.clone(),
                         &None,
@@ -320,7 +347,7 @@ impl WebsocketRouter {
                     ).await;
             }
             broker.unsubscribe_all(&ws);
-            request.state.rocket.websocket_router.handle_message(Event::Leave, request.clone(), &None, Data::local(vec![])).await;
+            let _e = request.state.rocket.websocket_router.handle_message(Event::Leave, request.clone(), &None, Data::local(vec![])).await;
             // TODO implement Ping/Pong (not exposed to the user)
             // TODO handle Close correctly (we should reply with Close,
             // unless we initiated it)
@@ -378,7 +405,7 @@ impl WebsocketRouter {
                     Err(MultiplexError::ControlMessage) => 
                         match Self::handle_control(data, subscriptions, &broker).await {
                             Err(message) => {
-                                let _e = ws.subscribe_handle().send(to_message(Cursor::new(message))).await;
+                                error_message(message, ws.subscribe_handle()).await;
                             }
                             Ok(MultiplexAction::Subscribe(topic)) => {
                                 if !subscriptions.iter().any(|r| r.uri() == &topic) {
@@ -389,28 +416,29 @@ impl WebsocketRouter {
                                     match join {
                                         Ok(()) => subscriptions.push(new_request),
                                         Err(s) => {
-                                            let _e = ws.subscribe_handle().send(to_message(Cursor::new(format!("ERR\u{b7}{}", s)))).await;
+                                            error_message(format!("ERR\u{b7}{}", s), ws.subscribe_handle()).await;
                                         }
                                     }
                                 }else {
-                                    let _e = ws.subscribe_handle().send(to_message(Cursor::new("ERR\u{b7}Already Subscribed"))).await;
+                                    error_message("ERR\u{b7}Already Subscribed", ws.subscribe_handle()).await;
                                 }
                             },
                             Ok(MultiplexAction::Unsubscribe(topic)) => {
                                 if let Some(leave_req) = Self::remove_topic(subscriptions, topic) {
                                     let leave = rocket.websocket_router.handle_message(Event::Leave, leave_req.clone(), &None, Data::local(vec![])).await;
                                 } else {
-                                    let _e = ws.subscribe_handle().send(to_message(Cursor::new("ERR\u{b7}Not Subscribed"))).await;
+                                    error_message("ERR\u{b7}Not Subscribed", ws.subscribe_handle()).await;
                                 }
                             }
-                            _ => (),
+                            //_ => (),
                         }
                     Err(e) => {
+                        e.send_message(ws.subscribe_handle()).await;
                     }
                 }
             }
             broker.unsubscribe_all(&ws);
-            rocket.websocket_router.handle_message(Event::Leave, subscriptions[0].clone(), &None, Data::local(vec![])).await;
+            let _e = rocket.websocket_router.handle_message(Event::Leave, subscriptions[0].clone(), &None, Data::local(vec![])).await;
             // TODO implement Ping/Pong (not exposed to the user)
             // TODO handle Close correctly (we should reply with Close,
             // unless we initiated it)
@@ -490,6 +518,24 @@ enum MultiplexError {
     ControlMessage,
     Utf8Error(Utf8Error),
     UrlError(rocket_http::uri::error::Error<'static>),
+}
+
+impl MultiplexError {
+    async fn send_message(self, sender: mpsc::Sender<WebsocketMessage>) {
+        match self {
+            Self::TopicNotPresent => error_message("ERR\u{B7}Topic not present", sender).await,
+            Self::NotSubscribed => error_message("ERR\u{B7}Not subscribed to topic", sender).await,
+            Self::ControlMessage => error_message("ERR\u{B7}Unexpected control message", sender).await,
+            Self::Utf8Error(_e) => error_message("ERR\u{B7}Topic was not valid utf8", sender).await,
+            Self::UrlError(_e) => error_message("ERR\u{B7}Topic was not a valid url", sender).await,
+        }
+    }
+}
+
+async fn error_message(bytes: impl Into<Bytes>, sender: mpsc::Sender<WebsocketMessage>) {
+    let (tx, rx) = mpsc::channel(2);
+    let _e = sender.send(WebsocketMessage::new(false, rx)).await;
+    let _e = tx.send(bytes.into()).await;
 }
 
 impl From<Utf8Error> for MultiplexError {
