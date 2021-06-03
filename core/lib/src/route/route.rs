@@ -377,11 +377,16 @@ impl From<StaticInfo> for Route {
     }
 }
 
+/// WebSocketEvent types for constructing Handlers
 #[derive(Clone)]
 pub enum WebsocketEvent<T> {
+    /// No websocket events, the defualt
     None,
+    /// A Join event, triggered when a client creates a connection
     Join(T),
+    /// A Message event, triggered once for each message recieved from a client
     Message(T),
+    /// A Leave event, triggered when a client closes a connection
     Leave(T),
 }
 

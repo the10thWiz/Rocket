@@ -59,6 +59,10 @@ fn index() -> Html<&'static str> {
                     }, i * 10);
                 }
             }
+            let tmp = JSON.stringify(arr) + '\n';
+            for(let i = 0; i < 5; i++) {
+                tmp+= tmp;
+            }
         </script>
     </body>
 </html>"#)

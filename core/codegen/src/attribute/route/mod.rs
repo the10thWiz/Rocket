@@ -587,7 +587,7 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn websocket_data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, Status);
+    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req.as_ref(), #__data).await {
@@ -799,7 +799,11 @@ fn codegen_websocket(event: WebsocketEvent, route: WebsocketRoute) -> Result<Tok
     }.into())
 }
 /// Websocket handler attribute
-pub fn websocket_parse(event: WebsocketEvent, args: TokenStream, input: TokenStream) -> Result<TokenStream> {
+pub fn websocket_parse(
+    event: WebsocketEvent,
+    args: TokenStream,
+    input: TokenStream
+) -> Result<TokenStream> {
     let function: syn::ItemFn = syn::parse2(input)
         .map_err(|e| Diagnostic::from(e))
         .map_err(|d| d.help(format!("#[websocket] can only be used on functions")))?;
@@ -810,6 +814,11 @@ pub fn websocket_parse(event: WebsocketEvent, args: TokenStream, input: TokenStr
     codegen_websocket(event, WebsocketRoute::from(attribute, function)?)
 }
 
-pub fn websocket(event: WebsocketEvent, args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> TokenStream {
-    websocket_parse(event.into(), args.into(), input.into()).unwrap_or_else(|diag| diag.emit_as_item_tokens())
+pub fn websocket(
+    event: WebsocketEvent,
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream
+) -> TokenStream {
+    websocket_parse(event.into(), args.into(), input.into())
+        .unwrap_or_else(|diag| diag.emit_as_item_tokens())
 }

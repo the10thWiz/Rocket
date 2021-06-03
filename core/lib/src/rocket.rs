@@ -6,7 +6,7 @@ use yansi::Paint;
 use either::Either;
 use figment::{Figment, Provider};
 
-use crate::channels::broker::Broker;
+use crate::channels::Broker;
 use crate::{Catcher, Config, Route, Shutdown, channels::WebsocketRouter, sentinel, shield::Shield};
 use crate::router::Router;
 use crate::trip_wire::TripWire;

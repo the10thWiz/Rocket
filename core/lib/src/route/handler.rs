@@ -12,6 +12,7 @@ pub type Outcome<'r> = crate::outcome::Outcome<Response<'r>, Status, Data>;
 /// [`Handler`].
 pub type BoxFuture<'r, T = Outcome<'r>> = futures::future::BoxFuture<'r, T>;
 
+/// Type alias for the return type of a `WebsocketRoute`
 pub type WsOutcome = crate::outcome::Outcome<(), Status, Data>;
 /// Type alias for the return type of a _raw_ Websocket Route
 pub type BoxFutureWs<'r, T = WsOutcome> = futures::future::BoxFuture<'r, T>;
@@ -173,18 +174,14 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
     }
 }
 
+/// Trait type implemented by Rocket Websocket handlers
 #[crate::async_trait]
 pub trait WebsocketHandler: CloneableWs + Send + Sync + 'static {
     /// Called by Rocket when a `Request` with its associated `Data` should be
     /// handled by this handler.
     ///
     /// The variant of `Outcome` returned by the returned `Future` determines
-    /// what Rocket does next. If the return value is a `Success(Response)`, the
-    /// wrapped `Response` is used to respond to the client. If the return value
-    /// is a `Failure(Status)`, the error catcher for `Status` is invoked to
-    /// generate a response. Otherwise, if the return value is `Forward(Data)`,
-    /// the next matching route is attempted. If there are no other matching
-    /// routes, the `404` error catcher is invoked.
+    /// what Rocket does next.
     async fn handle<'r>(&self, request: Arc<Request<'_>>, data: Data) -> WsOutcome;
 }
 

@@ -12,7 +12,7 @@
 use rocket_http::{ext::IntoOwned, uri::Origin};
 use tokio::sync::mpsc;
 
-use super::{WebsocketChannel, channel::{IntoMessage, WebsocketMessage, to_message}};
+use super::{WebsocketChannel, IntoMessage, WebsocketMessage, to_message};
 
 /// Internal enum for sharing messages between clients
 enum BrokerMessage {
@@ -60,7 +60,9 @@ impl Broker {
 
     /// Sends a message to all clients subscribed to this channel using descriptor `id`
     pub(crate) fn send(&self, id: &Origin<'_>, message: impl IntoMessage) {
-        let _ = self.channels.send(BrokerMessage::Forward(id.clone().into_owned(), to_message(message)));
+        let _ = self.channels.send(
+                BrokerMessage::Forward(id.clone().into_owned(), to_message(message))
+            );
     }
 
     /// Subscribes the client to this channel using the descriptor `id`
@@ -149,7 +151,8 @@ impl ChannelMap {
                 // message.clone() should be very cheap, since it uses `Bytes` internally to store
                 // the raw data
                 let (data_tx, data_rx) = mpsc::channel(2);
-                if let Ok(()) = t.send(WebsocketMessage::from_parts(header.clone(), data_rx)).await {
+                let message = WebsocketMessage::from_parts(header.clone(), data_rx);
+                if let Ok(()) = t.send(message).await {
                     chs.push(data_tx);
                 }
             }

@@ -1,8 +1,6 @@
 //! Internal Routing structs
 
-use std::borrow::Cow;
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::str::Utf8Error;
 use std::{io::Cursor, sync::Arc};
 
@@ -12,15 +10,12 @@ use rocket_http::ext::IntoOwned;
 use rocket_http::{Header, Status, hyper::upgrade::Upgraded, uri::Origin};
 use rocket_http::hyper::{self, header::{CONNECTION, UPGRADE}, upgrade::OnUpgrade};
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::mpsc::channel;
 use tokio::sync::oneshot;
 
 use websocket_codec::protocol::FrameHeader;
 use websocket_codec::{ClientRequest, Opcode};
 
 use crate::channels::WebsocketMessage;
-use crate::channels::channel::to_message;
 use crate::route::WebsocketEvent;
 use crate::route::WsOutcome;
 use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
@@ -101,9 +96,12 @@ impl WebsocketRouter {
         //}
         match route.websocket_handler {
             WebsocketEvent::None => (),
-            WebsocketEvent::Join(_) => self.routes.entry(Event::Join).or_default().push(route),
-            WebsocketEvent::Message(_) => self.routes.entry(Event::Message).or_default().push(route),
-            WebsocketEvent::Leave(_) => self.routes.entry(Event::Leave).or_default().push(route),
+            WebsocketEvent::Join(_) =>
+                self.routes.entry(Event::Join).or_default().push(route),
+            WebsocketEvent::Message(_) =>
+                self.routes.entry(Event::Message).or_default().push(route),
+            WebsocketEvent::Leave(_) =>
+                self.routes.entry(Event::Leave).or_default().push(route),
         }
     }
 
@@ -127,18 +125,6 @@ impl WebsocketRouter {
         }
 
         Ok(())
-    }
-
-    fn route<'r, 'a: 'r>(
-        &'a self,
-        event: Event,
-        req: &'r Arc<Request<'r>>,
-        topic: &'r Option<Origin<'_>>,
-    ) -> impl Iterator<Item = &'a Route> + 'r {
-        // Note that routes are presorted by ascending rank on each `add`.
-        self.routes.get(&event)
-            .into_iter()
-            .flat_map(move |routes| routes.iter().filter(move |r| r.matches_topic(Arc::as_ref(req), topic)))
     }
 
     async fn handle_message<'r, 'a: 'r>(
@@ -220,13 +206,20 @@ impl WebsocketRouter {
 
         //let mut response = None;
         let (websocket_channel, upgrade_tx) = WebsocketChannel::new();
-        req.local_cache(|| Some(InnerChannel::from_websocket(&websocket_channel, rocket.state().unwrap())));
+        req.local_cache(||
+                Some(InnerChannel::from_websocket(&websocket_channel, rocket.state().unwrap()))
+            );
 
         let protocol = Self::protocol(&req);
-        
+
         let mut channels = vec![Arc::new(req)];
-        
-        let join = rocket.websocket_router.handle_message(Event::Join, channels[0].clone(), &None, Data::local(vec![])).await;
+
+        let join = rocket.websocket_router.handle_message(
+                Event::Join,
+                channels[0].clone(),
+                &None,
+                Data::local(vec![])
+            ).await;
         match join {
             Ok(()) => {
                 let response = Self::create_reponse(channels[0].clone(), protocol);
@@ -305,7 +298,7 @@ impl WebsocketRouter {
         let broker = request.rocket().state::<Broker>().unwrap().clone();
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
-            
+
             broker.subscribe(request.uri(), &ws);
             while let Some(message) = ws.next().await {
                 let data = match message.opcode() {
@@ -313,18 +306,31 @@ impl WebsocketRouter {
                     Opcode::Binary => Data::from_ws(message, Some(true)),
                     Opcode::Ping => {
                         let (h, d) = message.into_parts();
-                        let message = WebsocketMessage::from_parts(FrameHeader::new(h.fin(), h.rsv(), Opcode::Pong.into(), h.mask(), h.data_len()), d);
+                        let message = WebsocketMessage::from_parts(
+                                FrameHeader::new(
+                                    h.fin(),
+                                    h.rsv(),
+                                    Opcode::Pong.into(),
+                                    h.mask(),
+                                    h.data_len()
+                                ),
+                                d
+                            );
                         let _e = ws.subscribe_handle().send(message).await;
                         continue;
                     },
                     Opcode::Pong => continue,
                     Opcode::Close => {
                         if ws.should_send_close() {
-                            let (tx, rx) = channel(1);
-                            std::mem::drop(tx);
                             let _e = ws.subscribe_handle().send(WebsocketMessage::from_parts(
-                                    FrameHeader::new(true, 0x0, Opcode::Close.into(), None, 0usize.into()),
-                                    rx
+                                    FrameHeader::new(
+                                        true,
+                                        0x0,
+                                        Opcode::Close.into(),
+                                        None,
+                                        0usize.into()
+                                    ),
+                                    message.into_parts().1
                                 )).await;
                         }
                         break;
@@ -338,7 +344,12 @@ impl WebsocketRouter {
                     ).await;
             }
             broker.unsubscribe_all(&ws);
-            let _e = request.state.rocket.websocket_router.handle_message(Event::Leave, request.clone(), &None, Data::local(vec![])).await;
+            let _e = request.state.rocket.websocket_router.handle_message(
+                    Event::Leave,
+                    request.clone(),
+                    &None,
+                    Data::local(vec![])
+                ).await;
             // TODO implement Ping/Pong (not exposed to the user)
             // TODO handle Close correctly (we should reply with Close,
             // unless we initiated it)
@@ -369,7 +380,7 @@ impl WebsocketRouter {
         let broker = rocket.state::<Broker>().unwrap().clone();
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
-            
+
             broker.subscribe(subscriptions[0].uri(), &ws);
             while let Some(message) = ws.next().await {
                 let mut data = match message.opcode() {
@@ -393,8 +404,8 @@ impl WebsocketRouter {
                             Err(_s) => (),
                         }
                     }
-                    Err(MultiplexError::ControlMessage) => 
-                        match Self::handle_control(data, subscriptions, &broker).await {
+                    Err(MultiplexError::ControlMessage) =>
+                        match Self::handle_control(data).await {
                             Err(message) => {
                                 error_message(message, ws.subscribe_handle()).await;
                             }
@@ -403,26 +414,46 @@ impl WebsocketRouter {
                                     let mut new_request = subscriptions[0].as_ref().clone();
                                     new_request.set_uri(topic);
                                     let new_request = Arc::new(new_request);
-                                    let join = rocket.websocket_router.handle_message(Event::Join, new_request.clone(), &None, Data::local(vec![])).await;
+                                    let join = rocket.websocket_router.handle_message(
+                                            Event::Join,
+                                            new_request.clone(),
+                                            &None,
+                                            Data::local(vec![])
+                                        ).await;
                                     match join {
                                         Ok(()) => {
                                             broker.subscribe(new_request.uri(), &ws);
                                             subscriptions.push(new_request);
                                         },
                                         Err(s) => {
-                                            error_message(format!("ERR\u{b7}{}", s), ws.subscribe_handle()).await;
+                                            error_message(
+                                                format!("ERR\u{b7}{}", s),
+                                                ws.subscribe_handle()
+                                            ).await;
                                         }
                                     }
                                 }else {
-                                    error_message("ERR\u{b7}Already Subscribed", ws.subscribe_handle()).await;
+                                    error_message(
+                                        "ERR\u{b7}Already Subscribed",
+                                        ws.subscribe_handle()
+                                    ).await;
                                 }
                             },
                             Ok(MultiplexAction::Unsubscribe(topic)) => {
                                 if let Some(leave_req) = Self::remove_topic(subscriptions, topic) {
                                     broker.unsubscribe(leave_req.uri(), &ws);
-                                    let leave = rocket.websocket_router.handle_message(Event::Leave, leave_req.clone(), &None, Data::local(vec![])).await;
+                                    let _leave = rocket.websocket_router.handle_message(
+                                        Event::Leave,
+                                        leave_req.clone(),
+                                        &None,
+                                        Data::local(vec![])
+                                    ).await;
+                                    // TODO: handle errors in leave
                                 } else {
-                                    error_message("ERR\u{b7}Not Subscribed", ws.subscribe_handle()).await;
+                                    error_message(
+                                        "ERR\u{b7}Not Subscribed",
+                                        ws.subscribe_handle()
+                                    ).await;
                                 }
                             }
                             //_ => (),
@@ -433,14 +464,22 @@ impl WebsocketRouter {
                 }
             }
             broker.unsubscribe_all(&ws);
-            let _e = rocket.websocket_router.handle_message(Event::Leave, subscriptions[0].clone(), &None, Data::local(vec![])).await;
+            let _e = rocket.websocket_router.handle_message(
+                Event::Leave,
+                subscriptions[0].clone(),
+                &None,
+                Data::local(vec![])
+            ).await;
             // TODO implement Ping/Pong (not exposed to the user)
             // TODO handle Close correctly (we should reply with Close,
             // unless we initiated it)
         }
     }
 
-    fn remove_topic<'r>(subs: &mut Vec<Arc<Request<'r>>>, topic: Origin<'_>) -> Option<Arc<Request<'r>>> {
+    fn remove_topic<'r>(
+        subs: &mut Vec<Arc<Request<'r>>>,
+        topic: Origin<'_>
+    ) -> Option<Arc<Request<'r>>> {
         if let Some((index, _)) = subs.iter().enumerate().find(|(_, r)| r.uri() == &topic) {
             Some(subs.remove(index))
         }else {
@@ -448,10 +487,17 @@ impl WebsocketRouter {
         }
     }
 
-    async fn multiplex_get_request<'a, 'r>(data: &mut Data, subscribtions: &'a Vec<Arc<Request<'r>>>) -> Result<Arc<Request<'r>>, MultiplexError> {
+    async fn multiplex_get_request<'a, 'r>(
+        data: &mut Data,
+        subscribtions: &'a Vec<Arc<Request<'r>>>
+    ) -> Result<Arc<Request<'r>>, MultiplexError> {
         // Peek max_topic length
         let topic = data.peek(MAX_TOPIC_LENGTH + MULTIPLEX_CONTROL_CHAR.len()).await;
-        if let Some((index, _)) = topic.windows(MULTIPLEX_CONTROL_CHAR.len()).enumerate().find(|(_, c)| c == &MULTIPLEX_CONTROL_CHAR) {
+        if let Some((index, _)) = topic
+            .windows(MULTIPLEX_CONTROL_CHAR.len())
+            .enumerate()
+            .find(|(_, c)| c == &MULTIPLEX_CONTROL_CHAR)
+        {
             if index == 0 {
                 return Err(MultiplexError::ControlMessage);
             }
@@ -470,7 +516,7 @@ impl WebsocketRouter {
         }
     }
 
-    async fn handle_control<'r>(mut data: Data, subscribtions: &mut Vec<Arc<Request<'r>>>, broker: &Broker) -> Result<MultiplexAction, &'static str> {
+    async fn handle_control<'r>(mut data: Data) -> Result<MultiplexAction, &'static str> {
         // Take the first 512 bytes of the message - which must be the entire message
         let message = String::from_utf8(data.take(512).await).unwrap();
         let mut parts = message.split(MULTIPLEX_CONTROL_STR);
@@ -487,14 +533,18 @@ impl WebsocketRouter {
                 if parts.next().is_some() {
                     return Err("Err\u{B7}To many arguments");
                 }
-                Ok(MultiplexAction::Subscribe(Origin::parse(topic).map_err(|_| "ERR\u{B7}Invalid topic Uri")?.into_owned()))
+                Ok(MultiplexAction::Subscribe(Origin::parse(topic)
+                            .map_err(|_| "ERR\u{B7}Invalid topic Uri")?
+                            .into_owned()))
             },
             Some("UNSUBSCRIBE") => {
                 let topic = parts.next().ok_or("ERR\u{B7}Missing topic parameter")?;
                 if parts.next().is_some() {
                     return Err("Err\u{B7}To many arguments");
                 }
-                Ok(MultiplexAction::Unsubscribe(Origin::parse(topic).map_err(|_| "ERR\u{B7}Invalid topic Uri")?.into_owned()))
+                Ok(MultiplexAction::Unsubscribe(Origin::parse(topic)
+                            .map_err(|_| "ERR\u{B7}Invalid topic Uri")?
+                            .into_owned()))
             },
             Some(_) => Err("INVALID\u{B7}Unkown control message"),
             None => Err("INVALID\u{B7}Improperly formatted message"),
@@ -518,11 +568,26 @@ enum MultiplexError {
 impl MultiplexError {
     async fn send_message(self, sender: mpsc::Sender<WebsocketMessage>) {
         match self {
-            Self::TopicNotPresent => error_message("ERR\u{B7}Topic not present", sender).await,
-            Self::NotSubscribed => error_message("ERR\u{B7}Not subscribed to topic", sender).await,
-            Self::ControlMessage => error_message("ERR\u{B7}Unexpected control message", sender).await,
-            Self::Utf8Error(_e) => error_message("ERR\u{B7}Topic was not valid utf8", sender).await,
-            Self::UrlError(_e) => error_message("ERR\u{B7}Topic was not a valid url", sender).await,
+            Self::TopicNotPresent => error_message(
+                    "ERR\u{B7}Topic not present",
+                    sender
+                ).await,
+            Self::NotSubscribed => error_message(
+                    "ERR\u{B7}Not subscribed to topic",
+                    sender
+                ).await,
+            Self::ControlMessage => error_message(
+                    "ERR\u{B7}Unexpected control message",
+                    sender
+                ).await,
+            Self::Utf8Error(_e) => error_message(
+                    "ERR\u{B7}Topic was not valid utf8",
+                    sender
+                ).await,
+            Self::UrlError(_e) => error_message(
+                    "ERR\u{B7}Topic was not a valid url",
+                    sender
+                ).await,
         }
     }
 }
@@ -568,7 +633,7 @@ const MULTIPLEX_CONTROL_CHAR: &'static [u8] = MULTIPLEX_CONTROL_STR.as_bytes();
 //
 // # Messages: Data & Control
 //
-// ## Data 
+// ## Data
 //
 // Data messages start with the topic URL they should be sent to, followed by `'\u{00B7}'`.
 // This is followed by the contents of the message. The length of the message is not limited by
@@ -590,8 +655,8 @@ const MULTIPLEX_CONTROL_CHAR: &'static [u8] = MULTIPLEX_CONTROL_STR.as_bytes();
 //
 // # Actions
 //
-// - Subscribe: `SUBSCRIBE`, [Topic]; subscribed the client to a specific topic URL, as if the client had
-// opened a second websocket connection to the topic URL
+// - Subscribe: `SUBSCRIBE`, [Topic]; subscribed the client to a specific topic URL, as if the
+// client had opened a second websocket connection to the topic URL
 // - Unsubscribe: `UNSUBSCRIBE`, [TOPIC]; unsubscribes the client from a specific topic URL, as if
 // the client has closed the second websocket connection to the topic URL
 // - Unsubscribe all: There is no specific unsubscribe all action, although closing the websocket
@@ -601,6 +666,6 @@ const MULTIPLEX_CONTROL_CHAR: &'static [u8] = MULTIPLEX_CONTROL_STR.as_bytes();
 // succeeded.
 // - Err: `ERR`, [ACTION, PARAMS]; Sent as a response to an action, this indicates that the action
 // failed.
-// - Invalid message: `INVALID`, [REASON]; Sent as a response to an message the client is not allowed to
-// send. Currently, this is only sent in response to a message to a topic the client is not
-// subscribed to.
+// - Invalid message: `INVALID`, [REASON]; Sent as a response to an message the client is not
+// allowed to send. Currently, this is only sent in response to a message to a topic the client is
+// not subscribed to.

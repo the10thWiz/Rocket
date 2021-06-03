@@ -168,16 +168,6 @@ impl<'r> Request<'r> {
         self.uri = uri;
     }
 
-    pub(crate) fn with_uri(&self, uri: Origin<'r>) -> Self {
-        Self {
-            method: Atomic::new(self.method()),
-            uri,
-            headers: self.headers.clone(),
-            remote: self.remote.clone(),
-            state: self.state.clone(),
-        }
-    }
-
     /// Returns the raw address of the remote connection that initiated this
     /// request if the address is known. If the address is not known, `None` is
     /// returned.

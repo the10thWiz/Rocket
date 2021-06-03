@@ -1,4 +1,4 @@
-use rocket_http::uri::{Origin, Uri};
+use rocket_http::uri::Origin;
 
 use crate::catcher::Catcher;
 use crate::route::{Route, Color};

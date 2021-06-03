@@ -1,145 +1,28 @@
-use std::borrow::Cow;
-use std::convert::TryInto;
-use std::io;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use bytes::{Bytes, BytesMut};
-use futures::future::pending;
+use bytes::BytesMut;
 use rocket_http::uri::Origin;
 use rocket_http::{Status, hyper::upgrade::Upgraded};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::{select, sync::{mpsc, oneshot}};
-use tokio_util::codec::{Decoder, Encoder, FramedParts};
-use ubyte::ByteUnit;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::join;
+use tokio::time::timeout;
+use tokio::sync::{mpsc, oneshot};
+use tokio_util::codec::{Decoder, Encoder};
 use websocket_codec::Opcode;
-use websocket_codec::protocol::{FrameHeader, FrameHeaderCodec};
+use websocket_codec::protocol::FrameHeader;
 
-use crate::{Data, Request, request::{FromRequest, Outcome}};
+use crate::channels::MAX_BUFFER_SIZE;
+use crate::channels::WebsocketMessage;
+use crate::{Request, request::{FromRequest, Outcome}};
 
+use crate::log::*;
+
+use super::IntoMessage;
 use super::broker::Broker;
-
-/// A trait for types that can be sent on a websocket.
-///
-/// This has default implementations for many common types, such as `String`, `Vec<u8>`, etc
-///
-/// # Text vs Binary
-/// The Websocket protocol requires Rocket to specify whether a message is text or binary. Rocket
-/// implements this automatically where possible, but it's Rocket has not way to detect whether a
-/// given message is binary or text solely based on the binary output. Most types will always turn
-/// into binary or text, but it is possible for a type to be either text or binary depending on the
-/// contents.
-///
-// TODO: implement `IntoMessage` on `Json` and other convience types
-pub trait IntoMessage {
-    fn is_binary(&self) -> bool;
-    fn into_message(self) -> mpsc::Receiver<Bytes>;
-}
-
-impl IntoMessage for Data {
-    fn is_binary(&self) -> bool {
-        self.websocket_is_binary().unwrap_or(true)
-    }
-
-    fn into_message(self) -> mpsc::Receiver<Bytes> {
-        self.open(ByteUnit::Byte(1024)).into_message()
-    }
-}
-
-
-impl<T: AsyncRead + Send + Unpin + 'static> IntoMessage for T {
-    fn is_binary(&self) -> bool {
-        true
-    }
-
-    fn into_message(mut self) -> mpsc::Receiver<Bytes> {
-        let (tx, rx) = mpsc::channel(1);
-        tokio::spawn(async move {
-            let mut buf = BytesMut::with_capacity(100);
-            while let Ok(n) = self.read_buf(&mut buf).await {
-                if n == 0 {
-                    break;
-                }
-                let tmp = buf.split();
-                let _e = tx.send(tmp.into()).await;
-            }
-        });
-        rx
-    }
-}
-
-// Compliler error, since AsyncRead could be implemented on String in future versions
-//impl IntoMessage for String {
-    //fn is_binary(&self) -> bool {
-        //false
-    //}
-
-    //fn into_message(self) -> mpsc::Receiver<Bytes> {
-        //unimplemented!()
-    //}
-//}
-
-
-/// Convience function to convert an `impl IntoMessage` into a `Message`
-pub(crate) fn to_message(message: impl IntoMessage) -> WebsocketMessage {
-    WebsocketMessage::new(message.is_binary(), message.into_message())
-}
-
-#[derive(Debug)]
-pub struct WebsocketMessage {
-    header: FrameHeader,
-    data: mpsc::Receiver<Bytes>,
-}
-
-impl WebsocketMessage {
-    pub fn new(binary: bool, data: mpsc::Receiver<Bytes>) -> Self {
-        Self {
-            header: FrameHeader::new(false, 0, if binary {
-                    Opcode::Binary.into()
-                }else{
-                    Opcode::Text.into()
-                }, None, 0usize.into()),
-            data,
-        }
-    }
-
-    fn close(status: Option<Status>) -> Self {
-        let (tx, data) = mpsc::channel(1);
-        if let Some(status) = status {
-            let _e = tx.try_send(status.to_string().into());
-        }
-        Self {
-            header: FrameHeader::new(true, 0, Opcode::Close.into(), None, 0usize.into()),
-            data
-        }
-    }
-
-    pub(crate) fn opcode(&self) -> Opcode {
-        Opcode::try_from(self.header.opcode()).unwrap_or(Opcode::Text)
-    }
-
-    pub(crate) fn into_parts(self) -> (FrameHeader, mpsc::Receiver<Bytes>) {
-        (self.header, self.data)
-    }
-
-    pub(crate) fn from_parts(header: FrameHeader, data: mpsc::Receiver<Bytes>) -> Self {
-        Self { header, data, }
-    }
-}
-
-impl IntoMessage for WebsocketMessage {
-    fn is_binary(&self) -> bool {
-        match Opcode::try_from(self.header.opcode()) {
-            Some(Opcode::Text) => false,
-            _ => true,
-        }
-    }
-
-    fn into_message(self) -> mpsc::Receiver<Bytes> {
-        self.data
-    }
-}
+use super::to_message;
 
 /// A Websocket connection, directly connected to a client.
 ///
@@ -148,32 +31,7 @@ impl IntoMessage for WebsocketMessage {
 pub struct WebsocketChannel {
     inner: mpsc::Receiver<WebsocketMessage>,
     sender: mpsc::Sender<WebsocketMessage>,
-    should_send_close: Arc<AtomicBool>,
-}
-
-/// Soft maximum buffer size
-const MAX_BUFFER_SIZE: usize = 1024;
-
-struct RunningMessage {
-    current: BytesMut,
-    remaining: usize,
-    cur: usize,
-    mask: [u8; 4],
-    fin: bool,
-}
-
-impl RunningMessage {
-    fn handle_xor(&mut self) {
-        for b in self.current.iter_mut() {
-            *b ^= self.mask[self.cur];
-            self.cur = (self.cur + 1) % 4;
-        }
-    }
-
-    fn xored(mut self) -> Self {
-        self.handle_xor();
-        self
-    }
+    close_sent: Arc<AtomicBool>,
 }
 
 impl WebsocketChannel {
@@ -181,12 +39,17 @@ impl WebsocketChannel {
         let (broker_tx, broker_rx) = mpsc::channel(50);
         let (upgrade_tx, upgrade_rx) = oneshot::channel();
         let (message_tx, message_rx) = mpsc::channel(1);
-        let should_send_close = Arc::new(AtomicBool::new(true));
-        tokio::spawn(Self::message_handler(upgrade_rx, broker_rx, message_tx, should_send_close.clone()));
+        let should_send_close = Arc::new(AtomicBool::new(false));
+        tokio::spawn(Self::message_handler(
+                upgrade_rx,
+                broker_rx,
+                message_tx,
+                should_send_close.clone()
+            ));
         (Self {
                 inner: message_rx,
                 sender: broker_tx,
-                should_send_close,
+                close_sent: should_send_close,
         }, upgrade_tx)
     }
 
@@ -202,260 +65,161 @@ impl WebsocketChannel {
         self.inner.recv().await
     }
 
-    /// Gets the should_send_close flag. This is set to false if we have already sent a close
-    /// message
+    /// Gets the close_sent flag. This function returns true iff we have not sent a close message
+    /// yet, i.e. we should send a close message.
     pub(crate) fn should_send_close(&self) -> bool {
-        self.should_send_close.load(atomic::Ordering::Acquire)
+        !self.close_sent.load(atomic::Ordering::Acquire)
     }
 
     async fn message_handler(
         upgrade_rx: oneshot::Receiver<Upgraded>,
         mut broker_rx: mpsc::Receiver<WebsocketMessage>,
         message_tx: mpsc::Sender<WebsocketMessage>,
-        should_send_close: Arc<AtomicBool>,
+        close_sent: Arc<AtomicBool>,
     ) {
-        // Get upgrade object (basically just a boxed handle to the tcp or tls stream)
         if let Ok(upgrade) = upgrade_rx.await {
-            // build codec
-            let tmp = websocket_codec::protocol::FrameHeaderCodec;
-            let mut raw_ws = tmp.framed(upgrade).into_parts();
-
-            let (mut data_tx, data_rx) = mpsc::channel(1);
-            let mut data_rx = Some(data_rx);
-
-            let mut outgoing_message: Option<WebsocketMessage> = None;
-            let mut running_message: Option<RunningMessage> = None;
-            loop {
-                let broker_ready = outgoing_message.is_none();
-                let next_message = running_message.is_none();
-                //println!("Sending Ready: {}", broker_ready);
-                //println!("Recv Ready: {}", next_message);
-                select! {
-                    message = async {
-                        if next_message {
-                            Self::read_header(&mut raw_ws).await
-                        }else {
-                            pending().await
-                        }
-                    } => {
-                        if let Some(Ok(header)) = message {
-                            //println!("Recv: {:?}", header);
-                            Self::send_message(
-                                header,
-                                &mut raw_ws,
-                                &message_tx,
-                                &mut data_tx,
-                                &mut data_rx,
-                                &mut running_message
-                            ).await;
-                        }else {
-                            // TODO handle close
-                            //println!("Closing ws");
+            // Split creates a mutex to syncronize access to the underlying io stream
+            // This should be okay, since the lock shouldn't be in high contention, although it
+            // make cause issues with trying to send and recieve messages at the same time.
+            let (read, write) = tokio::io::split(upgrade);
+            // The reader & writer only hold the lock while polling - so there should be NO
+            // contention at all. This is important, since I believe the mutex uses a spin-lock (at
+            // least in the version I looked at). Since the writer and reader are executed
+            // concurrently, but not in parallel (by the join! macro), they should never be polled
+            // at the same time.
+            let reader = async move {
+                let mut codec = websocket_codec::protocol::FrameHeaderCodec;
+                let mut read = read;
+                let mut read_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+                let (mut data_tx, data_rx) = mpsc::channel(1);
+                let mut data_rx = Some(data_rx);
+                loop {
+                    match read.read_buf(&mut read_buf).await {
+                        Ok(0) => warn_!("Potential EOF from client"),
+                        Ok(_n) => (),
+                        Err(e) => error_!(
+                                "Io error occured while recieving websocket messages: {:?}",
+                                e
+                            ),
+                    }
+                    let h = match codec.decode(&mut read_buf) {
+                        Ok(Some(h)) => h,
+                        Ok(None) => {
+                            read_buf.reserve(1);
+                            continue;
+                        },
+                        Err(e) => {
+                            error_!("Websocket client broke protocol: {:?}", e);
                             break;
-                        }
-                    }
-                    _ = async {
-                        if let Some(running) = &mut running_message {
-                            Self::continue_message(running, &data_tx).await
+                        },
+                    };
+                    let fin = h.fin();
+                    let close = h.opcode() == u8::from(Opcode::Close);
+                    let mut remaining = usize::try_from(h.data_len())
+                        .expect("Invalid Length in frame");
+                    // TODO: remove expect
+                    let mut mask: Option<u32> = h.mask().map(|m| m.into());
+                    if let Some(data_rx) = data_rx.take() {
+                        if h.opcode() == 0x0 {
+                            error_!("Websocket client sent an unexepexted continue frame");
                         } else {
-                            pending().await
+                            let message = WebsocketMessage::from_parts(h, data_rx);
+                            let _e = message_tx.send(message).await;
                         }
-                    } => {
-                        let _e = Self::read_next_part(
-                                &mut running_message,
-                                &mut raw_ws,
-                                &mut data_tx,
-                                &mut data_rx,
-                            ).await;
+                    } else if h.opcode() != 0x0 {
+                        error_!("Websocket client sent an unexepexted frame");
                     }
-                    message = async {
-                        if broker_ready {
-                            broker_rx.recv().await
-                        } else {
-                            pending().await
-                        }
-                    } => {
-                        if let Some(message) = message {
-                            if message.header.opcode() == u8::from(Opcode::Close) {
-                                should_send_close.store(false, atomic::Ordering::Release);
+                    while remaining > 0 {
+                        let mut chunk = read_buf.split_to(read_buf.len().min(remaining));
+                        if let Some(mask) = &mut mask {
+                            for b in chunk.iter_mut() {
+                                *b ^= *mask as u8;
+                                *mask = mask.rotate_right(8);
                             }
-                            //println!("Send: {:?}", message);
-                            outgoing_message = Some(message);
+                        }
+                        remaining -= chunk.len();
+                        let _e = data_tx.send(chunk.into()).await;
+                        if read_buf.len() < remaining {
+                            read_buf.reserve(MAX_BUFFER_SIZE.min(remaining));
+                            let _e = read.read_buf(&mut read_buf).await;
+                        }
+                    }
+                    if close {
+                        break;
+                    }
+                    if fin {
+                        // If this was the final frame, prepare for the next message
+                        let (tx, rx) = mpsc::channel(1);
+                        data_tx = tx;
+                        data_rx = Some(rx);
+                    }
+                }
+            };
+            let writer = async move {
+                let mut codec = websocket_codec::protocol::FrameHeaderCodec;
+                let mut write = write;
+                let mut write_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+                while let Some(message) = broker_rx.recv().await {
+                    let (header, mut rx) = message.into_parts();
+                    if header.opcode() == u8::from(Opcode::Close) {
+                        close_sent.store(true, atomic::Ordering::Release);
+                    }
+                    let mut running_header = Some(header);
+                    while let Some(chunk) = rx.recv().await {
+                        let mut parts = vec![chunk];
+                        let mut fin = false;
+                        // Buffer additional chunks if they are ready
+                        loop {
+                            // if the duration is zero, the rx will be polled at least once.
+                            // However, because rx has backpressure, we want to suspend the current
+                            // taks and allow new, ready chunks to be added.
+                            match timeout(Duration::from_millis(10), rx.recv()).await {
+                                Ok(Some(chunk)) => parts.push(chunk),
+                                Ok(None) => {
+                                    fin = true;
+                                    break;
+                                },
+                                Err(_e) => break,
+                            }
+                        }
+                        if let Some(header) = running_header.take() {
+                            let int_header = FrameHeader::new(
+                                    fin,
+                                    header.rsv(),
+                                    header.opcode(),
+                                    header.mask(),
+                                    parts.iter().map(|s| s.len()).sum::<usize>().into(),
+                                );
+                            let _e = codec.encode(int_header, &mut write_buf);
+                            let _e = write.write_all_buf(&mut write_buf).await;
+                            for mut chunk in parts {
+                                let _e = write.write_all_buf(&mut chunk).await;
+                            }
+                            if !fin {
+                                running_header = Some(FrameHeader::new(
+                                        false,
+                                        header.rsv(),
+                                        0x0,// Continue frame
+                                        header.mask(),
+                                        0usize.into(), // We're going to ignore this anyway
+                                    ));
+                            }else {
+                                break;
+                            }
                         }else {
-                            // TODO handle error
+                            todo!("")
                         }
                     }
-                    data = async {
-                        if let Some(data_rx) = &mut outgoing_message {
-                            data_rx.data.recv().await
-                        } else {
-                            pending().await
-                        }
-                    } => {
-                        if let Some(data) = data {
-                            //println!("Forwarding {} bytes of data", data.len());
-                            if let Some(message) = outgoing_message.take() {
-                                let mut data = vec![data];
-                                let mut fin = false;
-                                if let Some(data_rx) = &mut outgoing_message {
-                                    loop {
-                                        // We only wait 10ms for each chunk to be sent
-                                        let tmp = tokio::time::timeout(Duration::from_millis(10), data_rx.data.recv()).await;
-                                        if let Ok(Some(next)) = tmp {
-                                            data.push(next);
-                                        } else if let Ok(None) = tmp {
-                                            fin = true;
-                                            break;
-                                        } else {
-                                            break;
-                                        }
-                                    }
-                                }
-                                let int_header = FrameHeader::new(fin,
-                                                                  message.header.rsv(),
-                                                                  message.header.opcode(),
-                                                                  message.header.mask(),
-                                                                  data.iter().map(|s| s.len()).sum::<usize>().into());
-                                let _e = raw_ws.codec.encode(int_header, &mut raw_ws.write_buf);
-                                let _e = raw_ws.io.write_all_buf(&mut raw_ws.write_buf).await;
-                                for data in data {
-                                    let _e = raw_ws.io.write_all(&data).await;
-                                }
-                                if !fin {
-                                    outgoing_message = Some(WebsocketMessage {
-                                        // Next message will be a continue frame
-                                        header: FrameHeader::new(false,
-                                                                 message.header.rsv(),
-                                                                 0x0,
-                                                                 message.header.mask(),
-                                                                 0usize.into()),
-                                        data: message.data,
-                                    });
-                                }
-                            }
-                        } else {
-                            // This will sometimes send an empty frame to end a message. However,
-                            // if the sending half of the data channel is dropped immediately after
-                            // the final block was sent, this might be avoided
-                            //println!("Compeleting message");
-                            if let Some(message) = outgoing_message.take() {
-                                let int_header = FrameHeader::new(true,
-                                                                  message.header.rsv(),
-                                                                  message.header.opcode(),
-                                                                  message.header.mask(),
-                                                                  0usize.into());
-                                let _e = raw_ws.codec.encode(int_header, &mut raw_ws.write_buf);
-                                let _e = raw_ws.io.write_all_buf(&mut raw_ws.write_buf).await;
-                            }
-                        }
+                    if close_sent.load(atomic::Ordering::Acquire) {
+                        break;
                     }
                 }
-            }
-            //println!("Loop completed");
+            };
+            let _e = join! {
+                reader,
+                writer,
+            };
         }
-    }
-
-    async fn read_header(raw_ws: &mut FramedParts<Upgraded, FrameHeaderCodec>)
-        -> Option<Result<FrameHeader, websocket_codec::Error>>
-    {
-        loop {
-            match raw_ws.codec.decode(&mut raw_ws.read_buf) {
-                Ok(Some(header)) => return Some(Ok(header)),
-                Ok(None) => {
-                    raw_ws.read_buf.reserve(1);
-                    match raw_ws.io.read_buf(&mut raw_ws.read_buf).await {
-                        //Ok(0) => return None,
-                        Err(e) => return Some(Err(Box::new(e))),
-                        _ => (),
-                    }
-                },
-                Err(e) => return Some(Err(e)),
-            }
-        }
-    }
-
-    async fn send_message(
-        header: FrameHeader,
-        raw_ws: &mut FramedParts<Upgraded, FrameHeaderCodec>,
-        message_tx: &mpsc::Sender<WebsocketMessage>,
-        _data_tx: &mut mpsc::Sender<Bytes>,
-        data_rx: &mut Option<mpsc::Receiver<Bytes>>,
-        running_message: &mut Option<RunningMessage>,
-    ) {
-        let mask = header.mask().map(|u| u32::from(u).to_le_bytes());
-        // TODO avoid unwrap -> I think this should always succeed,
-        // although it might fail on 32 bit platforms or something.
-        let remaining = header.data_len().try_into().unwrap();
-        let fin = header.fin();
-        // Don't send continue frames
-        if let Some(data) = data_rx.take() {
-            let _e = message_tx.send(WebsocketMessage {
-                header, data,
-            }).await;
-        }else if header.opcode() == 0x01 {
-            // TODO: handle error
-        }
-        *running_message = Some(
-            RunningMessage {
-                current: raw_ws.read_buf.split_to(
-                    raw_ws.read_buf.len().min(remaining)
-                ),
-                remaining,
-                cur: 0,
-                mask: mask.unwrap_or([0; 4]),
-                fin,
-            }.xored()
-        );
-    }
-
-    async fn continue_message(
-        running_message: &mut RunningMessage,
-        data_tx: &mpsc::Sender<Bytes>,
-    ) {
-        let len = running_message.current.len();
-        //println!("{} Bytes of {} available to send", len, running_message.remaining);
-        if running_message.current.len() > 0 {
-            // Record how much will be sent
-            let _e = data_tx.send(running_message.current.clone().into()).await;
-            // Discard sent bytes
-            running_message.remaining-= running_message.current.len();
-            let _ = running_message.current.split();
-            if let Err(e) = _e {
-                //println!("Reciever hung up");
-            }
-        }
-    }
-
-    async fn read_next_part(
-        running_message: &mut Option<RunningMessage>,
-        raw_ws: &mut FramedParts<Upgraded, FrameHeaderCodec>,
-        data_tx: &mut mpsc::Sender<Bytes>,
-        data_rx: &mut Option<mpsc::Receiver<Bytes>>,
-    ) -> io::Result<()> {
-        if let Some(running) = running_message {
-            if running.remaining > 0 {
-                // Reserve more space
-                raw_ws.read_buf.reserve(running.remaining.min(MAX_BUFFER_SIZE));
-                let tmp = raw_ws.read_buf.len();
-                //println!("Reading with {} bytes in buffer", tmp);
-                let len = raw_ws.io.read_buf(&mut raw_ws.read_buf).await?;
-                //println!("Read {} bytes, advanced buf by {}", len, raw_ws.read_buf.len() - tmp);
-                running.current = raw_ws.read_buf.split_to(
-                    raw_ws.read_buf.len().min(running.remaining)
-                );
-                running.handle_xor();
-                //println!("Current is {} bytes", running.current.len());
-            }else {
-                // If the current frame is final, reset the data params
-                if running.fin {
-                    let (ndata_tx, ndata_rx) = mpsc::channel(1);
-                    *data_tx = ndata_tx;
-                    *data_rx = Some(ndata_rx);
-                }
-                *running_message = None;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -474,6 +238,16 @@ impl InnerChannel {
     }
 }
 
+/// A websocket Channel. This can be used to message the client that sent a message (namely, the
+/// one you are responding to), as well as broadcast messages to other clients. Note that every
+/// client will recieve a broadcast, including the client that triggered the broadcast.
+///
+/// The lifetime parameter should typically be <'_>. This is nessecary since the object contains
+/// references (which it might be possible to remove in later versions), and recent versions of
+/// Rust recommend not allowing implicit elided lifetimes.
+///
+/// This is only valid as a Request Guard on Websocket handlers (`message`, `join`, and `leave`).
+/// TODO: change implementation to verify this at compile time, rather than runtime.
 pub struct Channel<'r> {
     client: mpsc::Sender<WebsocketMessage>,
     broker: Broker,
@@ -511,9 +285,16 @@ impl<'r> Channel<'r> {
         ).await
     }
 
+    /// Broadcasts `message` to every client connected to this topic. Topics are identified by
+    /// the Origin URL used to connect to the server.
     pub async fn broadcast(&self, message: impl IntoMessage) {
-        println!("Broadcasting");
         self.broker.send(&self.uri, to_message(message));
+    }
+
+    /// Broadcasts `message` to every client connected to `topic`. Topics are identified by
+    /// the Origin URL used to connect to the server.
+    pub async fn broadcast_to(&self, topic: &Origin<'_>, message: impl IntoMessage) {
+        self.broker.send(topic, to_message(message));
     }
 }
 
