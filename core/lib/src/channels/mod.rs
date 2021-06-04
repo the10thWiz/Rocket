@@ -46,6 +46,7 @@
 //! This websocket implementation doesn't define any size limits of it's own, other than a soft
 //! maximum on the size of individual chunks when reading. Instead, size limits are handled by
 //! the types that implement `FromData`.
+
 // Autobahn testing
 //
 // 2.9 fails to send pong for ping
@@ -59,6 +60,52 @@
 // 7.13.* we need to decide on Rocket's behaviour, this isn't defined in the spec
 //
 // 12.* & 13.* test compression, which we don't implement (yet)
+
+// Full rocket-multiplex protocol description:
+//
+// Rocket uses the Origin URL of a websocket request as a topic identifier. The rocket-multiplex
+// proprotocol allows sending messages to multiple topics using a single websocket connection.
+//
+// Topic URLS are limited to `MAX_TOPIC_LENGTH = 100`, to prevent potential DoS attacks.
+//
+// # Messages: Data & Control
+//
+// ## Data
+//
+// Data messages start with the topic URL they should be sent to, followed by `'\u{00B7}'`.
+// This is followed by the contents of the message. The length of the message is not limited by
+// this protocol, although it is likely limited by Rocket in other ways.
+//
+// Data messages sent to a topic the client is not subscribed to result in an error being sent to
+// the client.
+//
+//
+// # Control
+//
+// Control messages are limited to 512 bytes total, although there should never be
+// a reason to create a longer message. Control messages take the form:
+//
+// `S ACTION S (PARAM S)*`
+//
+// Where `S` = `\u{00B7}`, `ACTION` is one of the following actions, and `PARAM` is one of the
+// positional paramaters associated with the aciton.
+//
+// # Actions
+//
+// - Subscribe: `SUBSCRIBE`, [Topic]; subscribed the client to a specific topic URL, as if the
+// client had opened a second websocket connection to the topic URL
+// - Unsubscribe: `UNSUBSCRIBE`, [TOPIC]; unsubscribes the client from a specific topic URL, as if
+// the client has closed the second websocket connection to the topic URL
+// - Unsubscribe all: There is no specific unsubscribe all action, although closing the websocket
+// connection is treated as an unsubscribe all
+//
+// - Ok: `OK`, []; Sent as a response to an action, this indicates that the action
+// succeeded.
+// - Err: `ERR`, [ACTION, PARAMS]; Sent as a response to an action, this indicates that the action
+// failed.
+// - Invalid message: `INVALID`, [REASON]; Sent as a response to an message the client is not
+// allowed to send. Currently, this is only sent in response to a message to a topic the client is
+// not subscribed to.
 
 mod router;
 mod message;
