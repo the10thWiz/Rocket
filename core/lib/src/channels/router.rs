@@ -12,10 +12,10 @@ use rocket_http::hyper::{self, header::{CONNECTION, UPGRADE}, upgrade::OnUpgrade
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use websocket_codec::protocol::FrameHeader;
 use websocket_codec::{ClientRequest, Opcode};
 
 use crate::channels::WebsocketMessage;
+use crate::channels::WebsocketStatus;
 use crate::route::WebsocketEvent;
 use crate::route::WsOutcome;
 use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
@@ -304,34 +304,40 @@ impl WebsocketRouter {
                 let data = match message.opcode() {
                     Opcode::Text => Data::from_ws(message, Some(false)),
                     Opcode::Binary => Data::from_ws(message, Some(true)),
-                    Opcode::Ping => {
-                        let (h, d) = message.into_parts();
-                        let message = WebsocketMessage::from_parts(
-                                FrameHeader::new(
-                                    h.fin(),
-                                    h.rsv(),
-                                    Opcode::Pong.into(),
-                                    None,
-                                    h.data_len()
-                                ),
-                                d
-                            );
-                        let _e = ws.subscribe_handle().send(message).await;
-                        continue;
-                    },
-                    Opcode::Pong => continue,
+                    Opcode::Ping => continue,// This should never happen
+                    Opcode::Pong => continue,// This should never happen
                     Opcode::Close => {
                         if ws.should_send_close() {
-                            let _e = ws.subscribe_handle().send(WebsocketMessage::from_parts(
-                                    FrameHeader::new(
-                                        true,
-                                        0x0,
-                                        Opcode::Close.into(),
-                                        None,
-                                        0usize.into()
-                                    ),
-                                    message.into_parts().1
-                                )).await;
+                            if let Some(tmp) = message.into_parts().1.recv().await {
+                                if let Ok(status) = WebsocketStatus::decode(tmp) {
+                                    let ret = if status == super::OK {
+                                        super::OK
+                                    } else if status == super::GOING_AWAY {
+                                        super::OK
+                                    } else if status == super::EXTENSION_REQUIRED {
+                                        super::OK
+                                    } else if status == super::UNKNOWN_MESSAGE_TYPE {
+                                        super::UNKNOWN_MESSAGE_TYPE
+                                    } else if status == super::INVALID_DATA_TYPE {
+                                        super::INVALID_DATA_TYPE
+                                    } else if status == super::POLICY_VIOLATION {
+                                        super::POLICY_VIOLATION
+                                    } else if status == super::MESSAGE_TOO_LARGE {
+                                        super::MESSAGE_TOO_LARGE
+                                    } else if status == super::INTERNAL_SERVER_ERROR {
+                                        super::INTERNAL_SERVER_ERROR
+                                    } else if (3000..=4999).contains(&status.code()) {
+                                        super::OK
+                                    } else {
+                                        super::PROTOCOL_ERROR
+                                    };
+                                    WebsocketChannel::close(&ws.subscribe_handle(), ret).await;
+                                } else {
+                                    WebsocketChannel::close(&ws.subscribe_handle(), super::PROTOCOL_ERROR).await;
+                                }
+                            } else {
+                                WebsocketChannel::close(&ws.subscribe_handle(), super::OK).await;
+                            }
                         }
                         break;
                     },
@@ -350,9 +356,6 @@ impl WebsocketRouter {
                     &None,
                     Data::local(vec![])
                 ).await;
-            // TODO implement Ping/Pong (not exposed to the user)
-            // TODO handle Close correctly (we should reply with Close,
-            // unless we initiated it)
         }
     }
 

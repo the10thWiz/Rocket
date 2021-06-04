@@ -115,8 +115,8 @@ impl WebsocketMessage {
     /// Creates a Close frame, with an optional status
     ///
     /// TODO: create seperate status struct
-    pub(crate) fn close(status: Option<WebsocketStatus>) -> Self {
-        let (tx, data) = mpsc::channel(1);
+    pub(crate) fn close(status: Option<WebsocketStatus<'_>>) -> Self {
+        let (tx, data) = mpsc::channel(3);
         if let Some(status) = status {
             let _e = tx.try_send(status.encode());
         }

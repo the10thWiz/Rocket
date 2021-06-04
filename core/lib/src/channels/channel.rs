@@ -7,14 +7,16 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use rocket_http::uri::Origin;
 use rocket_http::{Status, hyper::upgrade::Upgraded};
+use tokio::io::AsyncWrite;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::join;
-use tokio::time::sleep;
+use tokio::select;
 use tokio::time::timeout;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::{Decoder, Encoder};
 use websocket_codec::Opcode;
 use websocket_codec::protocol::FrameHeader;
+use websocket_codec::protocol::FrameHeaderCodec;
 
 use crate::channels::MAX_BUFFER_SIZE;
 use crate::channels::WebsocketMessage;
@@ -79,21 +81,35 @@ impl WebsocketChannel {
         if (header.opcode() == u8::from(Opcode::Close) ||
             header.opcode() == u8::from(Opcode::Ping) ||
             header.opcode() == u8::from(Opcode::Pong)) &&
-            remaining > 125
+            (remaining > 125 || !header.fin())
         {
             true
         } else if header.rsv() != 0x0 {
             true
-        } else if Opcode::try_from(header.opcode()).is_none() {
+        } else if Opcode::try_from(header.opcode()).is_none() && header.opcode() != 0x0 {
             true
         } else {
             false
         }
     }
 
+    pub(crate) async fn close(broker_tx: &mpsc::Sender<WebsocketMessage>, status: WebsocketStatus<'_>) {
+        let (tx, rx) = mpsc::channel(1);
+        let header = FrameHeader::new(
+            true,
+            0x0,
+            Opcode::Close.into(),
+            None,
+            0usize.into(),
+        );
+        //info_!("Close frame header: {:?}", header);
+        let _e = broker_tx.send(WebsocketMessage::from_parts(header, rx)).await;
+        let _e = tx.send(status.encode()).await;
+    }
+
     async fn message_handler(
         upgrade_rx: oneshot::Receiver<Upgraded>,
-        mut broker_tx: mpsc::Sender<WebsocketMessage>,
+        broker_tx: mpsc::Sender<WebsocketMessage>,
         mut broker_rx: mpsc::Receiver<WebsocketMessage>,
         message_tx: mpsc::Sender<WebsocketMessage>,
         close_sent: Arc<AtomicBool>,
@@ -108,6 +124,7 @@ impl WebsocketChannel {
             // least in the version I looked at). Since the writer and reader are executed
             // concurrently, but not in parallel (by the join! macro), they should never be polled
             // at the same time.
+            let (ping_tx, ping_rx) = mpsc::channel(1);
             let reader = async move {
                 let mut codec = websocket_codec::protocol::FrameHeaderCodec;
                 let mut read = read;
@@ -130,41 +147,80 @@ impl WebsocketChannel {
                             }
                             continue;
                         },
-                        Err(e) => {
-                            error_!("Websocket client broke protocol: {:?}", e);
+                        Err(_e) => {
+                            //error_!("Websocket client broke protocol: {:?}", e);
+                            Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
                             break;
                         },
                     };
+                    // A frame has been decoded
+                    // Save some attributes
                     let fin = h.fin();
                     let close = h.opcode() == u8::from(Opcode::Close);
-                    let mut remaining = usize::try_from(h.data_len())
-                        .expect("Invalid Length in frame");
-                    // Control frames may not have a length larger than 125 bytes
+                    let mut mask: Option<u32> = h.mask().map(|m| m.into());
+                    let mut remaining = if let Ok(r) = usize::try_from(h.data_len()) {
+                        r
+                    }else {
+                        // Send a protocol error if the datalength isn't valid
+                        Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
+                        break;
+                    };
+                    // Checks for some other protocol errors
                     if Self::protocol_error(&h, remaining) {
-                        let (tx, rx) = mpsc::channel(1);
-                        let header = FrameHeader::new(
-                            true,
-                            0x0,
-                            Opcode::Close.into(),
-                            None,
-                            0usize.into(),
-                        );
-                        let _e = broker_tx.send(WebsocketMessage::from_parts(header, rx)).await;
-                        let _e = tx.send(super::PROTOCOL_ERROR.encode()).await;
+                        Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
                         break;
                     }
-                    // TODO: remove expect
-                    let mut mask: Option<u32> = h.mask().map(|m| m.into());
+                    if h.opcode() == u8::from(Opcode::Ping) {
+                        // Read data, and send on ping_tx
+                        // Note that remaining MUST be less than 125, otherwise it's a protocol
+                        // error - checked by Self::protocol_error
+                        // Avoid overflow
+                        if read_buf.capacity() < remaining {
+                            read_buf.reserve(remaining - read_buf.capacity());
+                        }
+                        while remaining > read_buf.len() {
+                            let _e = read.read_buf(&mut read_buf).await;
+                        }
+                        let mut chunk = read_buf.split_to(remaining);
+                        if let Some(mask) = &mut mask {
+                            for b in chunk.iter_mut() {
+                                *b ^= *mask as u8;
+                                *mask = mask.rotate_right(8);
+                            }
+                        }
+                        let _e = ping_tx.send(chunk.freeze()).await;
+                        continue;
+                    } else if h.opcode() == u8::from(Opcode::Pong) {
+                        if remaining > read_buf.capacity() {
+                            read_buf.reserve(remaining - read_buf.capacity());
+                        }
+                        while remaining > read_buf.len() {
+                            let _e = read.read_buf(&mut read_buf).await;
+                        }
+                        continue;
+                    }
+                    // If there is a frame to continue, it must be continued
                     if let Some(data_rx) = data_rx.take() {
                         if h.opcode() == 0x0 {
-                            error_!("Websocket client sent an unexepexted continue frame");
+                            Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
+                            break;
                         } else {
                             let message = WebsocketMessage::from_parts(h, data_rx);
                             let _e = message_tx.send(message).await;
                         }
+                    } else if h.opcode() == u8::from(Opcode::Close) {
+                        // This will disrupt handling of later messages, but since this was a close
+                        // frame, we drop later messages anyway.
+                        let (tx, rx) = mpsc::channel(3);
+                        data_tx = tx;
+                        let message = WebsocketMessage::from_parts(h, rx);
+                        let _e = message_tx.send(message).await;
                     } else if h.opcode() != 0x0 {
-                        error_!("Websocket client sent an unexepexted frame");
+                        Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
+                        break;
                     }
+                    // Read and forward data - note that this will read (and discard) any data that
+                    // the server decided to ignore
                     while remaining > 0 {
                         let mut chunk = read_buf.split_to(read_buf.len().min(remaining));
                         if let Some(mask) = &mut mask {
@@ -189,24 +245,26 @@ impl WebsocketChannel {
                         data_tx = tx;
                         data_rx = Some(rx);
                     }
+                    // If this was a close frame, stop recieving messages
                     if close {
                         break;
                     }
-                    // Give time for writer?
-                    //sleep(Duration::from_millis(10)).await;
                 }
+                read
             };
             let writer = async move {
-                let mut codec = websocket_codec::protocol::FrameHeaderCodec;
+                // Explicit moves - probably not needed
                 let mut write = write;
+                let mut ping_rx = ping_rx;
+                let mut codec = websocket_codec::protocol::FrameHeaderCodec;
                 let mut write_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
-                while let Some(message) = broker_rx.recv().await {
+                while let Some(message) = Self::await_or_ping(&mut broker_rx, &mut ping_rx, &mut write, &mut write_buf, &mut codec).await {
                     let (header, mut rx) = message.into_parts();
                     if header.opcode() == u8::from(Opcode::Close) {
                         close_sent.store(true, atomic::Ordering::Release);
                     }
                     let mut running_header = Some(header);
-                    while let Some(chunk) = rx.recv().await {
+                    while let Some(chunk) = Self::await_or_ping(&mut rx, &mut ping_rx, &mut write, &mut write_buf, &mut codec).await {
                         let mut parts = vec![chunk];
                         let mut fin = false;
                         // Buffer additional chunks if they are ready
@@ -214,7 +272,7 @@ impl WebsocketChannel {
                             // if the duration is zero, the rx will be polled at least once.
                             // However, because rx has backpressure, we want to suspend the current
                             // taks and allow new, ready chunks to be added.
-                            match timeout(Duration::from_millis(10), rx.recv()).await {
+                            match timeout(Duration::from_millis(3), rx.recv()).await {
                                 Ok(Some(chunk)) => parts.push(chunk),
                                 Ok(None) => {
                                     fin = true;
@@ -273,6 +331,10 @@ impl WebsocketChannel {
                         break;
                     }
                 }
+                if !close_sent.load(atomic::Ordering::Acquire) {
+                    warn_!("Writer task did not send close");
+                }
+                write
             };
             //let reader = tokio::spawn(reader);
             //let writer = tokio::spawn(writer);
@@ -282,101 +344,34 @@ impl WebsocketChannel {
             };
         }
     }
-}
 
-mod io_util {
-    use std::{cell::UnsafeCell, pin::Pin, sync::Arc, task::{Context, Poll}};
-
-    use tokio::{io::{AsyncRead, AsyncWrite, ReadBuf}, sync::{OwnedSemaphorePermit, Semaphore}};
-    use tokio_util::sync::PollSemaphore;
-
-    pub fn split<T>(stream: T) -> (ReadHalf<T>, WriteHalf<T>) {
-        let semaphore = Arc::new(Semaphore::new(1));
-        let t = Arc::new(UnsafeCell::new(stream));
-        let read = Inner {
-            semaphore: PollSemaphore::new(semaphore.clone()),
-            t: t.clone(),
-        };
-        let write = Inner {
-            semaphore: PollSemaphore::new(semaphore),
-            t,
-        };
-        (ReadHalf { inner: read }, WriteHalf { inner: write })
-    }
-
-    pub struct ReadHalf<T> {
-        inner: Inner<T>,
-    }
-
-    impl<T: AsyncRead> AsyncRead for ReadHalf<T> {
-        fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
-            match self.inner.poll_lock(cx) {
-                Poll::Pending => {
-                    eprintln!("Reader waiting for lock");
-                    Poll::Pending},
-                Poll::Ready(g) => {
-                    eprintln!("Reading");
-                    g.inner.poll_read(cx, buf)},
+    /// This waits for a message on `f`, but will forward pings to the client if any are sent. This
+    /// allows pings & pongs to go between other messages
+    async fn await_or_ping<T, W: AsyncWrite + Unpin>(
+        f: &mut mpsc::Receiver<T>,
+        ping_rx: &mut mpsc::Receiver<Bytes>,
+        writer: &mut W,
+        write_buf: &mut BytesMut,
+        codec: &mut FrameHeaderCodec,
+    ) -> Option<T> {
+        loop {
+            select! {
+                o = f.recv() => break o,
+                Some(p) = ping_rx.recv() => {
+                    let pong_header = FrameHeader::new(
+                        true,
+                        0x0,
+                        Opcode::Pong.into(),
+                        None,
+                        p.len().into()
+                    );
+                    let _e = codec.encode(pong_header, write_buf);
+                    let _e = writer.write_all_buf(write_buf).await;
+                    let _e = writer.write_all(&p).await;
+                },
             }
         }
     }
-
-    pub struct WriteHalf<T> {
-        inner: Inner<T>,
-    }
-
-    impl<T: AsyncWrite> AsyncWrite for WriteHalf<T> {
-        fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
-            match self.inner.poll_lock(cx) {
-                Poll::Pending => {
-                    eprintln!("Writer waiting for lock");
-                    Poll::Pending},
-                Poll::Ready(g) => {
-                    eprintln!("Writing");
-                    g.inner.poll_write(cx, buf)},
-            }
-        }
-        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-            match self.inner.poll_lock(cx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(g) => g.inner.poll_flush(cx),
-            }
-        }
-        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-            match self.inner.poll_lock(cx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(g) => g.inner.poll_shutdown(cx),
-            }
-        }
-    }
-
-    struct Inner<T> {
-        semaphore: PollSemaphore,
-        t: Arc<UnsafeCell<T>>,
-    }
-
-    impl<T> Inner<T> {
-        fn poll_lock(&mut self, cx: &mut Context<'_>) -> Poll<Guard<'_, T>> {
-            match self.semaphore.poll_acquire(cx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Some(permit)) => Poll::Ready(Guard {
-                    _permit: permit,
-                    inner: unsafe { Pin::new_unchecked( &mut *self.t.get() ) }
-                }),
-                Poll::Ready(None) => todo!(),
-            }
-        }
-    }
-
-    struct Guard<'a, T> {
-        _permit: OwnedSemaphorePermit,
-        inner: Pin<&'a mut T>,
-    }
-
-    unsafe impl<T: Send> Send for ReadHalf<T> {}
-    unsafe impl<T: Send> Send for WriteHalf<T> {}
-    unsafe impl<T: Sync> Sync for ReadHalf<T> {}
-    unsafe impl<T: Sync> Sync for WriteHalf<T> {}
 }
 
 #[derive(Clone)]
@@ -435,7 +430,7 @@ impl<'r> Channel<'r> {
     }
 
     /// Sends a close notificaiton to the client, along with a reason for the close
-    pub async fn close_with_status(&self, status: WebsocketStatus) {
+    pub async fn close_with_status(&self, status: WebsocketStatus<'_>) {
         self.send_raw(
             WebsocketMessage::close(Some(status))
         ).await
@@ -466,3 +461,17 @@ impl<'r> FromRequest<'r> for Channel<'r> {
         }
     }
 }
+
+// Autobahn testing
+//
+// 2.9 fails to send pong for ping
+// 5.19/5.20 sometimes fail to send pongs & message in the correct order - this is likely a data
+//   race between reading and my reply - I start replying right away, before I've finished reading
+//   the frame
+// 6.* fail since I don't check UTF-8 - should I?
+// 7.1.5 fails since Rocket will forward part of a message back. This isn't an issue in most cases
+//   (especially JSON or similar), where the entire message would need to be buffered before we can
+//   start responding.
+// 7.13.* we need to decide on Rocket's behaviour, this isn't defined in the spec
+//
+// 12.* & 13.* test compression, which we don't implement (yet)
