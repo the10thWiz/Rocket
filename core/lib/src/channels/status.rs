@@ -40,7 +40,10 @@ macro_rules! websocket_status_impl {
     ($($name:ident => $code:expr),*) => {
         $(
             /// Websocket pre-defined Status code
-            pub const $name: WebsocketStatus<'static> = WebsocketStatus { code: $code, reason: Cow::Borrowed(stringify!($name)) };
+            pub const $name: WebsocketStatus<'static> = WebsocketStatus {
+                code: $code,
+                reason: Cow::Borrowed(stringify!($name))
+            };
         )*
     }
 }
@@ -119,7 +122,8 @@ impl WebsocketStatus<'static> {
             match code {
                 0000..=0999 => Err(StatusError::OutOfRange),
                 1005 | 1006 => Err(StatusError::IllegalStatus),
-                1000 | 1001 | 1002 | 1003 | 1004 | 1007 | 1008 | 1009 | 1010 | 1011 | 1015 => Ok(Self {
+                1000 | 1001 | 1002 | 1003 | 1004 | 1007 | 1008 | 1009 | 1010 | 1011 | 1015 =>
+                Ok(Self {
                     code,
                     reason: Cow::Owned(String::from_utf8(bytes.split_off(2).to_vec())?),
                 }),

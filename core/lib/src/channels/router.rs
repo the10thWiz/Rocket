@@ -206,7 +206,10 @@ impl WebsocketRouter {
 
         //let mut response = None;
         let (websocket_channel, upgrade_tx) = WebsocketChannel::new();
-        let inner_channel = InnerChannel::from_websocket(&websocket_channel, rocket.state().unwrap());
+        let inner_channel = InnerChannel::from_websocket(
+            &websocket_channel,
+            rocket.state().unwrap()
+        );
 
         let protocol = Self::protocol(&req);
 
@@ -330,7 +333,10 @@ impl WebsocketRouter {
                                     };
                                     WebsocketChannel::close(&ws.subscribe_handle(), ret).await;
                                 } else {
-                                    WebsocketChannel::close(&ws.subscribe_handle(), super::PROTOCOL_ERROR).await;
+                                    WebsocketChannel::close(
+                                        &ws.subscribe_handle(),
+                                        super::PROTOCOL_ERROR
+                                    ).await;
                                 }
                             } else {
                                 WebsocketChannel::close(&ws.subscribe_handle(), super::OK).await;

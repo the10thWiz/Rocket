@@ -95,7 +95,10 @@ impl WebsocketChannel {
         }
     }
 
-    pub(crate) async fn close(broker_tx: &mpsc::Sender<WebsocketMessage>, status: WebsocketStatus<'_>) {
+    pub(crate) async fn close(
+        broker_tx: &mpsc::Sender<WebsocketMessage>,
+        status: WebsocketStatus<'_>
+    ) {
         let (tx, rx) = mpsc::channel(1);
         let header = FrameHeader::new(
             true,
@@ -260,13 +263,25 @@ impl WebsocketChannel {
                 let mut ping_rx = ping_rx;
                 let mut codec = websocket_codec::protocol::FrameHeaderCodec;
                 let mut write_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
-                while let Some(message) = Self::await_or_ping(&mut broker_rx, &mut ping_rx, &mut write, &mut write_buf, &mut codec).await {
+                while let Some(message) = Self::await_or_ping(
+                    &mut broker_rx,
+                    &mut ping_rx,
+                    &mut write,
+                    &mut write_buf,
+                    &mut codec).await
+                {
                     let (header, mut rx) = message.into_parts();
                     if header.opcode() == u8::from(Opcode::Close) {
                         close_sent.store(true, atomic::Ordering::Release);
                     }
                     let mut running_header = Some(header);
-                    while let Some(chunk) = Self::await_or_ping(&mut rx, &mut ping_rx, &mut write, &mut write_buf, &mut codec).await {
+                    while let Some(chunk) = Self::await_or_ping(
+                        &mut rx,
+                        &mut ping_rx,
+                        &mut write,
+                        &mut write_buf,
+                        &mut codec).await
+                    {
                         let mut parts = vec![chunk];
                         let mut fin = false;
                         // Buffer additional chunks if they are ready

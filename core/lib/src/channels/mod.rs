@@ -1,5 +1,5 @@
 //! Rocket Websocket implementation
-//! 
+//!
 //! Websocket Routes are very similar to normal routes, and have many of the same properties.
 //!
 //! A simple echo handler:
