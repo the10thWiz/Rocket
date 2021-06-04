@@ -6,7 +6,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use bytes::BytesMut;
 use rocket_http::uri::Origin;
-use rocket_http::{Status, hyper::upgrade::Upgraded};
+use rocket_http::hyper::upgrade::Upgraded;
 use tokio::io::AsyncWrite;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::join;
@@ -20,11 +20,13 @@ use websocket_codec::protocol::FrameHeaderCodec;
 
 use crate::channels::MAX_BUFFER_SIZE;
 use crate::channels::WebsocketMessage;
-use crate::{Request, request::{FromRequest, Outcome}};
+use crate::request::Outcome;
 
 use crate::log::*;
 
+use super::FromWebsocket;
 use super::IntoMessage;
+use super::Websocket;
 use super::WebsocketStatus;
 use super::broker::Broker;
 use super::to_message;
@@ -450,28 +452,11 @@ impl<'r> Channel<'r> {
 }
 
 #[crate::async_trait]
-impl<'r> FromRequest<'r> for Channel<'r> {
+impl<'r> FromWebsocket<'r> for Channel<'r> {
     type Error = &'static str;
-    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        let tmp: Option<InnerChannel> = request.local_cache(|| None).clone();
-        if let Some(tmp) = tmp {
-            Outcome::Success(Self::from(tmp, request.uri()))
-        }else {
-            Outcome::Failure((Status::InternalServerError, "Websockets not initialized"))
-        }
+
+    async fn from_websocket(request: &'r Websocket<'_>) -> Outcome<Self, Self::Error> {
+        Outcome::Success(Self::from(request.inner_channel(), request.topic()))
     }
 }
 
-// Autobahn testing
-//
-// 2.9 fails to send pong for ping
-// 5.19/5.20 sometimes fail to send pongs & message in the correct order - this is likely a data
-//   race between reading and my reply - I start replying right away, before I've finished reading
-//   the frame
-// 6.* fail since I don't check UTF-8 - should I?
-// 7.1.5 fails since Rocket will forward part of a message back. This isn't an issue in most cases
-//   (especially JSON or similar), where the entire message would need to be buffered before we can
-//   start responding.
-// 7.13.* we need to decide on Rocket's behaviour, this isn't defined in the spec
-//
-// 12.* & 13.* test compression, which we don't implement (yet)

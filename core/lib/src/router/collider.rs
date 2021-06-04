@@ -104,31 +104,6 @@ impl Route {
             && queries_match(self, req.uri())
             && formats_match(self, req)
     }
-
-    /// Determines if this route matches against the given request.
-    ///
-    /// This means that:
-    ///
-    ///   * The route's method matches that of the incoming request.
-    ///   * The route's format (if any) matches that of the incoming request.
-    ///     - If route specifies format, it only gets requests for that format.
-    ///     - If route doesn't specify format, it gets requests for any format.
-    ///   * All static components in the route's path match the corresponding
-    ///     components in the same position in the incoming request.
-    ///   * All static components in the route's query string are also in the
-    ///     request query string, though in any position. If there is no query
-    ///     in the route, requests with/without queries match.
-    pub(crate) fn matches_topic(&self, req: &Request<'_>, topic: &Option<Origin<'_>>) -> bool {
-        if let Some(topic) = topic {
-            self.method == req.method()
-                && paths_match(self, topic)
-                && queries_match(self, topic)
-        }else {
-            self.method == req.method()
-                && paths_match(self, req.uri())
-                && queries_match(self, req.uri())
-        }
-    }
 }
 
 fn paths_match(route: &Route, req: &Origin<'_>) -> bool {

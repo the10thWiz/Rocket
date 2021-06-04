@@ -348,7 +348,7 @@ pub struct StaticInfo {
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFuture<'r>,
     /// The route's websocket handler, i.e, the annotated function.
     pub websocket_handler: WebsocketEvent<
-        for<'r> fn(Arc<crate::Request<'r>>, crate::Data) -> BoxFutureWs<'r>
+        for<'r> fn(Arc<crate::channels::Websocket<'r>>, crate::Data) -> BoxFutureWs<'r>
     >,
     /// The route's rank, if any.
     pub rank: Option<isize>,
@@ -406,6 +406,13 @@ impl<T> WebsocketEvent<T> {
             Self::Join(t) => &t,
             Self::Message(t) => &t,
             Self::Leave(t) => &t,
+        }
+    }
+
+    pub(crate) fn has_websocket_handler(&self) -> bool {
+        match self {
+            Self::None => false,
+            _ => true,
         }
     }
 }

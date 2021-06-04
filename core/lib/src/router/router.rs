@@ -26,7 +26,7 @@ impl Router {
     pub fn add_route(&mut self, route: Route) {
         let routes = self.routes.entry(route.method).or_default();
         routes.push(route);
-        routes.sort_by_key(|r| r.rank);
+        routes.sort_by_key(|r| if r.websocket_handler.has_websocket_handler() {100} else {r.rank});
     }
 
     pub fn add_catcher(&mut self, catcher: Catcher) {

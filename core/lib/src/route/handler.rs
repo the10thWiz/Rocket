@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::channels::Websocket;
 use crate::{Request, Data};
 use crate::response::{Response, Responder};
 use crate::http::Status;
@@ -182,17 +183,17 @@ pub trait WebsocketHandler: CloneableWs + Send + Sync + 'static {
     ///
     /// The variant of `Outcome` returned by the returned `Future` determines
     /// what Rocket does next.
-    async fn handle<'r>(&self, request: Arc<Request<'_>>, data: Data) -> WsOutcome;
+    async fn handle<'r>(&self, request: Arc<Websocket<'_>>, data: Data) -> WsOutcome;
 }
 
 // We write this manually to avoid double-boxing.
 impl<F: Clone + Sync + Send + 'static> WebsocketHandler for F
-    where for<'x> F: Fn(Arc<Request<'x>>, Data) -> BoxFutureWs<'x>,
+    where for<'x> F: Fn(Arc<Websocket<'x>>, Data) -> BoxFutureWs<'x>,
 {
     #[inline(always)]
     fn handle<'r, 'life0, 'life1, 'async_trait, 'a>(
         &'life0 self,
-        req: Arc<Request<'a>>,
+        req: Arc<Websocket<'a>>,
         data: Data,
     ) -> BoxFutureWs<'a>
         where 'r: 'async_trait,

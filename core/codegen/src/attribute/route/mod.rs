@@ -489,7 +489,7 @@ fn websocket_query_decls(route: &WebsocketRoute) -> Option<TokenStream> {
         let mut _e = #_form::Errors::new();
         #(let mut #ident = #init_expr;)*
 
-        for _f in #__req.query_fields() {
+        for _f in #__req.request().query_fields() {
             let _raw = (_f.name.source().as_str(), _f.value);
             let _key = _f.name.key_lossy().as_str();
             match (_raw, _key) {
@@ -523,11 +523,11 @@ fn websocket_query_decls(route: &WebsocketRoute) -> Option<TokenStream> {
 fn websocket_request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, _log, FromRequest, _Err, Outcome, _Some
+        __req, __data, _request, _log, FromWebsocket, _Err, Outcome, _Some
     );
 
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromRequest>::from_request(#__req.as_ref()).await {
+        let #ident: #ty = match <#ty as #FromWebsocket>::from_websocket(#__req.as_ref()).await {
             #Outcome::Success(__v) => __v,
             #Outcome::Forward(_) => {
                 #_log::warn_!("`{}` request guard is forwarding.", stringify!(#ty));
@@ -560,7 +560,7 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
     // that's the point of statically checking the URI parameters.
     let expr = match guard.trailing {
         false => quote_spanned! { ty.span() =>
-            match #__req.routed_segment(#i) {
+            match #__req.request().routed_segment(#i) {
                 #_Some(__s) => match <#ty as #FromParam>::from_param(__s) {
                     #_Ok(__v) => __v,
                     #_Err(__error) => return #parse_error,
@@ -574,7 +574,7 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
             }
         },
         true => quote_spanned! { ty.span() =>
-            match <#ty as #FromSegments>::from_segments(#__req.routed_segments(#i..)) {
+            match <#ty as #FromSegments>::from_segments(#__req.request().routed_segments(#i..)) {
                 #_Ok(__v) => __v,
                 #_Err(__error) => return #parse_error,
             }
@@ -590,7 +590,7 @@ fn websocket_data_guard_decl(guard: &Guard) -> TokenStream {
     define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome);
 
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromData>::from_data(#__req.as_ref(), #__data).await {
+        let #ident: #ty = match <#ty as #FromData>::from_data(#__req.request(), #__data).await {
             #Outcome::Success(_m) => _m,
             #Outcome::Forward(_d) => {
                 return #Outcome::Forward(_d);
@@ -754,7 +754,7 @@ fn codegen_websocket(event: WebsocketEvent, route: WebsocketRoute) -> Result<Tok
             #[allow(non_snake_case, unreachable_patterns, unreachable_code)]
             fn into_info(self) -> #_route::StaticInfo {
                 fn monomorphized_function<'_b>(
-                    #__req: #_Arc<#Request<'_b>>,
+                    #__req: #_Arc<#Websocket<'_b>>,
                     #__data: #Data
                 ) -> #_route::BoxFutureWs<'_b> {
                     #_Box::pin(async move {

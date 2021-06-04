@@ -22,6 +22,7 @@ use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
 use crate::router::{Collide, Collisions};
 use yansi::Paint;
 
+use super::Websocket;
 use super::broker::Broker;
 use super::{WebsocketChannel, channel::InnerChannel};
 
@@ -130,16 +131,15 @@ impl WebsocketRouter {
     async fn handle_message<'r, 'a: 'r>(
         &'a self,
         event: Event,
-        req: Arc<Request<'r>>,
-        topic: &'r Option<Origin<'_>>,
+        req: Arc<Websocket<'r>>,
         mut message: Data,
     ) -> Result<(), Status> {
         //let req_copy = req.clone();
         for route in self.routes.get(&event)
             .into_iter()
             .flat_map(|routes| routes.iter()) {
-            if route.matches_topic(req.as_ref(), topic) {
-                req.set_route(route);
+            if route.matches(req.request()) {
+                req.request().set_route(route);
 
                 let name = route.name.as_deref();
                 let handler = route.websocket_handler.unwrap_ref();
@@ -206,18 +206,15 @@ impl WebsocketRouter {
 
         //let mut response = None;
         let (websocket_channel, upgrade_tx) = WebsocketChannel::new();
-        req.local_cache(||
-                Some(InnerChannel::from_websocket(&websocket_channel, rocket.state().unwrap()))
-            );
+        let inner_channel = InnerChannel::from_websocket(&websocket_channel, rocket.state().unwrap());
 
         let protocol = Self::protocol(&req);
 
-        let mut channels = vec![Arc::new(req)];
+        let mut channels = vec![Arc::new(Websocket::new(req, inner_channel))];
 
         let join = rocket.websocket_router.handle_message(
                 Event::Join,
                 channels[0].clone(),
-                &None,
                 Data::local(vec![])
             ).await;
         match join {
@@ -263,9 +260,9 @@ impl WebsocketRouter {
         }
     }
 
-    fn create_reponse<'r>(req: Arc<Request<'r>>, protocol: Protocol) -> Response<'r> {
+    fn create_reponse<'r>(req: Arc<Websocket<'r>>, protocol: Protocol) -> Response<'r> {
         // Use websocket-codec to parse the client request
-        let cl_req = match ClientRequest::parse(|n| req.headers().get_one(n)) {
+        let cl_req = match ClientRequest::parse(|n| req.request().headers().get_one(n)) {
             Ok(v) => v,
             Err(_e) => return Self::handle_error(Status::UpgradeRequired),
         };
@@ -290,7 +287,7 @@ impl WebsocketRouter {
     }
 
     async fn websocket_task_naked<'r, 'a: 'r>(
-        request: &'a Arc<Request<'r>>,
+        request: &'a Arc<Websocket<'r>>,
         on_upgrade: OnUpgrade,
         mut ws: WebsocketChannel,
         upgrade_tx: oneshot::Sender<Upgraded>,
@@ -299,7 +296,7 @@ impl WebsocketRouter {
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
 
-            broker.subscribe(request.uri(), &ws);
+            broker.subscribe(request.topic(), &ws);
             while let Some(message) = ws.next().await {
                 let data = match message.opcode() {
                     Opcode::Text => Data::from_ws(message, Some(false)),
@@ -342,18 +339,16 @@ impl WebsocketRouter {
                         break;
                     },
                 };
-                let _res = request.state.rocket.websocket_router.handle_message(
+                let _res = request.rocket().websocket_router.handle_message(
                         Event::Message,
                         request.clone(),
-                        &None,
                         data
                     ).await;
             }
             broker.unsubscribe_all(&ws);
-            let _e = request.state.rocket.websocket_router.handle_message(
+            let _e = request.rocket().websocket_router.handle_message(
                     Event::Leave,
                     request.clone(),
-                    &None,
                     Data::local(vec![])
                 ).await;
         }
@@ -365,7 +360,7 @@ impl WebsocketRouter {
     /// Panics if request doesn't have exactly one request & origin pair
     async fn websocket_task_multiplexed<'r>(
         rocket: &'r Rocket<Orbit>,
-        subscriptions: &'r mut Vec<Arc<Request<'r>>>,
+        subscriptions: &'r mut Vec<Arc<Websocket<'r>>>,
         on_upgrade: OnUpgrade,
         mut ws: WebsocketChannel,
         upgrade_tx: oneshot::Sender<Upgraded>,
@@ -377,7 +372,7 @@ impl WebsocketRouter {
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
 
-            broker.subscribe(subscriptions[0].uri(), &ws);
+            broker.subscribe(subscriptions[0].topic(), &ws);
             while let Some(message) = ws.next().await {
                 let mut data = match message.opcode() {
                     Opcode::Text => Data::from_ws(message, Some(false)),
@@ -392,7 +387,6 @@ impl WebsocketRouter {
                         let res = rocket.websocket_router.handle_message(
                             Event::Message,
                             request,
-                            &None,
                             data
                         ).await;
                         match res {
@@ -406,19 +400,18 @@ impl WebsocketRouter {
                                 error_message(message, ws.subscribe_handle()).await;
                             }
                             Ok(MultiplexAction::Subscribe(topic)) => {
-                                if !subscriptions.iter().any(|r| r.uri() == &topic) {
+                                if !subscriptions.iter().any(|r| r.topic() == &topic) {
                                     let mut new_request = subscriptions[0].as_ref().clone();
                                     new_request.set_uri(topic);
                                     let new_request = Arc::new(new_request);
                                     let join = rocket.websocket_router.handle_message(
                                             Event::Join,
                                             new_request.clone(),
-                                            &None,
                                             Data::local(vec![])
                                         ).await;
                                     match join {
                                         Ok(()) => {
-                                            broker.subscribe(new_request.uri(), &ws);
+                                            broker.subscribe(new_request.topic(), &ws);
                                             subscriptions.push(new_request);
                                         },
                                         Err(s) => {
@@ -437,11 +430,10 @@ impl WebsocketRouter {
                             },
                             Ok(MultiplexAction::Unsubscribe(topic)) => {
                                 if let Some(leave_req) = Self::remove_topic(subscriptions, topic) {
-                                    broker.unsubscribe(leave_req.uri(), &ws);
+                                    broker.unsubscribe(leave_req.topic(), &ws);
                                     let _leave = rocket.websocket_router.handle_message(
                                         Event::Leave,
                                         leave_req.clone(),
-                                        &None,
                                         Data::local(vec![])
                                     ).await;
                                     // TODO: handle errors in leave
@@ -463,7 +455,6 @@ impl WebsocketRouter {
             let _e = rocket.websocket_router.handle_message(
                 Event::Leave,
                 subscriptions[0].clone(),
-                &None,
                 Data::local(vec![])
             ).await;
             // TODO implement Ping/Pong (not exposed to the user)
@@ -473,10 +464,10 @@ impl WebsocketRouter {
     }
 
     fn remove_topic<'r>(
-        subs: &mut Vec<Arc<Request<'r>>>,
+        subs: &mut Vec<Arc<Websocket<'r>>>,
         topic: Origin<'_>
-    ) -> Option<Arc<Request<'r>>> {
-        if let Some((index, _)) = subs.iter().enumerate().find(|(_, r)| r.uri() == &topic) {
+    ) -> Option<Arc<Websocket<'r>>> {
+        if let Some((index, _)) = subs.iter().enumerate().find(|(_, r)| r.topic() == &topic) {
             Some(subs.remove(index))
         }else {
             None
@@ -485,8 +476,8 @@ impl WebsocketRouter {
 
     async fn multiplex_get_request<'a, 'r>(
         data: &mut Data,
-        subscribtions: &'a Vec<Arc<Request<'r>>>
-    ) -> Result<Arc<Request<'r>>, MultiplexError> {
+        subscribtions: &'a Vec<Arc<Websocket<'r>>>
+    ) -> Result<Arc<Websocket<'r>>, MultiplexError> {
         // Peek max_topic length
         let topic = data.peek(MAX_TOPIC_LENGTH + MULTIPLEX_CONTROL_CHAR.len()).await;
         if let Some((index, _)) = topic
@@ -501,7 +492,7 @@ impl WebsocketRouter {
             // raw[..index] should contain everything EXCEPT the control character
             let topic = Origin::parse(std::str::from_utf8(&raw[..index])?)?;
             for r in subscribtions.iter() {
-                if r.uri() == &topic {
+                if r.topic() == &topic {
                     return Ok(r.clone());
                 }
             }
