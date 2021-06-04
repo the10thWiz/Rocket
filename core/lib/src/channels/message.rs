@@ -1,5 +1,4 @@
 use bytes::{Bytes, BytesMut};
-use rocket_http::Status;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::mpsc;
 use ubyte::ByteUnit;
@@ -8,7 +7,7 @@ use websocket_codec::protocol::FrameHeader;
 
 use crate::Data;
 
-use super::MAX_BUFFER_SIZE;
+use super::{MAX_BUFFER_SIZE, WebsocketStatus};
 
 /// A trait for types that can be sent on a websocket.
 ///
@@ -116,10 +115,10 @@ impl WebsocketMessage {
     /// Creates a Close frame, with an optional status
     ///
     /// TODO: create seperate status struct
-    pub(crate) fn close(status: Option<Status>) -> Self {
+    pub(crate) fn close(status: Option<WebsocketStatus>) -> Self {
         let (tx, data) = mpsc::channel(1);
         if let Some(status) = status {
-            let _e = tx.try_send(status.to_string().into());
+            let _e = tx.try_send(status.encode());
         }
         Self {
             header: FrameHeader::new(true, 0, Opcode::Close.into(), None, 0usize.into()),

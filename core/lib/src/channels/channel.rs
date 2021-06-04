@@ -3,11 +3,13 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use bytes::Bytes;
 use bytes::BytesMut;
 use rocket_http::uri::Origin;
 use rocket_http::{Status, hyper::upgrade::Upgraded};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::join;
+use tokio::time::sleep;
 use tokio::time::timeout;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::{Decoder, Encoder};
@@ -21,6 +23,7 @@ use crate::{Request, request::{FromRequest, Outcome}};
 use crate::log::*;
 
 use super::IntoMessage;
+use super::WebsocketStatus;
 use super::broker::Broker;
 use super::to_message;
 
@@ -42,6 +45,7 @@ impl WebsocketChannel {
         let should_send_close = Arc::new(AtomicBool::new(false));
         tokio::spawn(Self::message_handler(
                 upgrade_rx,
+                broker_tx.clone(),
                 broker_rx,
                 message_tx,
                 should_send_close.clone()
@@ -71,8 +75,25 @@ impl WebsocketChannel {
         !self.close_sent.load(atomic::Ordering::Acquire)
     }
 
+    fn protocol_error(header: &FrameHeader, remaining: usize) -> bool {
+        if (header.opcode() == u8::from(Opcode::Close) ||
+            header.opcode() == u8::from(Opcode::Ping) ||
+            header.opcode() == u8::from(Opcode::Pong)) &&
+            remaining > 125
+        {
+            true
+        } else if header.rsv() != 0x0 {
+            true
+        } else if Opcode::try_from(header.opcode()).is_none() {
+            true
+        } else {
+            false
+        }
+    }
+
     async fn message_handler(
         upgrade_rx: oneshot::Receiver<Upgraded>,
+        mut broker_tx: mpsc::Sender<WebsocketMessage>,
         mut broker_rx: mpsc::Receiver<WebsocketMessage>,
         message_tx: mpsc::Sender<WebsocketMessage>,
         close_sent: Arc<AtomicBool>,
@@ -91,21 +112,22 @@ impl WebsocketChannel {
                 let mut codec = websocket_codec::protocol::FrameHeaderCodec;
                 let mut read = read;
                 let mut read_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
-                let (mut data_tx, data_rx) = mpsc::channel(1);
+                let (mut data_tx, data_rx) = mpsc::channel(3);
                 let mut data_rx = Some(data_rx);
                 loop {
-                    match read.read_buf(&mut read_buf).await {
-                        Ok(0) => warn_!("Potential EOF from client"),
-                        Ok(_n) => (),
-                        Err(e) => error_!(
-                                "Io error occured while recieving websocket messages: {:?}",
-                                e
-                            ),
-                    }
                     let h = match codec.decode(&mut read_buf) {
                         Ok(Some(h)) => h,
                         Ok(None) => {
                             read_buf.reserve(1);
+                            match read.read_buf(&mut read_buf).await {
+                                Ok(0) => break,//warn_!("Potential EOF from client"),
+                                Ok(_n) => (),
+                                Err(e) =>
+                                    error_!(
+                                        "Io error occured during websocket messages: {:?}",
+                                        e
+                                    ),
+                            }
                             continue;
                         },
                         Err(e) => {
@@ -117,6 +139,20 @@ impl WebsocketChannel {
                     let close = h.opcode() == u8::from(Opcode::Close);
                     let mut remaining = usize::try_from(h.data_len())
                         .expect("Invalid Length in frame");
+                    // Control frames may not have a length larger than 125 bytes
+                    if Self::protocol_error(&h, remaining) {
+                        let (tx, rx) = mpsc::channel(1);
+                        let header = FrameHeader::new(
+                            true,
+                            0x0,
+                            Opcode::Close.into(),
+                            None,
+                            0usize.into(),
+                        );
+                        let _e = broker_tx.send(WebsocketMessage::from_parts(header, rx)).await;
+                        let _e = tx.send(super::PROTOCOL_ERROR.encode()).await;
+                        break;
+                    }
                     // TODO: remove expect
                     let mut mask: Option<u32> = h.mask().map(|m| m.into());
                     if let Some(data_rx) = data_rx.take() {
@@ -144,15 +180,20 @@ impl WebsocketChannel {
                             let _e = read.read_buf(&mut read_buf).await;
                         }
                     }
-                    if close {
-                        break;
-                    }
                     if fin {
                         // If this was the final frame, prepare for the next message
-                        let (tx, rx) = mpsc::channel(1);
+                        let (tx, rx) = mpsc::channel(3);
+                        // explicitly drop data_tx
+                        //let _e = data_tx.send(Bytes::new()).await;
+                        //drop(data_tx);
                         data_tx = tx;
                         data_rx = Some(rx);
                     }
+                    if close {
+                        break;
+                    }
+                    // Give time for writer?
+                    //sleep(Duration::from_millis(10)).await;
                 }
             };
             let writer = async move {
@@ -183,11 +224,14 @@ impl WebsocketChannel {
                             }
                         }
                         if let Some(header) = running_header.take() {
+                            if header.mask().is_some() {
+                                error_!("Websocket messages should not be sent with masks");
+                            }
                             let int_header = FrameHeader::new(
                                     fin,
                                     header.rsv(),
                                     header.opcode(),
-                                    header.mask(),
+                                    None,
                                     parts.iter().map(|s| s.len()).sum::<usize>().into(),
                                 );
                             let _e = codec.encode(int_header, &mut write_buf);
@@ -210,17 +254,129 @@ impl WebsocketChannel {
                             todo!("")
                         }
                     }
+                    // If no data was sent, we send the header with an empty body anyway
+                    if let Some(header) = running_header.take() {
+                        if header.mask().is_some() {
+                            error_!("Websocket messages should not be sent with masks");
+                        }
+                        let int_header = FrameHeader::new(
+                                true,
+                                header.rsv(),
+                                header.opcode(),
+                                None,
+                                0usize.into(),
+                            );
+                        let _e = codec.encode(int_header, &mut write_buf);
+                        let _e = write.write_all_buf(&mut write_buf).await;
+                    }
                     if close_sent.load(atomic::Ordering::Acquire) {
                         break;
                     }
                 }
             };
+            //let reader = tokio::spawn(reader);
+            //let writer = tokio::spawn(writer);
             let _e = join! {
-                reader,
                 writer,
+                reader,
             };
         }
     }
+}
+
+mod io_util {
+    use std::{cell::UnsafeCell, pin::Pin, sync::Arc, task::{Context, Poll}};
+
+    use tokio::{io::{AsyncRead, AsyncWrite, ReadBuf}, sync::{OwnedSemaphorePermit, Semaphore}};
+    use tokio_util::sync::PollSemaphore;
+
+    pub fn split<T>(stream: T) -> (ReadHalf<T>, WriteHalf<T>) {
+        let semaphore = Arc::new(Semaphore::new(1));
+        let t = Arc::new(UnsafeCell::new(stream));
+        let read = Inner {
+            semaphore: PollSemaphore::new(semaphore.clone()),
+            t: t.clone(),
+        };
+        let write = Inner {
+            semaphore: PollSemaphore::new(semaphore),
+            t,
+        };
+        (ReadHalf { inner: read }, WriteHalf { inner: write })
+    }
+
+    pub struct ReadHalf<T> {
+        inner: Inner<T>,
+    }
+
+    impl<T: AsyncRead> AsyncRead for ReadHalf<T> {
+        fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+            match self.inner.poll_lock(cx) {
+                Poll::Pending => {
+                    eprintln!("Reader waiting for lock");
+                    Poll::Pending},
+                Poll::Ready(g) => {
+                    eprintln!("Reading");
+                    g.inner.poll_read(cx, buf)},
+            }
+        }
+    }
+
+    pub struct WriteHalf<T> {
+        inner: Inner<T>,
+    }
+
+    impl<T: AsyncWrite> AsyncWrite for WriteHalf<T> {
+        fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+            match self.inner.poll_lock(cx) {
+                Poll::Pending => {
+                    eprintln!("Writer waiting for lock");
+                    Poll::Pending},
+                Poll::Ready(g) => {
+                    eprintln!("Writing");
+                    g.inner.poll_write(cx, buf)},
+            }
+        }
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            match self.inner.poll_lock(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(g) => g.inner.poll_flush(cx),
+            }
+        }
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            match self.inner.poll_lock(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(g) => g.inner.poll_shutdown(cx),
+            }
+        }
+    }
+
+    struct Inner<T> {
+        semaphore: PollSemaphore,
+        t: Arc<UnsafeCell<T>>,
+    }
+
+    impl<T> Inner<T> {
+        fn poll_lock(&mut self, cx: &mut Context<'_>) -> Poll<Guard<'_, T>> {
+            match self.semaphore.poll_acquire(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Some(permit)) => Poll::Ready(Guard {
+                    _permit: permit,
+                    inner: unsafe { Pin::new_unchecked( &mut *self.t.get() ) }
+                }),
+                Poll::Ready(None) => todo!(),
+            }
+        }
+    }
+
+    struct Guard<'a, T> {
+        _permit: OwnedSemaphorePermit,
+        inner: Pin<&'a mut T>,
+    }
+
+    unsafe impl<T: Send> Send for ReadHalf<T> {}
+    unsafe impl<T: Send> Send for WriteHalf<T> {}
+    unsafe impl<T: Sync> Sync for ReadHalf<T> {}
+    unsafe impl<T: Sync> Sync for WriteHalf<T> {}
 }
 
 #[derive(Clone)]
@@ -279,7 +435,7 @@ impl<'r> Channel<'r> {
     }
 
     /// Sends a close notificaiton to the client, along with a reason for the close
-    pub async fn close_with_status(&self, status: Status) {
+    pub async fn close_with_status(&self, status: WebsocketStatus) {
         self.send_raw(
             WebsocketMessage::close(Some(status))
         ).await

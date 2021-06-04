@@ -311,7 +311,7 @@ impl WebsocketRouter {
                                     h.fin(),
                                     h.rsv(),
                                     Opcode::Pong.into(),
-                                    h.mask(),
+                                    None,
                                     h.data_len()
                                 ),
                                 d
@@ -367,13 +367,6 @@ impl WebsocketRouter {
         mut ws: WebsocketChannel,
         upgrade_tx: oneshot::Sender<Upgraded>,
     ) {
-        // Unsafe code to escape the borrow checker, and allow us to mutate the
-        // list of subscribtions
-        // Safety: Honestly, I'm not sure this is actually safe
-        //   The basic idea is that calls to `handle_message` release their borrows
-        //   once they have been awaited, which I'm pretty sure they do. However, the
-        //   borrow checker can't figure that out, hence this unsafe code.
-        //let mut_subs = Pin::new(unsafe { &mut *(subscriptions as *mut Vec<_>) });
         if subscriptions.len() != 1 {
             panic!("Websocket task requires exactly 1 request in the subscribtions vector");
         }

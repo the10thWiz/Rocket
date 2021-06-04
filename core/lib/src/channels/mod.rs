@@ -6,6 +6,7 @@ mod router;
 mod message;
 mod broker;
 mod channel;
+mod status;
 
 pub(crate) use router::WebsocketRouter;
 pub(crate) use message::to_message;
@@ -13,6 +14,7 @@ pub(crate) use broker::Broker;
 
 pub use channel::{Channel, WebsocketChannel};
 pub use message::{WebsocketMessage, IntoMessage};
+pub use status::*;
 //pub use broker::Broker;
 
 pub use websocket_codec::Opcode;
