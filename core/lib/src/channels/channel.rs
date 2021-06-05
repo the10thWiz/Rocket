@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use bytes::BytesMut;
+use rocket_http::ext::IntoOwned;
 use rocket_http::uri::Origin;
 use rocket_http::hyper::upgrade::Upgraded;
 use tokio::io::AsyncWrite;
@@ -19,6 +20,7 @@ use websocket_codec::protocol::FrameHeader;
 use websocket_codec::protocol::FrameHeaderCodec;
 
 use crate::channels::MAX_BUFFER_SIZE;
+use crate::channels::rocket_multiplex::MULTIPLEX_CONTROL_CHAR;
 use crate::channels::WebsocketMessage;
 use crate::request::Outcome;
 
@@ -26,23 +28,21 @@ use crate::log::*;
 
 use super::FromWebsocket;
 use super::IntoMessage;
+use super::Protocol;
 use super::Websocket;
 use super::WebsocketStatus;
 use super::broker::Broker;
 use super::to_message;
 
-/// A Websocket connection, directly connected to a client.
-///
-/// Messages sent with the `send` method are only sent to one client, the one who sent the message.
-/// This is also nessecary for subscribing clients to specific channels.
-pub struct WebsocketChannel {
+/// An internal representation of a Websocket connection
+pub(crate) struct WebsocketChannel {
     inner: mpsc::Receiver<WebsocketMessage>,
     sender: mpsc::Sender<WebsocketMessage>,
     close_sent: Arc<AtomicBool>,
 }
 
 impl WebsocketChannel {
-    pub(crate) fn new() -> (Self, oneshot::Sender<Upgraded>) {
+    pub fn new() -> (Self, oneshot::Sender<Upgraded>) {
         let (broker_tx, broker_rx) = mpsc::channel(50);
         let (upgrade_tx, upgrade_rx) = oneshot::channel();
         let (message_tx, message_rx) = mpsc::channel(1);
@@ -62,20 +62,20 @@ impl WebsocketChannel {
     }
 
     /// Gets the handle to subscribe this channel to a descriptor
-    pub(crate) fn subscribe_handle(&self) -> mpsc::Sender<WebsocketMessage> {
+    pub fn subscribe_handle(&self) -> mpsc::Sender<WebsocketMessage> {
         self.sender.clone()
     }
 
     /// Get the next message from this client.
     ///
     /// This method also forwards messages sent from any channels the client is subscribed to
-    pub(crate) async fn next(&mut self) -> Option<WebsocketMessage> {
+    pub async fn next(&mut self) -> Option<WebsocketMessage> {
         self.inner.recv().await
     }
 
     /// Gets the close_sent flag. This function returns true iff we have not sent a close message
     /// yet, i.e. we should send a close message.
-    pub(crate) fn should_send_close(&self) -> bool {
+    pub fn should_send_close(&self) -> bool {
         !self.close_sent.load(atomic::Ordering::Acquire)
     }
 
@@ -87,6 +87,7 @@ impl WebsocketChannel {
         {
             true
         } else if header.rsv() != 0x0 {
+            //eprintln!("{:b}", header.rsv());
             true
         } else if Opcode::try_from(header.opcode()).is_none() && header.opcode() != 0x0 {
             true
@@ -95,7 +96,7 @@ impl WebsocketChannel {
         }
     }
 
-    pub(crate) async fn close(
+    pub async fn close(
         broker_tx: &mpsc::Sender<WebsocketMessage>,
         status: WebsocketStatus<'_>
     ) {
@@ -107,8 +108,7 @@ impl WebsocketChannel {
             None,
             0usize.into(),
         );
-        //info_!("Close frame header: {:?}", header);
-        let _e = broker_tx.send(WebsocketMessage::from_parts(header, rx)).await;
+        let _e = broker_tx.send(WebsocketMessage::from_parts(header, None, rx)).await;
         let _e = tx.send(status.encode()).await;
     }
 
@@ -172,6 +172,7 @@ impl WebsocketChannel {
                     };
                     // Checks for some other protocol errors
                     if Self::protocol_error(&h, remaining) {
+                        warn_!("Remote Protocol Error");
                         Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
                         break;
                     }
@@ -202,6 +203,8 @@ impl WebsocketChannel {
                         while remaining > read_buf.len() {
                             let _e = read.read_buf(&mut read_buf).await;
                         }
+                        // discard the pong message
+                        let _ = read_buf.split_to(remaining);
                         continue;
                     }
                     // If there is a frame to continue, it must be continued
@@ -210,7 +213,7 @@ impl WebsocketChannel {
                             Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
                             break;
                         } else {
-                            let message = WebsocketMessage::from_parts(h, data_rx);
+                            let message = WebsocketMessage::from_parts(h, None, data_rx);
                             let _e = message_tx.send(message).await;
                         }
                     } else if h.opcode() == u8::from(Opcode::Close) {
@@ -218,7 +221,7 @@ impl WebsocketChannel {
                         // frame, we drop later messages anyway.
                         let (tx, rx) = mpsc::channel(3);
                         data_tx = tx;
-                        let message = WebsocketMessage::from_parts(h, rx);
+                        let message = WebsocketMessage::from_parts(h, None, rx);
                         let _e = message_tx.send(message).await;
                     } else if h.opcode() != 0x0 {
                         Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
@@ -257,6 +260,7 @@ impl WebsocketChannel {
                 }
                 read
             };
+
             let writer = async move {
                 // Explicit moves - probably not needed
                 let mut write = write;
@@ -270,7 +274,7 @@ impl WebsocketChannel {
                     &mut write_buf,
                     &mut codec).await
                 {
-                    let (header, mut rx) = message.into_parts();
+                    let (header, mut topic, mut rx) = message.into_parts();
                     if header.opcode() == u8::from(Opcode::Close) {
                         close_sent.store(true, atomic::Ordering::Release);
                     }
@@ -311,6 +315,16 @@ impl WebsocketChannel {
                                 );
                             let _e = codec.encode(int_header, &mut write_buf);
                             let _e = write.write_all_buf(&mut write_buf).await;
+
+                            // Write out the topic if we have one. This can only be present once
+                            // (since it is replaced with None by take), so it will only be sent
+                            // once at the beginning of a message. Naked messages will send topic
+                            // as None, and therefore nothing will be appended
+                            if let Some(topic) = topic.take() {
+                                let _e = write.write_all(topic.to_string().as_bytes()).await;
+                                let _e = write.write_all(MULTIPLEX_CONTROL_CHAR).await;
+                            }
+
                             for mut chunk in parts {
                                 let _e = write.write_all_buf(&mut chunk).await;
                             }
@@ -395,18 +409,24 @@ impl WebsocketChannel {
 pub(crate) struct InnerChannel {
     client: mpsc::Sender<WebsocketMessage>,
     broker: Broker,
+    protocol: Protocol,
 }
 
 impl InnerChannel {
-    pub(crate) fn from_websocket(chan: &WebsocketChannel, broker: &Broker) -> Self {
+    pub(crate) fn from_websocket(
+        chan: &WebsocketChannel,
+        broker: &Broker,
+        protocol: Protocol
+    ) -> Self {
         Self{
             client: chan.subscribe_handle(),
             broker: broker.clone(),
+            protocol,
         }
     }
 }
 
-/// A websocket Channel. This can be used to message the client that sent a message (namely, the
+/// A Websocket Channel. This can be used to message the client that sent a message (namely, the
 /// one you are responding to), as well as broadcast messages to other clients. Note that every
 /// client will recieve a broadcast, including the client that triggered the broadcast.
 ///
@@ -415,11 +435,11 @@ impl InnerChannel {
 /// Rust recommend not allowing implicit elided lifetimes.
 ///
 /// This is only valid as a Request Guard on Websocket handlers (`message`, `join`, and `leave`).
-/// TODO: change implementation to verify this at compile time, rather than runtime.
 pub struct Channel<'r> {
     client: mpsc::Sender<WebsocketMessage>,
     broker: Broker,
-    uri: &'r Origin<'r>
+    uri: &'r Origin<'r>,
+    protocol: Protocol,
 }
 
 impl<'r> Channel<'r> {
@@ -428,6 +448,7 @@ impl<'r> Channel<'r> {
             client: inner.client,
             broker: inner.broker,
             uri,
+            protocol: inner.protocol,
         }
     }
 
@@ -438,7 +459,12 @@ impl<'r> Channel<'r> {
 
     /// Send a message to the specific client connected to this websocket
     pub async fn send(&self, message: impl IntoMessage) {
-        self.send_raw(to_message(message)).await
+        match self.protocol {
+            Protocol::Naked => self.send_raw(to_message(message)).await,
+            Protocol::Multiplexed => self.send_raw(
+                to_message(message).with_topic(self.uri.clone().into_owned())
+            ).await,
+        }
     }
 
     /// Sends a close notificaiton to the client, so no new messages will arive

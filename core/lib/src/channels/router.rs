@@ -24,6 +24,9 @@ use yansi::Paint;
 
 use super::Websocket;
 use super::broker::Broker;
+use super::rocket_multiplex::MAX_TOPIC_LENGTH;
+use super::rocket_multiplex::MULTIPLEX_CONTROL_CHAR;
+use super::rocket_multiplex::MULTIPLEX_CONTROL_STR;
 use super::{WebsocketChannel, channel::InnerChannel};
 
 async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
@@ -63,7 +66,7 @@ async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum Protocol {
+pub enum Protocol {
     Naked,
     Multiplexed,
 }
@@ -204,14 +207,15 @@ impl WebsocketRouter {
         // Dispatch the request to get a response, then write that response out.
         let _token = rocket.preprocess_request(&mut req, &mut data).await;
 
+        let protocol = Self::protocol(&req);
+
         //let mut response = None;
         let (websocket_channel, upgrade_tx) = WebsocketChannel::new();
         let inner_channel = InnerChannel::from_websocket(
             &websocket_channel,
-            rocket.state().unwrap()
+            rocket.state().unwrap(),
+            protocol,
         );
-
-        let protocol = Self::protocol(&req);
 
         let mut channels = vec![Arc::new(Websocket::new(req, inner_channel))];
 
@@ -289,6 +293,38 @@ impl WebsocketRouter {
         response.finalize()
     }
 
+    async fn close_status(mut body: mpsc::Receiver<Bytes>) -> WebsocketStatus<'static> {
+        if let Some(body) = body.recv().await {
+            if let Ok(status) = WebsocketStatus::decode(body) {
+                if status == super::OK {
+                    super::OK
+                } else if status == super::GOING_AWAY {
+                    super::OK
+                } else if status == super::EXTENSION_REQUIRED {
+                    super::OK
+                } else if status == super::UNKNOWN_MESSAGE_TYPE {
+                    super::UNKNOWN_MESSAGE_TYPE
+                } else if status == super::INVALID_DATA_TYPE {
+                    super::INVALID_DATA_TYPE
+                } else if status == super::POLICY_VIOLATION {
+                    super::POLICY_VIOLATION
+                } else if status == super::MESSAGE_TOO_LARGE {
+                    super::MESSAGE_TOO_LARGE
+                } else if status == super::INTERNAL_SERVER_ERROR {
+                    super::INTERNAL_SERVER_ERROR
+                } else if (3000..=4999).contains(&status.code()) {
+                    super::OK
+                } else {
+                    super::PROTOCOL_ERROR
+                }
+            } else {
+                super::PROTOCOL_ERROR
+            }
+        } else {
+            super::OK
+        }
+    }
+
     async fn websocket_task_naked<'r, 'a: 'r>(
         request: &'a Arc<Websocket<'r>>,
         on_upgrade: OnUpgrade,
@@ -299,7 +335,7 @@ impl WebsocketRouter {
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
 
-            broker.subscribe(request.topic(), &ws);
+            broker.subscribe(request.topic(), Protocol::Naked, &ws);
             while let Some(message) = ws.next().await {
                 let data = match message.opcode() {
                     Opcode::Text => Data::from_ws(message, Some(false)),
@@ -308,39 +344,8 @@ impl WebsocketRouter {
                     Opcode::Pong => continue,// This should never happen
                     Opcode::Close => {
                         if ws.should_send_close() {
-                            if let Some(tmp) = message.into_parts().1.recv().await {
-                                if let Ok(status) = WebsocketStatus::decode(tmp) {
-                                    let ret = if status == super::OK {
-                                        super::OK
-                                    } else if status == super::GOING_AWAY {
-                                        super::OK
-                                    } else if status == super::EXTENSION_REQUIRED {
-                                        super::OK
-                                    } else if status == super::UNKNOWN_MESSAGE_TYPE {
-                                        super::UNKNOWN_MESSAGE_TYPE
-                                    } else if status == super::INVALID_DATA_TYPE {
-                                        super::INVALID_DATA_TYPE
-                                    } else if status == super::POLICY_VIOLATION {
-                                        super::POLICY_VIOLATION
-                                    } else if status == super::MESSAGE_TOO_LARGE {
-                                        super::MESSAGE_TOO_LARGE
-                                    } else if status == super::INTERNAL_SERVER_ERROR {
-                                        super::INTERNAL_SERVER_ERROR
-                                    } else if (3000..=4999).contains(&status.code()) {
-                                        super::OK
-                                    } else {
-                                        super::PROTOCOL_ERROR
-                                    };
-                                    WebsocketChannel::close(&ws.subscribe_handle(), ret).await;
-                                } else {
-                                    WebsocketChannel::close(
-                                        &ws.subscribe_handle(),
-                                        super::PROTOCOL_ERROR
-                                    ).await;
-                                }
-                            } else {
-                                WebsocketChannel::close(&ws.subscribe_handle(), super::OK).await;
-                            }
+                            let status = Self::close_status(message.into_parts().2).await;
+                            WebsocketChannel::close(&ws.subscribe_handle(), status).await;
                         }
                         break;
                     },
@@ -378,14 +383,20 @@ impl WebsocketRouter {
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
 
-            broker.subscribe(subscriptions[0].topic(), &ws);
+            broker.subscribe(subscriptions[0].topic(), Protocol::Multiplexed, &ws);
             while let Some(message) = ws.next().await {
                 let mut data = match message.opcode() {
                     Opcode::Text => Data::from_ws(message, Some(false)),
                     Opcode::Binary => Data::from_ws(message, Some(true)),
-                    Opcode::Ping => continue,
-                    Opcode::Pong => continue,
-                    Opcode::Close => break,
+                    Opcode::Ping => continue,// This should never happen
+                    Opcode::Pong => continue,// This should never happen
+                    Opcode::Close => {
+                        if ws.should_send_close() {
+                            let status = Self::close_status(message.into_parts().2).await;
+                            WebsocketChannel::close(&ws.subscribe_handle(), status).await;
+                        }
+                        break
+                    },
                 };
                 let req = Self::multiplex_get_request(&mut data, &subscriptions).await;
                 match req {
@@ -417,7 +428,7 @@ impl WebsocketRouter {
                                         ).await;
                                     match join {
                                         Ok(()) => {
-                                            broker.subscribe(new_request.topic(), &ws);
+                                            broker.subscribe(new_request.topic(), Protocol::Multiplexed, &ws);
                                             subscriptions.push(new_request);
                                         },
                                         Err(s) => {
@@ -602,17 +613,3 @@ impl<'a> From<rocket_http::uri::error::Error<'a>> for MultiplexError {
         Self::UrlError(e.into_owned())
     }
 }
-
-/// Maximum length of topic URLs, with the possible exception of the original URL used to connect.
-///
-/// TODO: investigate the exception, and potentially handle it
-const MAX_TOPIC_LENGTH: usize = 100;
-
-/// Control character for seperating information in 'rocket-mutltiplex'
-///
-/// U+00B7 (MIDDLE DOT) is a printable, valid UTF8 character, but it is never valid within a URL.
-/// To include it, or any other invalid character in a URL, it must be percent-encoded. This means
-/// there is no ambiguity between a URL containing this character, and a URL terminated by this
-/// character
-const MULTIPLEX_CONTROL_STR: &'static str = "\u{B7}";
-const MULTIPLEX_CONTROL_CHAR: &'static [u8] = MULTIPLEX_CONTROL_STR.as_bytes();

@@ -1,4 +1,7 @@
+use std::io::Cursor;
+
 use bytes::{Bytes, BytesMut};
+use rocket_http::uri::Origin;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::mpsc;
 use ubyte::ByteUnit;
@@ -24,6 +27,7 @@ use super::{MAX_BUFFER_SIZE, WebsocketStatus};
 /// into binary or text, but it is possible for a type to be either text or binary depending on the
 /// contents.
 ///
+/// # Notes for implementing `IntoMessage`
 // TODO: implement `IntoMessage` on `Json` and other convience types
 pub trait IntoMessage {
     /// Returns whether this message is binary, as opposed to text.
@@ -42,47 +46,98 @@ impl IntoMessage for Data {
     }
 
     fn into_message(self) -> mpsc::Receiver<Bytes> {
-        self.open(ByteUnit::max_value()).into_message()
+        into_message(self.open(ByteUnit::max_value()))
     }
 }
 
+/// Helper function for implementing `IntoMessage`. Converts a type that implements AsyncRead into
+/// `mpsc::Receiver<Bytes>`, the type `IntoMessage` requires.
+pub fn into_message<T: AsyncRead + Send + Unpin + 'static>(mut t: T) -> mpsc::Receiver<Bytes> {
+    let (tx, rx) = mpsc::channel(1);
+    tokio::spawn(async move {
+        let mut buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+        while let Ok(n) = t.read_buf(&mut buf).await {
+            if n == 0 {
+                break;
+            }
+            let tmp = buf.split();
+            let _e = tx.send(tmp.into()).await;
+            if buf.capacity() <= 0 {
+                buf.reserve(MAX_BUFFER_SIZE);
+            }
+        }
+    });
+    rx
+}
 
-impl<T: AsyncRead + Send + Unpin + 'static> IntoMessage for T {
+//impl<T: AsyncRead + Send + Unpin + 'static> IntoMessage for T {
+    //fn is_binary(&self) -> bool {
+        //true
+    //}
+
+    //fn into_message(mut self) -> mpsc::Receiver<Bytes> {
+        //let (tx, rx) = mpsc::channel(1);
+        //tokio::spawn(async move {
+            //let mut buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+            //while let Ok(n) = self.read_buf(&mut buf).await {
+                //if n == 0 {
+                    //break;
+                //}
+                //let tmp = buf.split();
+                //let _e = tx.send(tmp.into()).await;
+                //if buf.capacity() <= 0 {
+                    //buf.reserve(MAX_BUFFER_SIZE);
+                //}
+            //}
+        //});
+        //rx
+    //}
+//}
+
+// Compliler error, since AsyncRead could be implemented on String in future versions (probably of
+// Tokio)
+// Alternative is implementing on every type manally (or macro), but this makes writing custom
+// IntoMessage types harder.
+
+impl IntoMessage for String {
+    fn is_binary(&self) -> bool {
+        false
+    }
+
+    fn into_message(self) -> mpsc::Receiver<Bytes> {
+        into_message(Cursor::new(self))
+    }
+}
+
+impl IntoMessage for &str {
+    fn is_binary(&self) -> bool {
+        false
+    }
+
+    fn into_message(self) -> mpsc::Receiver<Bytes> {
+        into_message(Cursor::new(self.to_string()))
+    }
+}
+
+impl IntoMessage for Vec<u8> {
     fn is_binary(&self) -> bool {
         true
     }
 
-    fn into_message(mut self) -> mpsc::Receiver<Bytes> {
-        let (tx, rx) = mpsc::channel(1);
-        tokio::spawn(async move {
-            let mut buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
-            while let Ok(n) = self.read_buf(&mut buf).await {
-                if n == 0 {
-                    break;
-                }
-                let tmp = buf.split();
-                let _e = tx.send(tmp.into()).await;
-                if buf.capacity() <= 0 {
-                    buf.reserve(MAX_BUFFER_SIZE);
-                }
-            }
-        });
-        rx
+    fn into_message(self) -> mpsc::Receiver<Bytes> {
+        into_message(Cursor::new(self))
     }
 }
 
-// Compliler error, since AsyncRead could be implemented on String in future versions (probably of
-// Tokio)
-//impl IntoMessage for String {
-    //fn is_binary(&self) -> bool {
-        //false
-    //}
+impl IntoMessage for &[u8] {
+    fn is_binary(&self) -> bool {
+        true
+    }
 
-    //fn into_message(self) -> mpsc::Receiver<Bytes> {
-        //unimplemented!()
-    //}
-//}
-
+    fn into_message(self) -> mpsc::Receiver<Bytes> {
+        into_message(Cursor::new(self.to_vec()))
+    }
+}
 
 /// Convience function to convert an `impl IntoMessage` into a `Message`
 pub(crate) fn to_message(message: impl IntoMessage) -> WebsocketMessage {
@@ -96,6 +151,7 @@ pub(crate) fn to_message(message: impl IntoMessage) -> WebsocketMessage {
 #[derive(Debug)]
 pub struct WebsocketMessage {
     header: FrameHeader,
+    topic: Option<Origin<'static>>,
     data: mpsc::Receiver<Bytes>,
 }
 
@@ -108,6 +164,7 @@ impl WebsocketMessage {
                 }else{
                     Opcode::Text.into()
                 }, None, 0usize.into()),
+            topic: None,
             data,
         }
     }
@@ -122,6 +179,7 @@ impl WebsocketMessage {
         }
         Self {
             header: FrameHeader::new(true, 0, Opcode::Close.into(), None, 0usize.into()),
+            topic: None,
             data
         }
     }
@@ -136,15 +194,21 @@ impl WebsocketMessage {
     /// Converts this message into the internal parts
     ///
     /// See [`WebsocketMessage::from_parts`] for the reverse
-    pub(crate) fn into_parts(self) -> (FrameHeader, mpsc::Receiver<Bytes>) {
-        (self.header, self.data)
+    pub(crate) fn into_parts(self) -> (FrameHeader, Option<Origin<'static>>, mpsc::Receiver<Bytes>) {
+        (self.header, self.topic, self.data)
     }
 
     /// Converts the internal parts into a websocket message
     ///
     /// See [`WebsocketMessage::into_parts`] for the reverse
-    pub(crate) fn from_parts(header: FrameHeader, data: mpsc::Receiver<Bytes>) -> Self {
-        Self { header, data, }
+    pub(crate) fn from_parts(header: FrameHeader, topic: Option<Origin<'static>>, data: mpsc::Receiver<Bytes>) -> Self {
+        Self { header, topic, data, }
+    }
+
+    /// Set the topic of this message
+    pub(crate) fn with_topic(mut self, topic: Origin<'static>) -> Self {
+        self.topic = Some(topic);
+        self
     }
 }
 

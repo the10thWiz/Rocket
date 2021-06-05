@@ -12,14 +12,13 @@
 use rocket_http::{ext::IntoOwned, uri::Origin};
 use tokio::sync::mpsc;
 
-use super::{WebsocketChannel, IntoMessage, WebsocketMessage, to_message};
+use super::{IntoMessage, Protocol, WebsocketChannel, WebsocketMessage, to_message};
 
 /// Internal enum for sharing messages between clients
 enum BrokerMessage {
-    /// Registers a websocket to recieve messages from a room
-    ///
-    /// Note: this should only be sent once per websocket connection
-    Register(Origin<'static>, mpsc::Sender<WebsocketMessage>),
+    /// Registers a websocket to recieve messages from a topic. Only the first Protocol sent will
+    /// be used, and it controls whether messages sent to the client will have the topic attached.
+    Register(Origin<'static>, Protocol, mpsc::Sender<WebsocketMessage>),
 
     /// Removes a previously registered listener
     ///
@@ -66,9 +65,9 @@ impl Broker {
     }
 
     /// Subscribes the client to this channel using the descriptor `id`
-    pub(crate) fn subscribe(&self, id: &Origin<'_>, channel: &WebsocketChannel) {
+    pub(crate) fn subscribe(&self, id: &Origin<'_>, protocol: Protocol, channel: &WebsocketChannel) {
         let _ = self.channels.send(
-            BrokerMessage::Register(id.clone().into_owned(), channel.subscribe_handle())
+            BrokerMessage::Register(id.clone().into_owned(), protocol, channel.subscribe_handle())
         );
     }
 
@@ -95,7 +94,7 @@ impl Broker {
         let mut subs = ChannelMap::new(100);
         while let Some(wsm) = rx.recv().await {
             match wsm {
-                BrokerMessage::Register(room, tx) => subs.insert(tx, room),
+                BrokerMessage::Register(room, protocol, tx) => subs.insert(tx, protocol, room),
                 BrokerMessage::Forward(room, message) => subs.send(room, message).await,
                 BrokerMessage::Unregister(room, tx) => subs.remove_value(tx, room),
                 BrokerMessage::UnregisterAll(tx) => subs.remove_key(tx),
@@ -107,7 +106,7 @@ impl Broker {
 }
 
 /// Convient struct for holding channel subscribtions
-struct ChannelMap(Vec<(mpsc::Sender<WebsocketMessage>, Vec<Origin<'static>>)>);
+struct ChannelMap(Vec<(mpsc::Sender<WebsocketMessage>, Protocol, Vec<Origin<'static>>)>);
 
 impl ChannelMap {
     /// Create map with capactity
@@ -116,24 +115,24 @@ impl ChannelMap {
     }
 
     /// Add `descriptor` to the list of subscriptions for `tx`
-    fn insert(&mut self, tx: mpsc::Sender<WebsocketMessage>, descriptor: Origin<'static>) {
-        for (t, v) in self.0.iter_mut() {
+    fn insert(&mut self, tx: mpsc::Sender<WebsocketMessage>, protocol: Protocol, descriptor: Origin<'static>) {
+        for (t, _, v) in self.0.iter_mut() {
             if t.same_channel(&tx) {
                 v.push(descriptor);
                 return;
             }
         }
-        self.0.push((tx, vec![descriptor]));
+        self.0.push((tx, protocol, vec![descriptor]));
     }
 
     /// Remove every descriptor `tx` is subscribed to
     fn remove_key(&mut self, tx: mpsc::Sender<WebsocketMessage>) {
-        self.0.retain(|(t, _)| !t.same_channel(&tx));
+        self.0.retain(|(t, _, _)| !t.same_channel(&tx));
     }
 
     /// Remove every descriptor that `descriptor` matches and `tx` is subscribed to
     fn remove_value(&mut self, tx: mpsc::Sender<WebsocketMessage>, descriptor: Origin<'static>) {
-        for (t, v) in self.0.iter_mut() {
+        for (t, _, v) in self.0.iter_mut() {
             if t.same_channel(&tx) {
                 v.retain(|d| d != &descriptor);
                 return;
@@ -145,13 +144,16 @@ impl ChannelMap {
     /// `descriptor`
     async fn send(&mut self, descriptor: Origin<'static>, message: WebsocketMessage) {
         let mut chs = vec![];
-        let (header, mut data) = message.into_parts();
-        for (t, v) in self.0.iter() {
+        let (header, _, mut data) = message.into_parts();
+        for (t, protocol, v) in self.0.iter() {
             if v.iter().any(|r| r == &descriptor) {
                 // message.clone() should be very cheap, since it uses `Bytes` internally to store
                 // the raw data
                 let (data_tx, data_rx) = mpsc::channel(2);
-                let message = WebsocketMessage::from_parts(header.clone(), data_rx);
+                let message = match protocol {
+                    Protocol::Naked => WebsocketMessage::from_parts(header.clone(), None, data_rx),
+                    Protocol::Multiplexed => WebsocketMessage::from_parts(header.clone(), Some(descriptor.clone()), data_rx),
+                };
                 if let Ok(()) = t.send(message).await {
                     chs.push(data_tx);
                 }
@@ -168,6 +170,6 @@ impl ChannelMap {
     }
 
     fn cleanup(&mut self) {
-        self.0.retain(|(t, _)| !t.is_closed());
+        self.0.retain(|(t, _, _)| !t.is_closed());
     }
 }

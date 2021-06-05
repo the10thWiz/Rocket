@@ -32,6 +32,9 @@ use crate::data::{Limits, Data, FromData, Outcome};
 use crate::response::{self, Responder, content};
 use crate::http::Status;
 use crate::form::prelude as form;
+use crate::channels::{IntoMessage, into_message};
+use tokio::sync::mpsc;
+use bytes::Bytes;
 
 use serde::{Serialize, Deserialize};
 
@@ -194,6 +197,24 @@ impl<'r, T: Serialize> Responder<'r, 'static> for MsgPack<T> {
             })?;
 
         content::MsgPack(buf).respond_to(req)
+    }
+}
+
+/// Serializes the wrapped value into MessagePack. Returns a response with
+/// Content-Type `MsgPack` and a fixed-size body with the serialization. If
+/// serialization fails, an `Err` of `Status::InternalServerError` is returned.
+impl<'r, T: Serialize> IntoMessage for MsgPack<T> {
+    fn is_binary(&self) -> bool {
+        true
+    }
+
+    fn into_message(self) -> mpsc::Receiver<Bytes> {
+        let buf = rmp_serde::to_vec(&self.0)
+            .map_err(|e| {
+                error_!("MsgPack failed to serialize: {:?}", e);
+                e
+            }).unwrap_or_default();
+        into_message(Cursor::new(buf))
     }
 }
 
