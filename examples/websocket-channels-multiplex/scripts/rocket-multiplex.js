@@ -1,9 +1,12 @@
 const RocketWebsocket = (() => {
+
   const seperator = '\u{B7}';
+
   class ConnectionPool {
     constructor() {
       this.ws = [];
     }
+
     // open, error, and close all just forward the event to every listening websocket object
     forward_event(e) {
       for (let i = 0; i < this.ws.length; i++) {
@@ -15,6 +18,7 @@ const RocketWebsocket = (() => {
         }
       }
     }
+
     forward_topic_event(e, topic) {
       for (let i = 0; i < this.ws.length; i++) {
         if (this.ws[i].w == e.target) {
@@ -28,7 +32,8 @@ const RocketWebsocket = (() => {
         }
       }
     }
-    // This needs to actually parse stuff
+
+    // This needs to actually parse messages
     onmessage(e) {
       for (let i = 0; i < this.ws.length; i++) {
         if (this.ws[i].w == e.target) {
@@ -112,6 +117,7 @@ const RocketWebsocket = (() => {
         }
       }
     }
+
     // Method to add listening websocket
     add(w) {
       let url = new URL(w.url);
@@ -135,6 +141,7 @@ const RocketWebsocket = (() => {
         listeners: [w],
       });
     }
+
     send(m, u) {
       let url = new URL(u);
       let topic = url.pathname + url.search;
@@ -151,6 +158,7 @@ const RocketWebsocket = (() => {
         console.error('Bindary types are not implemented');
       }
     }
+
     close(code, reason, u) {
       let url = new URL(u);
       let topic = url.pathname + url.search;
@@ -165,6 +173,7 @@ const RocketWebsocket = (() => {
       }
     }
   };
+
   let connection_pool = new ConnectionPool();
 
   const OPENING = 0;
@@ -220,14 +229,6 @@ const RocketWebsocket = (() => {
     send(message) {
       connection_pool.send(message, this.url);
     }
-
-    //EventTarget.prototype.listeners = null;
-    //get listeners() {
-      //return {};
-    //}
-    //set listeners(_l) {
-      //return {};
-    //}
 
     // Events TODO: options, etc
     addEventListener(type, callback) {
