@@ -3,9 +3,11 @@
 use rocket::channels::Channel;
 use rocket::response::content::Html;
 use rocket::{State, Data};
+use rocket::fs::FileServer;
 
-#[message("/listen/{room}", "<data>")]
-async fn listen(room: &str, data: Data, ws: Channel<'_>) {
+#[message("/listen/<_>", "<data>")]
+async fn listen(data: Data, ws: Channel<'_>) {
+    println!("Echoing data");
     ws.broadcast(data).await;
 }
 
@@ -25,27 +27,30 @@ fn index() -> Html<&'static str> {
         <input type="text" id="text" />
         <button type="button" id="send">Send</button>
         <div id="lines"></div>
+        <script type="text/javascript" src="/scripts/rocket-multiplex.js"></script>
         <script type="text/javascript">
-            const lines = document.getElementById('lines');
-            const text = document.getElementById('text');
-            const status = document.getElementById('status');
-            const ws = new WebSocket('ws://' + location.host + '/listen/global');
-            ws.onopen = function(e) {
-                status.innerText = 'Connected :)';
-            };
-            ws.onclose = function(e) {
-                status.innerText = 'Disconnected :(';
-                lines.innerHTML = '';
-            };
-            ws.onmessage = function(msg, e) {
-                const line = document.createElement('p');
-                line.innerText = msg.data;
-                lines.prepend(line);
-            };
-            send.onclick = function(e) {
-                ws.send(text.value);
-                text.value = '';
-            };
+            document.addEventListener('load', () => {
+                const lines = document.getElementById('lines');
+                const text = document.getElementById('text');
+                const status = document.getElementById('status');
+                const ws = new RocketWebsocket('ws://' + location.host + '/listen/global');
+                ws.onopen = function(e) {
+                    status.innerText = 'Connected :)';
+                };
+                ws.onclose = function(e) {
+                    status.innerText = 'Disconnected :(';
+                    lines.innerHTML = '';
+                };
+                ws.onmessage = function(msg, e) {
+                    const line = document.createElement('p');
+                    line.innerText = msg.data;
+                    lines.prepend(line);
+                };
+                send.onclick = function(e) {
+                    ws.send(text.value);
+                    text.value = '';
+                };
+            });
         </script>
     </body>
 </html>"#)
@@ -53,5 +58,5 @@ fn index() -> Html<&'static str> {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![listen, index])
+    rocket::build().mount("/", routes![listen, index]).mount("/scripts", FileServer::from("scripts/"))
 }
