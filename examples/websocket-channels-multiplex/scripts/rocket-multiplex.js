@@ -6,7 +6,6 @@ const RocketWebsocket = (() => {
     }
     // open, error, and close all just forward the event to every listening websocket object
     forward_event(e) {
-      console.log(e);
       for (let i = 0; i < this.ws.length; i++) {
         if (this.ws[i].w == e.target) {
           for (let j = 0; j < this.ws[i].listeners.length; j++) {
@@ -17,7 +16,6 @@ const RocketWebsocket = (() => {
       }
     }
     forward_topic_event(e, topic) {
-      console.log(e);
       for (let i = 0; i < this.ws.length; i++) {
         if (this.ws[i].w == e.target) {
           for (let j = 0; j < this.ws[i].listeners.length; j++) {
@@ -32,7 +30,6 @@ const RocketWebsocket = (() => {
     }
     // This needs to actually parse stuff
     onmessage(e) {
-      console.log(e);
       for (let i = 0; i < this.ws.length; i++) {
         if (this.ws[i].w == e.target) {
           let host = e.origin;
@@ -52,18 +49,18 @@ const RocketWebsocket = (() => {
                 case 'ERR':
                   switch (parts[2]) {
                     case 'SUBSCRIBE':
-                      let idx = this.ws[i].topics.indexOf(parts[3]);
-                      if (idx != -1) {
-                        this.ws[i].topics.splice(idx);
+                      let id = this.ws[i].topics.indexOf(parts[3]);
+                      if (id != -1) {
+                        this.ws[i].topics.splice(id);
                       }
                       this.forward_topic_event(new Event('error'), parts[3]);
                       this.forward_topic_event(new Event('close'), parts[3]);
                       break;
                     case 'UNSUBSCRIBE':
                       this.forward_topic_event(new Event('error'), parts[3]);
-                      let idx = this.ws[i].topics.indexOf(parts[3]);
-                      if (idx != -1) {
-                        this.ws[i].topics.splice(idx);
+                      let ida = this.ws[i].topics.indexOf(parts[3]);
+                      if (ida != -1) {
+                        this.ws[i].topics.splice(ida);
                       }
                       break;
                     default:
@@ -117,7 +114,6 @@ const RocketWebsocket = (() => {
     }
     // Method to add listening websocket
     add(w) {
-      console.log(this);
       let url = new URL(w.url);
       // TODO handle events, etc
       for(let i = 0; i < this.ws.lengthis; i++) {
@@ -142,12 +138,10 @@ const RocketWebsocket = (() => {
     send(m, u) {
       let url = new URL(u);
       let topic = url.pathname + url.search;
-      console.log(topic);
       if (typeof m == 'string') {
         for(let i = 0; i < this.ws.length; i++) {
           if (url.origin == this.ws[i].url.origin) {
             if (this.ws[i].topics.indexOf(topic) != -1) {
-              console.log('sending');
               this.ws[i].w.send(topic + seperator + m);
               return;
             }
@@ -173,12 +167,17 @@ const RocketWebsocket = (() => {
   };
   let connection_pool = new ConnectionPool();
 
+  const OPENING = 0;
+  const READY = 1;
+  const CLOSED = 2;
+  const ERROR = 3;
+
   return class extends EventTarget {
     constructor(url) {
       super();
-      //console.log('created');
       this.url = url;
       this.listeners = {};
+      this.state = OPENING;
       connection_pool.add(this);
     }
 
@@ -236,6 +235,23 @@ const RocketWebsocket = (() => {
         this.listeners[type] = [];
       }
       this.listeners[type].push(callback);
+      switch (type) {
+        case 'open':
+          if (this.state >= READY) {
+            callback(new Event('open'));
+          }
+          break;
+        case 'close':
+          if (this.state >= CLOSED) {
+            callback(new Event('close'));
+          }
+          break;
+        case 'error':
+          if (this.state >= ERROR) {
+            callback(new Event('error'));
+          }
+          break;
+      }
     }
 
     removeEventListener(type, callback) {
@@ -252,6 +268,17 @@ const RocketWebsocket = (() => {
     }
 
     dispatchEvent(event) {
+      switch (event.type) {
+        case 'open':
+          this.state = READY;
+          break;
+        case 'close':
+          this.state = CLOSED;
+          break;
+        case 'error':
+          this.state = ERROR;
+          break;
+      }
       if (!(event.type in this.listeners)) {
         return true;
       }
@@ -264,47 +291,47 @@ const RocketWebsocket = (() => {
     }
 
     get onclose() {
-      return this.onclose;
+      return this._onclose;
     }
     set onclose(onclose) {
-      if (this.onclose) {
-        this.removeEventListener('close', this.onclose);
+      if (this._onclose) {
+        this.removeEventListener('close', this._onclose);
       }
       this.addEventListener('close', onclose);
-      return this.onclose = onclose;
+      return this._onclose = onclose;
     }
 
     get onerror() {
-      return this.onerror;
+      return this._onerror;
     }
     set onerror(onerror) {
-      if (this.onerror) {
-        this.removeEventListener('error', this.onerror);
+      if (this._onerror) {
+        this.removeEventListener('error', this._onerror);
       }
       this.addEventListener('error', onerror);
-      return this.onerror = onerror;
+      return this._onerror = onerror;
     }
 
     get onmessage() {
-      return this.onmessage;
+      return this._onmessage;
     }
     set onmessage(onmessage) {
-      if (this.onmessage) {
-        this.removeEventListener('message', this.onmessage);
+      if (this._onmessage) {
+        this.removeEventListener('message', this._onmessage);
       }
       this.addEventListener('message', onmessage);
-      return this.onmessage = onmessage;
+      return this._onmessage = onmessage;
     }
 
     get onopen() {
-      return this.onopen;
+      return this._onopen;
     }
     set onopen(onopen) {
-      if (this.onopen) {
-        this.removeEventListener('open', this.onopen);
+      if (this._onopen) {
+        this.removeEventListener('open', this._onopen);
       }
       this.addEventListener('open', onopen);
-      return this.onopen = onopen;
+      return this._onopen = onopen;
     }
   };
 })();
