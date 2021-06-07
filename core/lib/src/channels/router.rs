@@ -23,7 +23,6 @@ use crate::router::{Collide, Collisions};
 use yansi::Paint;
 
 use super::Websocket;
-use super::broker::Broker;
 use super::rocket_multiplex::MAX_TOPIC_LENGTH;
 use super::rocket_multiplex::MULTIPLEX_CONTROL_CHAR;
 use super::rocket_multiplex::MULTIPLEX_CONTROL_STR;
@@ -213,7 +212,7 @@ impl WebsocketRouter {
         let (websocket_channel, upgrade_tx) = WebsocketChannel::new();
         let inner_channel = InnerChannel::from_websocket(
             &websocket_channel,
-            rocket.state().unwrap(),
+            &rocket.broker,
             protocol,
         );
 
@@ -331,7 +330,7 @@ impl WebsocketRouter {
         mut ws: WebsocketChannel,
         upgrade_tx: oneshot::Sender<Upgraded>,
     ) {
-        let broker = request.rocket().state::<Broker>().unwrap().clone();
+        let broker = request.rocket().broker();
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
 
@@ -379,7 +378,7 @@ impl WebsocketRouter {
         if subscriptions.len() != 1 {
             panic!("Websocket task requires exactly 1 request in the subscribtions vector");
         }
-        let broker = rocket.state::<Broker>().unwrap().clone();
+        let broker = rocket.broker();
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
 

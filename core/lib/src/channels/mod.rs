@@ -82,10 +82,13 @@
 //! - [ ] Identify potential panics in Rocket
 //! - [ ] Full Autobahn compliance: Potential exceptions are possible, since Rocket is very async
 //! & very fast
-//! - [ ] Topic multiplexing; rocket-multiplex
+//! - [x] Topic multiplexing; rocket-multiplex
+//!     - [ ] Testing
+//!     - [ ] Subprotocols
+//!     - [ ] Topic length limit on initial connect
 //! - [ ] Rocket specific Opcode type, since Rocket handles many of them already
 //! - [ ] Full examples for the guide
-//! - [ ] Broker improvements
+//! - [x] Broker improvements
 //! - [ ] Finalize data portion of the attribute macros
 //! - [ ] Finalize the `IntoMessage` implementations
 //! - [ ] Subprotocol support. Depends on rocket-multiplex support for subprotocols
@@ -136,11 +139,11 @@ mod websocket;
 
 pub(crate) use router::*;
 pub(crate) use message::to_message;
-pub(crate) use broker::Broker;
 pub(crate) use channel::WebsocketChannel;
 
 pub use channel::Channel;
 pub use message::{WebsocketMessage, IntoMessage, into_message};
+pub use broker::Broker;
 pub use status::*;
 pub use websocket::{FromWebsocket, Websocket};
 

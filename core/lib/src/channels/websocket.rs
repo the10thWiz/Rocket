@@ -5,7 +5,7 @@ use rocket_http::uri::Origin;
 
 use crate::{Request, Rocket, Orbit, request::{FromRequest, Outcome}};
 
-use super::channel::InnerChannel;
+use super::{Broker, channel::InnerChannel};
 
 
 /// Websocket equavalent of `Request`
@@ -33,6 +33,11 @@ impl<'r> Websocket<'r> {
     /// Gets a reference to the current Rocket instance
     pub fn rocket(&self) -> &Rocket<Orbit> {
         self.request.rocket()
+    }
+
+    /// Gets a handle to the broker
+    pub fn broker(&self) -> Broker {
+        self.request.rocket().broker()
     }
 
     /// Gets the internal websocket channel

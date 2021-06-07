@@ -467,8 +467,6 @@ impl Rocket<Build> {
     /// }
     /// ```
     pub async fn ignite(mut self) -> Result<Rocket<Ignite>, Error> {
-        // Add Websocket broker to managed state
-        self = self.manage(Broker::new());
         // We initialize the logger here so that logging from fairings are
         // visible but change the max-log-level when we have a final config.
         crate::log::init(&Config::debug_default());
@@ -522,6 +520,7 @@ impl Rocket<Build> {
             figment: self.0.figment,
             fairings: self.0.fairings,
             state: self.0.state,
+            broker: Broker::new(),
         });
 
         // Query the sentinels, abort if requested.
@@ -602,6 +601,33 @@ impl Rocket<Ignite> {
         self.shutdown.clone()
     }
 
+    /// Returns a handle to the channel broker. The handle can be used to send messages to
+    /// webscoket clients. See [`Broker`] for more details.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// #[rocket::main]
+    /// async fn main() -> Result<(), rocket::Error> {
+    ///     let rocket = rocket::build().ignite().await?;
+    ///
+    ///     let broker = rocket.broker();
+    ///     tokio::spawn(async move {
+    ///         loop {
+    ///             broker.send_to(uri!("/time"), "1");
+    ///             tokio::time::sleep(
+    ///                 time::Duration::from_secs(5)
+    ///             ).await;
+    ///         }
+    ///     });
+    ///
+    ///     rocket.launch().await
+    /// }
+    /// ```
+    pub fn broker(&self) -> Broker {
+        self.0.broker.clone()
+    }
+
     fn into_orbit(self) -> Rocket<Orbit> {
         Rocket(Orbiting {
             router: self.0.router,
@@ -611,6 +637,7 @@ impl Rocket<Ignite> {
             config: self.0.config,
             state: self.0.state,
             shutdown: self.0.shutdown,
+            broker: self.0.broker,
         })
     }
 
@@ -689,6 +716,33 @@ impl Rocket<Orbit> {
     /// ```
     pub fn shutdown(&self) -> Shutdown {
         self.shutdown.clone()
+    }
+
+    /// Returns a handle to the channel broker. The handle can be used to send messages to
+    /// webscoket clients. See [`Broker`] for more details.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// #[rocket::main]
+    /// async fn main() -> Result<(), rocket::Error> {
+    ///     let rocket = rocket::build().ignite().await?;
+    ///
+    ///     let broker = rocket.broker();
+    ///     tokio::spawn(async move {
+    ///         loop {
+    ///             broker.send_to(uri!("/time"), "1");
+    ///             tokio::time::sleep(
+    ///                 time::Duration::from_secs(5)
+    ///             ).await;
+    ///         }
+    ///     });
+    ///
+    ///     rocket.launch().await
+    /// }
+    /// ```
+    pub fn broker(&self) -> Broker {
+        self.0.broker.clone()
     }
 }
 

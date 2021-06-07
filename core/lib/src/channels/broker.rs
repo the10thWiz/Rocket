@@ -42,7 +42,7 @@ enum BrokerMessage {
 /// See the examples for how to use Channel.
 /// TODO: Create examples
 #[derive(Clone)]
-pub(crate) struct Broker {
+pub struct Broker {
     channels: mpsc::UnboundedSender<BrokerMessage>,
 }
 
@@ -65,7 +65,12 @@ impl Broker {
     }
 
     /// Subscribes the client to this channel using the descriptor `id`
-    pub(crate) fn subscribe(&self, id: &Origin<'_>, protocol: Protocol, channel: &WebsocketChannel) {
+    pub(crate) fn subscribe(
+        &self,
+        id: &Origin<'_>,
+        protocol: Protocol,
+        channel: &WebsocketChannel
+    ) {
         let _ = self.channels.send(
             BrokerMessage::Register(id.clone().into_owned(), protocol, channel.subscribe_handle())
         );
@@ -103,6 +108,12 @@ impl Broker {
             subs.cleanup();
         }
     }
+
+    pub fn send_to<'a>(&self, to: impl AsRef<Origin<'a>>, message: impl IntoMessage) {
+        let _ = self.channels.send(
+                BrokerMessage::Forward(to.as_ref().clone().into_owned(), to_message(message))
+            );
+    }
 }
 
 /// Convient struct for holding channel subscribtions
@@ -115,7 +126,12 @@ impl ChannelMap {
     }
 
     /// Add `descriptor` to the list of subscriptions for `tx`
-    fn insert(&mut self, tx: mpsc::Sender<WebsocketMessage>, protocol: Protocol, descriptor: Origin<'static>) {
+    fn insert(
+        &mut self,
+        tx: mpsc::Sender<WebsocketMessage>,
+        protocol: Protocol,
+        descriptor: Origin<'static>
+    ) {
         for (t, _, v) in self.0.iter_mut() {
             if t.same_channel(&tx) {
                 v.push(descriptor);
@@ -151,8 +167,16 @@ impl ChannelMap {
                 // the raw data
                 let (data_tx, data_rx) = mpsc::channel(2);
                 let message = match protocol {
-                    Protocol::Naked => WebsocketMessage::from_parts(header.clone(), None, data_rx),
-                    Protocol::Multiplexed => WebsocketMessage::from_parts(header.clone(), Some(descriptor.clone()), data_rx),
+                    Protocol::Naked => WebsocketMessage::from_parts(
+                        header.clone(),
+                        None,
+                        data_rx
+                    ),
+                    Protocol::Multiplexed => WebsocketMessage::from_parts(
+                        header.clone(),
+                        Some(descriptor.clone()),
+                        data_rx
+                    ),
                 };
                 if let Ok(()) = t.send(message).await {
                     chs.push(data_tx);

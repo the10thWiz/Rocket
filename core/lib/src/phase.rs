@@ -3,7 +3,7 @@ use figment::Figment;
 
 use crate::{Catcher, Config, Rocket, Route, Shutdown};
 use crate::router::Router;
-use crate::channels::WebsocketRouter;
+use crate::channels::{WebsocketRouter, Broker};
 use crate::fairing::Fairings;
 
 mod private {
@@ -100,6 +100,7 @@ phases! {
         pub(crate) config: Config,
         pub(crate) state: Container![Send + Sync],
         pub(crate) shutdown: Shutdown,
+        pub(crate) broker: Broker,
     }
 
     /// The final launch [`Phase`].
@@ -114,5 +115,6 @@ phases! {
         pub(crate) config: Config,
         pub(crate) state: Container![Send + Sync],
         pub(crate) shutdown: Shutdown,
+        pub(crate) broker: Broker,
     }
 }
