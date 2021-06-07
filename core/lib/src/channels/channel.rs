@@ -306,12 +306,14 @@ impl WebsocketChannel {
                             if header.mask().is_some() {
                                 error_!("Websocket messages should not be sent with masks");
                             }
+                            let topic_buf = topic.take().map(|topic| topic.to_string());
                             let int_header = FrameHeader::new(
                                     fin,
                                     header.rsv(),
                                     header.opcode(),
                                     None,
-                                    parts.iter().map(|s| s.len()).sum::<usize>().into(),
+                                    // .chain is used to add the length of the topic (if any)
+                                    parts.iter().map(|s| s.len()).chain(topic_buf.iter().map(|b| b.len() + 2)).sum::<usize>().into(),
                                 );
                             let _e = codec.encode(int_header, &mut write_buf);
                             let _e = write.write_all_buf(&mut write_buf).await;
@@ -320,8 +322,8 @@ impl WebsocketChannel {
                             // (since it is replaced with None by take), so it will only be sent
                             // once at the beginning of a message. Naked messages will send topic
                             // as None, and therefore nothing will be appended
-                            if let Some(topic) = topic.take() {
-                                let _e = write.write_all(topic.to_string().as_bytes()).await;
+                            if let Some(topic) = topic_buf {
+                                let _e = write.write_all(topic.as_bytes()).await;
                                 let _e = write.write_all(MULTIPLEX_CONTROL_CHAR).await;
                             }
 
