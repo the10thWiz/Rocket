@@ -415,4 +415,14 @@ impl<T> WebsocketEvent<T> {
             _ => true,
         }
     }
+
+    pub(crate) fn collides_with(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::None, Self::None) => true,
+            (Self::Join(_), Self::Join(_)) => true,
+            (Self::Message(_), Self::Message(_)) => true,
+            (Self::Leave(_), Self::Leave(_)) => true,
+            _ => false,
+        }
+    }
 }

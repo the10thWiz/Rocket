@@ -79,6 +79,7 @@ impl Collide for Route {
     fn collides_with(&self, other: &Route) -> bool {
         self.method == other.method
             && self.rank == other.rank
+            && self.websocket_handler.collides_with(&other.websocket_handler)
             && paths_collide(self, other)
             && formats_collide(self, other)
     }
