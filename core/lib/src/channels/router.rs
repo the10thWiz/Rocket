@@ -136,7 +136,7 @@ impl WebsocketRouter {
         req: Arc<Websocket<'r>>,
         mut message: Data,
     ) -> Result<(), Status> {
-        //let req_copy = req.clone();
+        let mut forwarded = false;
         for route in self.routes.get(&event)
             .into_iter()
             .flat_map(|routes| routes.iter()) {
@@ -153,13 +153,15 @@ impl WebsocketRouter {
                     Some(WsOutcome::Success(())) => return Ok(()),
                     None => return Err(Status::InternalServerError),
                 }
+                forwarded = true;
             }
         }
         if event == Event::Join && self.routes.get(&Event::Message)
             .into_iter()
             .flat_map(|routes| routes.iter()).next().is_some()
+            && !forwarded
         {
-            // Succeed if no matching join handlers failed
+            // Succeed if there were no matching join handlers
             Ok(())
         } else {
             Err(Status::NotFound)

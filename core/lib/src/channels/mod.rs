@@ -71,9 +71,8 @@
 //! The `Channel::broadcast` method will broadcast the message to the current topic, i.e. the one
 //! the client is subscribed to. `Channel::broadcast_to` & `Broker::broadcast_to` will broadcast to
 //! a specified topic. The `uri!` macro is the prefered way to create Origin Uris (Topics), but it
-//! is also possible to parse Uris on the fly if needed. Refer to [`Origin`] for more information.
-//!
-//! TODO: Expose the Broker type via Rocket.
+//! is also possible to parse Uris on the fly if needed. Refer to
+//! [`Origin`](crate::http::uri::Origin) for more information.
 //!
 //! # TODO for potential improvements
 //!
@@ -86,12 +85,15 @@
 //!     - [ ] Testing
 //!     - [ ] Subprotocols
 //!     - [ ] Topic length limit on initial connect
-//! - [ ] Rocket specific Opcode type, since Rocket handles many of them already
+//! - [ ] Rocket specific Opcode type, since Rocket handles many of them already - maybe
 //! - [ ] Full examples for the guide
 //! - [x] Broker improvements
 //! - [ ] Finalize data portion of the attribute macros
 //! - [ ] Finalize the `IntoMessage` implementations
 //! - [ ] Subprotocol support. Depends on rocket-multiplex support for subprotocols
+//!
+//! - [ ] `data = `
+//! - [ ] async `broadcast`s
 //!
 //! ## Nice to haves
 //!
@@ -124,8 +126,8 @@
 //!     way to handle this correctly using the current model, since the server side handler is
 //!     already running by the time the error happens.
 //!
-//! - [ ] (6.*) fail since the echo server doesn't check UTF-8
-//! - [ ] (12.*, 13.*) test compression, which we don't implement (yet)
+//! - [ ] (6.\*) fail since the echo server doesn't check UTF-8
+//! - [ ] (12.\*, 13.\*) test compression, which we don't implement (yet)
 //!
 //! There are also a number of informational tests, which don't have correct behaviour specified by
 //! the RFC, but we should look at them and decide whether our current behaviour is good enough
@@ -146,8 +148,6 @@ pub use message::{WebsocketMessage, IntoMessage, into_message};
 pub use broker::Broker;
 pub use status::*;
 pub use websocket::{FromWebsocket, Websocket};
-
-pub use websocket_codec::Opcode;
 
 /// Soft maximum buffer size
 pub const MAX_BUFFER_SIZE: usize = 1024;

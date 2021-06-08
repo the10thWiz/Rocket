@@ -24,7 +24,7 @@
 //! [`msgpack()`]: crate::local::blocking::LocalRequest::msgpack()
 //! [`into_msgpack()`]: crate::local::blocking::LocalResponse::into_msgpack()
 
-use std::io;
+use std::io::{self, Cursor};
 use std::ops::{Deref, DerefMut};
 
 use crate::request::{Request, local_cache};

@@ -41,7 +41,7 @@ enum BrokerMessage {
 ///
 /// See the examples for how to use Channel.
 /// TODO: Create examples
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Broker {
     channels: mpsc::UnboundedSender<BrokerMessage>,
 }
@@ -109,6 +109,7 @@ impl Broker {
         }
     }
 
+    /// Broadcast a message to a specific topic
     pub fn send_to<'a>(&self, to: impl AsRef<Origin<'a>>, message: impl IntoMessage) {
         let _ = self.channels.send(
                 BrokerMessage::Forward(to.as_ref().clone().into_owned(), to_message(message))
