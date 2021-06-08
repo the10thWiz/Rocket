@@ -144,6 +144,8 @@ impl WebsocketRouter {
                 req.request().set_route(route);
 
                 let name = route.name.as_deref();
+                // Note: unwrap_ref may panic. This shouldn't ever happen, becuase every handler
+                // that would panic should have been filtered out by `add_route`
                 let handler = route.websocket_handler.unwrap_ref();
                 let res = handle(name, || handler.handle(req.clone(), message)).await;
                 // Successfully ran
@@ -259,7 +261,7 @@ impl WebsocketRouter {
     fn protocol(req: &Request<'_>) -> Protocol {
         if req.headers()
             .get("Sec-WebSocket-Protocol")
-            .flat_map(|s| s.split(",").map(|s| s.trim()))
+            .flat_map(|s| s.split(',').map(|s| s.trim()))
             .any(|s| s.eq_ignore_ascii_case("rocket-multiplex"))
         {
             Protocol::Multiplexed
@@ -294,6 +296,7 @@ impl WebsocketRouter {
         response.finalize()
     }
 
+    // TODO run leave handler first, and fall back on this if no handler succeeds.
     async fn close_status(mut body: mpsc::Receiver<Bytes>) -> WebsocketStatus<'static> {
         if let Some(body) = body.recv().await {
             if let Ok(status) = WebsocketStatus::decode(body) {
@@ -336,7 +339,7 @@ impl WebsocketRouter {
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
 
-            broker.subscribe(request.topic(), Protocol::Naked, &ws);
+            broker.subscribe(request.topic(), Protocol::Naked, &ws).await;
             while let Some(message) = ws.next().await {
                 let data = match message.opcode() {
                     Opcode::Text => Data::from_ws(message, Some(false)),
@@ -357,7 +360,7 @@ impl WebsocketRouter {
                         data
                     ).await;
             }
-            broker.unsubscribe_all(&ws);
+            broker.unsubscribe_all(&ws).await;
             let _e = request.rocket().websocket_router.handle_message(
                     Event::Leave,
                     request.clone(),
@@ -384,7 +387,7 @@ impl WebsocketRouter {
         if let Ok(upgrade) = on_upgrade.await {
             let _e = upgrade_tx.send(upgrade);
 
-            broker.subscribe(subscriptions[0].topic(), Protocol::Multiplexed, &ws);
+            broker.subscribe(subscriptions[0].topic(), Protocol::Multiplexed, &ws).await;
             while let Some(message) = ws.next().await {
                 let mut data = match message.opcode() {
                     Opcode::Text => Data::from_ws(message, Some(false)),
@@ -429,7 +432,7 @@ impl WebsocketRouter {
                                         ).await;
                                     match join {
                                         Ok(()) => {
-                                            broker.subscribe(new_request.topic(), Protocol::Multiplexed, &ws);
+                                            broker.subscribe(new_request.topic(), Protocol::Multiplexed, &ws).await;
                                             subscriptions.push(new_request);
                                         },
                                         Err(s) => {
@@ -448,7 +451,7 @@ impl WebsocketRouter {
                             },
                             Ok(MultiplexAction::Unsubscribe(topic)) => {
                                 if let Some(leave_req) = Self::remove_topic(subscriptions, topic) {
-                                    broker.unsubscribe(leave_req.topic(), &ws);
+                                    broker.unsubscribe(leave_req.topic(), &ws).await;
                                     let _leave = rocket.websocket_router.handle_message(
                                         Event::Leave,
                                         leave_req.clone(),
@@ -469,7 +472,7 @@ impl WebsocketRouter {
                     }
                 }
             }
-            broker.unsubscribe_all(&ws);
+            broker.unsubscribe_all(&ws).await;
             let _e = rocket.websocket_router.handle_message(
                 Event::Leave,
                 subscriptions[0].clone(),
@@ -494,7 +497,7 @@ impl WebsocketRouter {
 
     async fn multiplex_get_request<'a, 'r>(
         data: &mut Data,
-        subscribtions: &'a Vec<Arc<Websocket<'r>>>
+        subscribtions: &'a [Arc<Websocket<'r>>]
     ) -> Result<Arc<Websocket<'r>>, MultiplexError> {
         // Peek max_topic length
         let topic = data.peek(MAX_TOPIC_LENGTH + MULTIPLEX_CONTROL_CHAR.len()).await;
@@ -523,10 +526,10 @@ impl WebsocketRouter {
 
     async fn handle_control<'r>(mut data: Data) -> Result<MultiplexAction, &'static str> {
         // Take the first 512 bytes of the message - which must be the entire message
-        let message = String::from_utf8(data.take(512).await).unwrap();
+        let message = String::from_utf8(data.take(512).await).map_err(|_| "INVALID\u{B7}Non UTF-8")?;
         let mut parts = message.split(MULTIPLEX_CONTROL_STR);
         let first = parts.next().ok_or("INVALID\u{B7}Improperly formatted message")?;
-        if first != "" {// Err if the message did not start with the control char
+        if !first.is_empty() {// Err if the message did not start with the control char
             return Err("INVALID\u{B7}Improperly formatted message");
         }
         // .filter(|s| s != "") would acheive a similar effect, but I want the protocol to be more
@@ -536,7 +539,7 @@ impl WebsocketRouter {
             Some("SUBSCRIBE") => {
                 let topic = parts.next().ok_or("ERR\u{B7}Missing topic parameter")?;
                 if parts.next().is_some() {
-                    return Err("Err\u{B7}To many arguments");
+                    return Err("ERR\u{B7}To many arguments");
                 }
                 Ok(MultiplexAction::Subscribe(Origin::parse(topic)
                             .map_err(|_| "ERR\u{B7}Invalid topic Uri")?

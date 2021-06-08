@@ -12,9 +12,12 @@
 use rocket_http::{ext::IntoOwned, uri::Origin};
 use tokio::sync::mpsc;
 
+use crate::{Request, request::{FromRequest, Outcome}};
+
 use super::{IntoMessage, Protocol, WebsocketChannel, WebsocketMessage, to_message};
 
 /// Internal enum for sharing messages between clients
+// TODO Forward is a MASSIVE variant, the websocket message should probably be boxed
 enum BrokerMessage {
     /// Registers a websocket to recieve messages from a topic. Only the first Protocol sent will
     /// be used, and it controls whether messages sent to the client will have the topic attached.
@@ -58,14 +61,14 @@ impl Broker {
     }
 
     /// Sends a message to all clients subscribed to this channel using descriptor `id`
-    pub(crate) fn send(&self, id: &Origin<'_>, message: impl IntoMessage) {
+    pub(crate) async fn send(&self, id: &Origin<'_>, message: impl IntoMessage) {
         let _ = self.channels.send(
                 BrokerMessage::Forward(id.clone().into_owned(), to_message(message))
             );
     }
 
     /// Subscribes the client to this channel using the descriptor `id`
-    pub(crate) fn subscribe(
+    pub(crate) async fn subscribe(
         &self,
         id: &Origin<'_>,
         protocol: Protocol,
@@ -80,7 +83,7 @@ impl Broker {
     ///
     /// # Note
     /// This will unsubscribe this client from EVERY descriptor that matches `id`
-    pub(crate) fn unsubscribe(&self, id: &Origin<'_>, channel: &WebsocketChannel) {
+    pub(crate) async fn unsubscribe(&self, id: &Origin<'_>, channel: &WebsocketChannel) {
         let _ = self.channels.send(
             BrokerMessage::Unregister(id.clone().into_owned(), channel.subscribe_handle())
         );
@@ -90,7 +93,7 @@ impl Broker {
     ///
     /// The client is automatically unsubscribed if they are disconnected, so this does not need
     /// to be called when the client is disconnecting
-    pub(crate) fn unsubscribe_all(&self, channel: &WebsocketChannel) {
+    pub(crate) async fn unsubscribe_all(&self, channel: &WebsocketChannel) {
         let _ = self.channels.send(BrokerMessage::UnregisterAll(channel.subscribe_handle()));
     }
 
@@ -110,10 +113,21 @@ impl Broker {
     }
 
     /// Broadcast a message to a specific topic
-    pub fn send_to<'a>(&self, to: impl AsRef<Origin<'a>>, message: impl IntoMessage) {
+    // This method doesn't need to be async, but I've marked it as async to allow the broker to
+    // require waiting
+    pub async fn send_to<'a>(&self, to: impl AsRef<Origin<'a>>, message: impl IntoMessage) {
         let _ = self.channels.send(
                 BrokerMessage::Forward(to.as_ref().clone().into_owned(), to_message(message))
             );
+    }
+}
+
+#[crate::async_trait]
+impl<'r> FromRequest<'r> for Broker {
+    type Error = std::convert::Infallible;
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        Outcome::Success(request.rocket().broker())
     }
 }
 

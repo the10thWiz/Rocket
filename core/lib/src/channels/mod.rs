@@ -78,14 +78,15 @@
 //!
 //! - [ ] Better panic handling: At the moment, nothing is reported to the client, and the
 //! connection continues as normal
-//! - [ ] Identify potential panics in Rocket
+//! - [x] Identify potential panics in Rocket
 //! - [ ] Full Autobahn compliance: Potential exceptions are possible, since Rocket is very async
 //! & very fast
 //! - [x] Topic multiplexing; rocket-multiplex
 //!     - [ ] Testing
 //!     - [ ] Subprotocols
 //!     - [ ] Topic length limit on initial connect
-//! - [ ] Rocket specific Opcode type, since Rocket handles many of them already - maybe
+//! - [-] Rocket specific Opcode type, since Rocket handles many of them already
+//!     The `websocket-codec` Opcode type is no longer re-exported
 //! - [ ] Full examples for the guide
 //! - [x] Broker improvements
 //! - [ ] Finalize data portion of the attribute macros
@@ -93,7 +94,7 @@
 //! - [ ] Subprotocol support. Depends on rocket-multiplex support for subprotocols
 //!
 //! - [ ] `data = `
-//! - [ ] async `broadcast`s
+//! - [x] async `broadcast`s
 //!
 //! ## Nice to haves
 //!

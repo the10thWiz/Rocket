@@ -79,6 +79,7 @@ impl WebsocketChannel {
         !self.close_sent.load(atomic::Ordering::Acquire)
     }
 
+    // TODO maybe avoid repeated if blocks?
     fn protocol_error(header: &FrameHeader, remaining: usize) -> bool {
         if (header.opcode() == u8::from(Opcode::Close) ||
             header.opcode() == u8::from(Opcode::Ping) ||
@@ -484,13 +485,13 @@ impl<'r> Channel<'r> {
     /// Broadcasts `message` to every client connected to this topic. Topics are identified by
     /// the Origin URL used to connect to the server.
     pub async fn broadcast(&self, message: impl IntoMessage) {
-        self.broker.send(&self.uri, to_message(message));
+        self.broker.send(&self.uri, to_message(message)).await;
     }
 
     /// Broadcasts `message` to every client connected to `topic`. Topics are identified by
     /// the Origin URL used to connect to the server.
     pub async fn broadcast_to(&self, topic: &Origin<'_>, message: impl IntoMessage) {
-        self.broker.send(topic, to_message(message));
+        self.broker.send(topic, to_message(message)).await;
     }
 }
 
@@ -502,4 +503,3 @@ impl<'r> FromWebsocket<'r> for Channel<'r> {
         Outcome::Success(Self::from(request.inner_channel(), request.topic()))
     }
 }
-

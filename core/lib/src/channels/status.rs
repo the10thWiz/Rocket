@@ -113,6 +113,7 @@ impl<'a> WebsocketStatus<'a> {
     }
 }
 
+// Maybe remove leading zeros?
 impl WebsocketStatus<'static> {
     pub(crate) fn decode(mut bytes: Bytes) -> Result<Self, StatusError> {
         if bytes.len() < 2 {
