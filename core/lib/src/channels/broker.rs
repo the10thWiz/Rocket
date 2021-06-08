@@ -200,6 +200,7 @@ impl ChannelMap {
         }
 
         tokio::spawn(async move {
+            // TODO handle potential back pressure
             while let Some(next) = data.recv().await {
                 for ch in chs.iter() {
                     let _e = ch.send(next.clone()).await;
