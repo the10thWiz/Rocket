@@ -8,14 +8,14 @@ use crate::{Request, Rocket, Orbit, request::{FromRequest, Outcome}};
 use super::{Broker, channel::InnerChannel};
 
 
-/// Websocket equavalent of `Request`
-pub struct Websocket<'r> {
+/// WebSocket equavalent of `Request`
+pub struct WebSocket<'r> {
     request: Request<'r>,
     inner_channel: InnerChannel,
 }
 
-impl<'r> Websocket<'r> {
-    /// Create a new Websocket object
+impl<'r> WebSocket<'r> {
+    /// Create a new WebSocket object
     pub(crate) fn new(request: Request<'r>, inner_channel: InnerChannel) -> Self {
         Self { request, inner_channel }
     }
@@ -40,7 +40,7 @@ impl<'r> Websocket<'r> {
         self.request.rocket().broker()
     }
 
-    /// Gets the internal websocket channel
+    /// Gets the internal WebSocket channel
     pub(crate) fn inner_channel(&self) -> InnerChannel {
         self.inner_channel.clone()
     }
@@ -51,7 +51,7 @@ impl<'r> Websocket<'r> {
     }
 }
 
-impl Websocket<'_> {
+impl WebSocket<'_> {
     pub(crate) fn clone(&self) -> Self {
         Self {
             request: self.request.clone(),
@@ -60,32 +60,32 @@ impl Websocket<'_> {
     }
 }
 
-/// Websocket equavalent of `FromRequest`. See `FromRequest` for more details on the inner
+/// WebSocket equavalent of `FromRequest`. See `FromRequest` for more details on the inner
 /// workings.
 ///
-/// A defualt implementation of `FromWebsocket` is provided for any type that implements
-/// `FromRequest`, which just calls the `FromRequest` implementation on the Websocket type
+/// A defualt implementation of `FromWebSocket` is provided for any type that implements
+/// `FromRequest`, which just calls the `FromRequest` implementation on the WebSocket type
 #[crate::async_trait]
-pub trait FromWebsocket<'r>: Sized {
+pub trait FromWebSocket<'r>: Sized {
     /// The associated error to be returned if derivation fails.
     type Error: Debug;
 
-    /// Derives an instance of `Self` from the incoming websocket metadata.
+    /// Derives an instance of `Self` from the incoming webSocket metadata.
     ///
     /// If the derivation is successful, an outcome of `Success` is returned. If
     /// the derivation fails in an unrecoverable fashion, `Failure` is returned.
     /// `Forward` is returned to indicate that the request should be forwarded
     /// to other matching routes, if any.
-    async fn from_websocket(request: &'r Websocket<'_>) -> Outcome<Self, Self::Error>;
+    async fn from_websocket(request: &'r WebSocket<'_>) -> Outcome<Self, Self::Error>;
 }
 
-impl<'r, T: FromRequest<'r>> FromWebsocket<'r> for T {
+impl<'r, T: FromRequest<'r>> FromWebSocket<'r> for T {
     type Error = <T as FromRequest<'r>>::Error;
 
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     fn from_websocket<'life0, 'async_trait>(
-        request: &'r Websocket<'life0>,
+        request: &'r WebSocket<'life0>,
     ) -> BoxFuture<'async_trait, Outcome<Self, Self::Error>>
         where 'r: 'async_trait,
               'life0: 'async_trait,

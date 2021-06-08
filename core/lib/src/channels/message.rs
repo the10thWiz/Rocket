@@ -10,18 +10,18 @@ use websocket_codec::protocol::FrameHeader;
 
 use crate::Data;
 
-use super::{MAX_BUFFER_SIZE, WebsocketStatus};
+use super::{MAX_BUFFER_SIZE, WebSocketStatus};
 
-/// A trait for types that can be sent on a websocket.
+/// A trait for types that can be sent on a webSocket.
 ///
 // This has default implementations for many common types, such as `String`, `Vec<u8>`, etc
 /// There is a default implementation for [`crate::Data`] and `T: AsyncRead`. `Data` will
-/// correctly return is_binary if the `Data` came from websocket handler. The default
+/// correctly return is_binary if the `Data` came from webSocket handler. The default
 /// implementation for `T: AsyncRead` always returns binary.
 ///
 /// # Text vs Binary
 ///
-/// The Websocket protocol requires Rocket to specify whether a message is text or binary. Rocket
+/// The WebSocket protocol requires Rocket to specify whether a message is text or binary. Rocket
 /// implements this automatically where possible, but it's Rocket has not way to detect whether a
 /// given message is binary or text solely based on the binary output. Most types will always turn
 /// into binary or text, but it is possible for a type to be either text or binary depending on the
@@ -140,23 +140,23 @@ impl IntoMessage for &[u8] {
 }
 
 /// Convience function to convert an `impl IntoMessage` into a `Message`
-pub(crate) fn to_message(message: impl IntoMessage) -> WebsocketMessage {
-    WebsocketMessage::new(message.is_binary(), message.into_message())
+pub(crate) fn to_message(message: impl IntoMessage) -> WebSocketMessage {
+    WebSocketMessage::new(message.is_binary(), message.into_message())
 }
 
-/// Semi-internal representation of a websocket message
+/// Semi-internal representation of a webSocket message
 ///
 /// This should typically never be constructed by hand, instead types that should be able to be
-/// sent on a websocket channel should implement `IntoMessage`
+/// sent on a webSocket channel should implement `IntoMessage`
 #[derive(Debug)]
-pub struct WebsocketMessage {
+pub struct WebSocketMessage {
     header: FrameHeader,
     topic: Option<Origin<'static>>,
     data: mpsc::Receiver<Bytes>,
 }
 
-impl WebsocketMessage {
-    /// Create a new websocket message
+impl WebSocketMessage {
+    /// Create a new webSocket message
     pub(crate) fn new(binary: bool, data: mpsc::Receiver<Bytes>) -> Self {
         Self {
             header: FrameHeader::new(false, 0, if binary {
@@ -172,7 +172,7 @@ impl WebsocketMessage {
     /// Creates a Close frame, with an optional status
     ///
     /// TODO: create seperate status struct
-    pub(crate) fn close(status: Option<WebsocketStatus<'_>>) -> Self {
+    pub(crate) fn close(status: Option<WebSocketStatus<'_>>) -> Self {
         let (tx, data) = mpsc::channel(3);
         if let Some(status) = status {
             let _e = tx.try_send(status.encode());
@@ -186,21 +186,21 @@ impl WebsocketMessage {
 
     /// Gets the Opcode of the message. Defaults to Opcode::Text, although it should never fail.
     ///
-    /// TODO: move this into WebsocketMessage itself
+    /// TODO: move this into WebSocketMessage itself
     pub(crate) fn opcode(&self) -> Opcode {
         Opcode::try_from(self.header.opcode()).unwrap_or(Opcode::Text)
     }
 
     /// Converts this message into the internal parts
     ///
-    /// See [`WebsocketMessage::from_parts`] for the reverse
+    /// See [`WebSocketMessage::from_parts`] for the reverse
     pub(crate) fn into_parts(self) -> (FrameHeader, Option<Origin<'static>>, mpsc::Receiver<Bytes>) {
         (self.header, self.topic, self.data)
     }
 
-    /// Converts the internal parts into a websocket message
+    /// Converts the internal parts into a webSocket message
     ///
-    /// See [`WebsocketMessage::into_parts`] for the reverse
+    /// See [`WebSocketMessage::into_parts`] for the reverse
     pub(crate) fn from_parts(header: FrameHeader, topic: Option<Origin<'static>>, data: mpsc::Receiver<Bytes>) -> Self {
         Self { header, topic, data, }
     }
@@ -213,7 +213,7 @@ impl WebsocketMessage {
 }
 
 // Trivial conversion
-impl IntoMessage for WebsocketMessage {
+impl IntoMessage for WebSocketMessage {
     fn is_binary(&self) -> bool {
         match Opcode::try_from(self.header.opcode()) {
             Some(Opcode::Text) => false,

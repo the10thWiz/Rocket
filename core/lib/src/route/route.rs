@@ -9,7 +9,7 @@ use crate::http::{uri, Method, MediaType};
 use crate::route::{Handler, RouteUri, BoxFuture};
 use crate::sentinel::Sentry;
 
-use super::{BoxFutureWs, WebsocketHandler};
+use super::{BoxFutureWs, WebSocketHandler};
 
 /// A request handling route.
 ///
@@ -185,8 +185,8 @@ pub struct Route {
     pub method: Method,
     /// The function that should be called when the route matches.
     pub handler: Box<dyn Handler>,
-    /// The function that should be called when the route matches for websocket connection
-    pub websocket_handler: WebsocketEvent<Box<dyn WebsocketHandler>>,
+    /// The function that should be called when the route matches for webSocket connection
+    pub websocket_handler: WebSocketEvent<Box<dyn WebSocketHandler>>,
     /// The route URI.
     pub uri: RouteUri<'static>,
     /// The rank of this route. Lower ranks have higher priorities.
@@ -257,7 +257,7 @@ impl Route {
             format: None,
             sentinels: Vec::new(),
             handler: Box::new(handler),
-            websocket_handler: WebsocketEvent::None,
+            websocket_handler: WebSocketEvent::None,
             rank, uri, method,
         }
     }
@@ -346,9 +346,9 @@ pub struct StaticInfo {
     pub format: Option<MediaType>,
     /// The route's handler, i.e, the annotated function.
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFuture<'r>,
-    /// The route's websocket handler, i.e, the annotated function.
-    pub websocket_handler: WebsocketEvent<
-        for<'r> fn(Arc<crate::channels::Websocket<'r>>, crate::Data) -> BoxFutureWs<'r>
+    /// The route's webSocket handler, i.e, the annotated function.
+    pub websocket_handler: WebSocketEvent<
+        for<'r> fn(Arc<crate::channels::WebSocket<'r>>, crate::Data) -> BoxFutureWs<'r>
     >,
     /// The route's rank, if any.
     pub rank: Option<isize>,
@@ -368,7 +368,7 @@ impl From<StaticInfo> for Route {
             method: info.method,
             handler: Box::new(info.handler),
             websocket_handler: info.websocket_handler
-                .map(|w| Box::new(w) as Box<dyn WebsocketHandler>),
+                .map(|w| Box::new(w) as Box<dyn WebSocketHandler>),
             rank: info.rank.unwrap_or_else(|| uri.default_rank()),
             format: info.format,
             sentinels: info.sentinels.into_iter().collect(),
@@ -379,8 +379,8 @@ impl From<StaticInfo> for Route {
 
 /// WebSocketEvent types for constructing Handlers
 #[derive(Clone)]
-pub enum WebsocketEvent<T> {
-    /// No websocket events, the defualt
+pub enum WebSocketEvent<T> {
+    /// No webSocket events, the defualt
     None,
     /// A Join event, triggered when a client creates a connection
     Join(T),
@@ -390,13 +390,13 @@ pub enum WebsocketEvent<T> {
     Leave(T),
 }
 
-impl<T> WebsocketEvent<T> {
-    fn map<F>(self, f: impl Fn(T) -> F) -> WebsocketEvent<F> {
+impl<T> WebSocketEvent<T> {
+    fn map<F>(self, f: impl Fn(T) -> F) -> WebSocketEvent<F> {
         match self {
-            Self::None => WebsocketEvent::None,
-            Self::Join(t) => WebsocketEvent::Join(f(t)),
-            Self::Message(t) => WebsocketEvent::Message(f(t)),
-            Self::Leave(t) => WebsocketEvent::Leave(f(t)),
+            Self::None => WebSocketEvent::None,
+            Self::Join(t) => WebSocketEvent::Join(f(t)),
+            Self::Message(t) => WebSocketEvent::Message(f(t)),
+            Self::Leave(t) => WebSocketEvent::Leave(f(t)),
         }
     }
 

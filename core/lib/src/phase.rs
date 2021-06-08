@@ -3,7 +3,7 @@ use figment::Figment;
 
 use crate::{Catcher, Config, Rocket, Route, Shutdown};
 use crate::router::Router;
-use crate::channels::{WebsocketRouter, Broker};
+use crate::channels::{WebSocketRouter, Broker};
 use crate::fairing::Fairings;
 
 mod private {
@@ -94,7 +94,7 @@ phases! {
     /// launch into orbit. See [`Rocket#ignite`] for full details.
     Ignite (#[derive(Debug)] Igniting) {
         pub(crate) router: Router,
-        pub(crate) websocket_router: WebsocketRouter,
+        pub(crate) websocket_router: WebSocketRouter,
         pub(crate) fairings: Fairings,
         pub(crate) figment: Figment,
         pub(crate) config: Config,
@@ -109,7 +109,7 @@ phases! {
     /// represents a running application. See [`Rocket#orbit`] for full details.
     Orbit (#[derive(Debug)] Orbiting) {
         pub(crate) router: Router,
-        pub(crate) websocket_router: WebsocketRouter,
+        pub(crate) websocket_router: WebSocketRouter,
         pub(crate) fairings: Fairings,
         pub(crate) figment: Figment,
         pub(crate) config: Config,

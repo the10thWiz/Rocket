@@ -1,4 +1,4 @@
-const RocketWebsocket = (() => {
+const RocketWebSocket = (() => {
 
   const seperator = '\u{B7}';
 
@@ -7,7 +7,7 @@ const RocketWebsocket = (() => {
       this.ws = [];
     }
 
-    // open, error, and close all just forward the event to every listening websocket object
+    // open, error, and close all just forward the event to every listening webSocket object
     forward_event(e) {
       for (let i = 0; i < this.ws.length; i++) {
         if (this.ws[i].w == e.target) {
@@ -118,7 +118,7 @@ const RocketWebsocket = (() => {
       }
     }
 
-    // Method to add listening websocket
+    // Method to add listening webSocket
     add(w) {
       let url = new URL(w.url);
       // TODO handle events, etc

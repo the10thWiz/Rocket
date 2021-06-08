@@ -14,19 +14,19 @@ use tokio::sync::oneshot;
 
 use websocket_codec::{ClientRequest, Opcode};
 
-use crate::channels::WebsocketMessage;
-use crate::channels::WebsocketStatus;
-use crate::route::WebsocketEvent;
+use crate::channels::WebSocketMessage;
+use crate::channels::WebSocketStatus;
+use crate::route::WebSocketEvent;
 use crate::route::WsOutcome;
 use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
 use crate::router::{Collide, Collisions};
 use yansi::Paint;
 
-use super::Websocket;
+use super::WebSocket;
 use super::rocket_multiplex::MAX_TOPIC_LENGTH;
 use super::rocket_multiplex::MULTIPLEX_CONTROL_CHAR;
 use super::rocket_multiplex::MULTIPLEX_CONTROL_STR;
-use super::{WebsocketChannel, channel::InnerChannel};
+use super::{WebSocketChannel, channel::InnerChannel};
 
 async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
     where F: FnOnce() -> Fut, Fut: Future<Output = T>,
@@ -78,11 +78,11 @@ enum Event {
 }
 
 #[derive(Debug)]
-pub struct WebsocketRouter {
+pub struct WebSocketRouter {
     routes: HashMap<Event, Vec<Route>>,
 }
 
-impl WebsocketRouter {
+impl WebSocketRouter {
     pub fn new() -> Self {
         Self {
             routes: HashMap::new(),
@@ -94,16 +94,16 @@ impl WebsocketRouter {
     }
 
     pub fn add_route(&mut self, route: Route) {
-        //if route.websocket_handler.is_some() {
+        //if route.webSocket_handler.is_some() {
             //self.routes.push(route);
         //}
         match route.websocket_handler {
-            WebsocketEvent::None => (),
-            WebsocketEvent::Join(_) =>
+            WebSocketEvent::None => (),
+            WebSocketEvent::Join(_) =>
                 self.routes.entry(Event::Join).or_default().push(route),
-            WebsocketEvent::Message(_) =>
+            WebSocketEvent::Message(_) =>
                 self.routes.entry(Event::Message).or_default().push(route),
-            WebsocketEvent::Leave(_) =>
+            WebSocketEvent::Leave(_) =>
                 self.routes.entry(Event::Leave).or_default().push(route),
         }
     }
@@ -133,7 +133,7 @@ impl WebsocketRouter {
     async fn handle_message<'r, 'a: 'r>(
         &'a self,
         event: Event,
-        req: Arc<Websocket<'r>>,
+        req: Arc<WebSocket<'r>>,
         mut message: Data,
     ) -> Result<(), Status> {
         let mut forwarded = false;
@@ -213,14 +213,14 @@ impl WebsocketRouter {
         let protocol = Self::protocol(&req);
 
         //let mut response = None;
-        let (websocket_channel, upgrade_tx) = WebsocketChannel::new();
+        let (websocket_channel, upgrade_tx) = WebSocketChannel::new();
         let inner_channel = InnerChannel::from_websocket(
             &websocket_channel,
             &rocket.broker,
             protocol,
         );
 
-        let mut channels = vec![Arc::new(Websocket::new(req, inner_channel))];
+        let mut channels = vec![Arc::new(WebSocket::new(req, inner_channel))];
 
         let join = rocket.websocket_router.handle_message(
                 Event::Join,
@@ -270,7 +270,7 @@ impl WebsocketRouter {
         }
     }
 
-    fn create_reponse<'r>(req: Arc<Websocket<'r>>, protocol: Protocol) -> Response<'r> {
+    fn create_reponse<'r>(req: Arc<WebSocket<'r>>, protocol: Protocol) -> Response<'r> {
         // Use websocket-codec to parse the client request
         let cl_req = match ClientRequest::parse(|n| req.request().headers().get_one(n)) {
             Ok(v) => v,
@@ -285,7 +285,7 @@ impl WebsocketRouter {
         if protocol == Protocol::Multiplexed {
             response.header(Header::new("Sec-WebSocket-Protocol", "rocket-multiplex"));
         }
-        response.sized_body(None, Cursor::new("Switching to websocket"));
+        response.sized_body(None, Cursor::new("Switching to WebSocket"));
         response.finalize()
     }
 
@@ -297,9 +297,9 @@ impl WebsocketRouter {
     }
 
     // TODO run leave handler first, and fall back on this if no handler succeeds.
-    async fn close_status(mut body: mpsc::Receiver<Bytes>) -> WebsocketStatus<'static> {
+    async fn close_status(mut body: mpsc::Receiver<Bytes>) -> WebSocketStatus<'static> {
         if let Some(body) = body.recv().await {
-            if let Ok(status) = WebsocketStatus::decode(body) {
+            if let Ok(status) = WebSocketStatus::decode(body) {
                 if status == super::OK {
                     super::OK
                 } else if status == super::GOING_AWAY {
@@ -330,9 +330,9 @@ impl WebsocketRouter {
     }
 
     async fn websocket_task_naked<'r, 'a: 'r>(
-        request: &'a Arc<Websocket<'r>>,
+        request: &'a Arc<WebSocket<'r>>,
         on_upgrade: OnUpgrade,
-        mut ws: WebsocketChannel,
+        mut ws: WebSocketChannel,
         upgrade_tx: oneshot::Sender<Upgraded>,
     ) {
         let broker = request.rocket().broker();
@@ -349,7 +349,7 @@ impl WebsocketRouter {
                     Opcode::Close => {
                         if ws.should_send_close() {
                             let status = Self::close_status(message.into_parts().2).await;
-                            WebsocketChannel::close(&ws.subscribe_handle(), status).await;
+                            WebSocketChannel::close(&ws.subscribe_handle(), status).await;
                         }
                         break;
                     },
@@ -375,13 +375,13 @@ impl WebsocketRouter {
     /// Panics if request doesn't have exactly one request & origin pair
     async fn websocket_task_multiplexed<'r>(
         rocket: &'r Rocket<Orbit>,
-        subscriptions: &'r mut Vec<Arc<Websocket<'r>>>,
+        subscriptions: &'r mut Vec<Arc<WebSocket<'r>>>,
         on_upgrade: OnUpgrade,
-        mut ws: WebsocketChannel,
+        mut ws: WebSocketChannel,
         upgrade_tx: oneshot::Sender<Upgraded>,
     ) {
         if subscriptions.len() != 1 {
-            panic!("Websocket task requires exactly 1 request in the subscribtions vector");
+            panic!("WebSocket task requires exactly 1 request in the subscribtions vector");
         }
         let broker = rocket.broker();
         if let Ok(upgrade) = on_upgrade.await {
@@ -397,7 +397,7 @@ impl WebsocketRouter {
                     Opcode::Close => {
                         if ws.should_send_close() {
                             let status = Self::close_status(message.into_parts().2).await;
-                            WebsocketChannel::close(&ws.subscribe_handle(), status).await;
+                            WebSocketChannel::close(&ws.subscribe_handle(), status).await;
                         }
                         break
                     },
@@ -485,9 +485,9 @@ impl WebsocketRouter {
     }
 
     fn remove_topic<'r>(
-        subs: &mut Vec<Arc<Websocket<'r>>>,
+        subs: &mut Vec<Arc<WebSocket<'r>>>,
         topic: Origin<'_>
-    ) -> Option<Arc<Websocket<'r>>> {
+    ) -> Option<Arc<WebSocket<'r>>> {
         if let Some((index, _)) = subs.iter().enumerate().find(|(_, r)| r.topic() == &topic) {
             Some(subs.remove(index))
         }else {
@@ -497,8 +497,8 @@ impl WebsocketRouter {
 
     async fn multiplex_get_request<'a, 'r>(
         data: &mut Data,
-        subscribtions: &'a [Arc<Websocket<'r>>]
-    ) -> Result<Arc<Websocket<'r>>, MultiplexError> {
+        subscribtions: &'a [Arc<WebSocket<'r>>]
+    ) -> Result<Arc<WebSocket<'r>>, MultiplexError> {
         // Peek max_topic length
         let topic = data.peek(MAX_TOPIC_LENGTH + MULTIPLEX_CONTROL_CHAR.len()).await;
         if let Some((index, _)) = topic
@@ -574,7 +574,7 @@ enum MultiplexError {
 }
 
 impl MultiplexError {
-    async fn send_message(self, sender: mpsc::Sender<WebsocketMessage>) {
+    async fn send_message(self, sender: mpsc::Sender<WebSocketMessage>) {
         match self {
             Self::TopicNotPresent => error_message(
                     "ERR\u{B7}Topic not present",
@@ -600,9 +600,9 @@ impl MultiplexError {
     }
 }
 
-async fn error_message(bytes: impl Into<Bytes>, sender: mpsc::Sender<WebsocketMessage>) {
+async fn error_message(bytes: impl Into<Bytes>, sender: mpsc::Sender<WebSocketMessage>) {
     let (tx, rx) = mpsc::channel(2);
-    let _e = sender.send(WebsocketMessage::new(false, rx)).await;
+    let _e = sender.send(WebSocketMessage::new(false, rx)).await;
     let _e = tx.send(bytes.into()).await;
 }
 

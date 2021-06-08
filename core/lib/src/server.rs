@@ -7,7 +7,7 @@ use tokio::sync::oneshot;
 use futures::stream::StreamExt;
 use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 
-use crate::{Data, Orbit, Request, Response, Rocket, channels::WebsocketRouter, route};
+use crate::{Data, Orbit, Request, Response, Rocket, channels::WebSocketRouter, route};
 use crate::form::Form;
 use crate::outcome::Outcome;
 use crate::error::{Error, ErrorKind};
@@ -72,7 +72,7 @@ async fn hyper_service_fn(
     let (tx, rx) = oneshot::channel();
     tokio::spawn(async move {
         if rocket.websocket_router.is_upgrade(&hyp_req) {
-            WebsocketRouter::handle(rocket, hyp_req, h_addr, tx).await;
+            WebSocketRouter::handle(rocket, hyp_req, h_addr, tx).await;
         }else {
             // Get all of the information from Hyper.
             let (h_parts, h_body) = hyp_req.into_parts();

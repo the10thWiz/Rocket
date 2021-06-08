@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::channels::Websocket;
+use crate::channels::WebSocket;
 use crate::{Request, Data};
 use crate::response::{Response, Responder};
 use crate::http::Status;
@@ -13,9 +13,9 @@ pub type Outcome<'r> = crate::outcome::Outcome<Response<'r>, Status, Data>;
 /// [`Handler`].
 pub type BoxFuture<'r, T = Outcome<'r>> = futures::future::BoxFuture<'r, T>;
 
-/// Type alias for the return type of a `WebsocketRoute`
+/// Type alias for the return type of a `WebSocketRoute`
 pub type WsOutcome = crate::outcome::Outcome<(), Status, Data>;
-/// Type alias for the return type of a _raw_ Websocket Route
+/// Type alias for the return type of a _raw_ WebSocket Route
 pub type BoxFutureWs<'r, T = WsOutcome> = futures::future::BoxFuture<'r, T>;
 
 /// Trait implemented by [`Route`](crate::Route) request handlers.
@@ -175,25 +175,25 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
     }
 }
 
-/// Trait type implemented by Rocket Websocket handlers
+/// Trait type implemented by Rocket WebSocket handlers
 #[crate::async_trait]
-pub trait WebsocketHandler: CloneableWs + Send + Sync + 'static {
+pub trait WebSocketHandler: CloneableWs + Send + Sync + 'static {
     /// Called by Rocket when a `Request` with its associated `Data` should be
     /// handled by this handler.
     ///
     /// The variant of `Outcome` returned by the returned `Future` determines
     /// what Rocket does next.
-    async fn handle<'r>(&self, request: Arc<Websocket<'_>>, data: Data) -> WsOutcome;
+    async fn handle<'r>(&self, request: Arc<WebSocket<'_>>, data: Data) -> WsOutcome;
 }
 
 // We write this manually to avoid double-boxing.
-impl<F: Clone + Sync + Send + 'static> WebsocketHandler for F
-    where for<'x> F: Fn(Arc<Websocket<'x>>, Data) -> BoxFutureWs<'x>,
+impl<F: Clone + Sync + Send + 'static> WebSocketHandler for F
+    where for<'x> F: Fn(Arc<WebSocket<'x>>, Data) -> BoxFutureWs<'x>,
 {
     #[inline(always)]
     fn handle<'r, 'life0, 'life1, 'async_trait, 'a>(
         &'life0 self,
-        req: Arc<Websocket<'a>>,
+        req: Arc<WebSocket<'a>>,
         data: Data,
     ) -> BoxFutureWs<'a>
         where 'r: 'async_trait,
@@ -330,7 +330,7 @@ mod private {
     pub trait Sealed {}
     impl<T: super::Handler + Clone> Sealed for T {}
     pub trait SealedWs {}
-    impl<T: super::WebsocketHandler + Clone> SealedWs for T {}
+    impl<T: super::WebSocketHandler + Clone> SealedWs for T {}
 }
 
 /// Helper trait to make a [`Route`](crate::Route)'s `Box<dyn Handler>`
@@ -356,25 +356,25 @@ impl Clone for Box<dyn Handler> {
     }
 }
 
-/// Helper trait to make a [`Route`](crate::Route)'s `Box<dyn WebsocketHandler>`
+/// Helper trait to make a [`Route`](crate::Route)'s `Box<dyn WebSocketHandler>`
 /// `Clone`.
 ///
 /// This trait cannot be implemented directly. Instead, implement `Clone` and
-/// [`WebsocketHandler`]; all types that implement
-/// `Clone` and `WebsocketHandler` automatically implement `Cloneable`.
+/// [`WebSocketHandler`]; all types that implement
+/// `Clone` and `WebSocketHandler` automatically implement `Cloneable`.
 pub trait CloneableWs: private::SealedWs {
     #[doc(hidden)]
-    fn clone_handler(&self) -> Box<dyn WebsocketHandler>;
+    fn clone_handler(&self) -> Box<dyn WebSocketHandler>;
 }
 
-impl<T: WebsocketHandler + Clone> CloneableWs for T {
-    fn clone_handler(&self) -> Box<dyn WebsocketHandler> {
+impl<T: WebSocketHandler + Clone> CloneableWs for T {
+    fn clone_handler(&self) -> Box<dyn WebSocketHandler> {
         Box::new(self.clone())
     }
 }
 
-impl Clone for Box<dyn WebsocketHandler> {
-    fn clone(&self) -> Box<dyn WebsocketHandler> {
+impl Clone for Box<dyn WebSocketHandler> {
+    fn clone(&self) -> Box<dyn WebSocketHandler> {
         self.clone_handler()
     }
 }

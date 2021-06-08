@@ -8,7 +8,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, ReadBuf, Take};
 use futures::stream::Stream;
 use futures::ready;
 
-use crate::{channels::{IntoMessage, WebsocketMessage}, http::hyper};
+use crate::{channels::{IntoMessage, WebSocketMessage}, http::hyper};
 use crate::ext::{PollExt, Chain};
 use crate::data::{Capped, N};
 
@@ -60,7 +60,7 @@ enum State {
 enum StreamKind {
     Body(hyper::Body),
     Multipart(multer::Field<'static>),
-    Websocket(mpsc::Receiver<hyper::Bytes>),
+    WebSocket(mpsc::Receiver<hyper::Bytes>),
 }
 
 impl DataStream {
@@ -245,9 +245,9 @@ impl From<multer::Field<'static>> for StreamReader {
     }
 }
 
-impl From<WebsocketMessage> for StreamReader {
-    fn from(message: WebsocketMessage) -> Self {
-        Self { inner: StreamKind::Websocket(message.into_message()), state: State::Pending }
+impl From<WebSocketMessage> for StreamReader {
+    fn from(message: WebSocketMessage) -> Self {
+        Self { inner: StreamKind::WebSocket(message.into_message()), state: State::Pending }
     }
 }
 
@@ -274,7 +274,7 @@ impl Stream for StreamKind {
                 .map_err_ext(|e| io::Error::new(io::ErrorKind::Other, e)),
             StreamKind::Multipart(mp) => Pin::new(mp).poll_next(cx)
                 .map_err_ext(|e| io::Error::new(io::ErrorKind::Other, e)),
-            StreamKind::Websocket(r) => r.poll_recv(cx).map(|b| b.map(|b| Ok(b))),
+            StreamKind::WebSocket(r) => r.poll_recv(cx).map(|b| b.map(|b| Ok(b))),
         }
     }
 
@@ -282,7 +282,7 @@ impl Stream for StreamKind {
         match self {
             StreamKind::Body(body) => body.size_hint(),
             StreamKind::Multipart(mp) => mp.size_hint(),
-            StreamKind::Websocket(_r) => (0, None),
+            StreamKind::WebSocket(_r) => (0, None),
         }
     }
 }

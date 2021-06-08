@@ -1,6 +1,6 @@
-//! Rocket Websocket implementation
+//! Rocket WebSocket implementation
 //!
-//! Websocket Routes are very similar to normal routes, and have many of the same properties.
+//! WebSocket Routes are very similar to normal routes, and have many of the same properties.
 //!
 //! A simple echo handler:
 //! ```ignore
@@ -30,16 +30,16 @@
 //! Channel Guard, but not every Channel Guard is a Request Guard. This means that any Request
 //! Guard you've been using will just work as a Channel Guard. However, there are Channel Guards
 //! that cannot be Request Guards, such as the `Channel` object. This distinction is primarily
-//! useful for the `Channel` object, since it makes including it in a non-websocket route a
+//! useful for the `Channel` object, since it makes including it in a non-WebSocket route a
 //! compiler error.
 //!
 //! # Data
 //!
-//! Websocket messages will automatically be converted into any type that implements `FromData`,
+//! WebSocket messages will automatically be converted into any type that implements `FromData`,
 //! which means pre-existing types like `Json`, or `&str` just work as expected.
 //!
 //! Send messages is slightly more complicated. In order to facilitate the use of existing
-//! websocket libraries, Rocket needs to know whether a given message is Text or Binary. To this
+//! WebSocket libraries, Rocket needs to know whether a given message is Text or Binary. To this
 //! end, Rocket has the `IntoMessage` trait.
 //!
 //! TODO: initially, this is only implemented for Data and types that implement `AsyncRead`.
@@ -48,13 +48,13 @@
 //!
 //! # Interactions with other requests
 //!
-//! Websocket Routes automatically define a corresponding route for non-websocket requests. This
-//! route is given a rank of 100, so it should almost never collide with non-websocket routes, and
+//! WebSocket Routes automatically define a corresponding route for non-WebSocket requests. This
+//! route is given a rank of 100, so it should almost never collide with non-WebSocket routes, and
 //! returns an `UpgradeRequired` status.
 //!
 //! # Limits
 //!
-//! This websocket implementation doesn't define any size limits of it's own, other than a soft
+//! This WebSocket implementation doesn't define any size limits of it's own, other than a soft
 //! maximum on the size of individual chunks when reading. Instead, size limits are handled by
 //! the types that implement `FromData`.
 //!
@@ -65,7 +65,7 @@
 //! For example, if a client connects to `ws://example.com/main/lobby`, it would be routed to a
 //! message handler for `/main/lobby`, and Rocket would use `/main/lobby` as the topic the client
 //! is subscribed to. Messages can be broadcast to a topic via the `Channel` object, or the `Broker`
-//! object. Outside of a websocket handler, you have to use the `Broker`, which can be obtained
+//! object. Outside of a WebSocket handler, you have to use the `Broker`, which can be obtained
 //! from the Rocket instance.
 //!
 //! The `Channel::broadcast` method will broadcast the message to the current topic, i.e. the one
@@ -105,7 +105,7 @@
 //! These are things that can be added in a minor patch since they don't cause breaking changes
 //!
 //! - [ ] Compression
-//! - [ ] HTTP/2 websockets
+//! - [ ] HTTP/2 WebSockets
 //!
 //! # Autobahn testing
 //!
@@ -142,13 +142,13 @@ mod websocket;
 
 pub(crate) use router::*;
 pub(crate) use message::to_message;
-pub(crate) use channel::WebsocketChannel;
+pub(crate) use channel::WebSocketChannel;
 
 pub use channel::Channel;
-pub use message::{WebsocketMessage, IntoMessage, into_message};
+pub use message::{WebSocketMessage, IntoMessage, into_message};
 pub use broker::Broker;
 pub use status::*;
-pub use websocket::{FromWebsocket, Websocket};
+pub use websocket::{FromWebSocket, WebSocket};
 
 /// Soft maximum buffer size
 pub const MAX_BUFFER_SIZE: usize = 1024;
@@ -156,8 +156,8 @@ pub const MAX_BUFFER_SIZE: usize = 1024;
 pub mod rocket_multiplex {
     //! # Full rocket-multiplex protocol description:
     //!
-    //! Rocket uses the Origin URL of a websocket request as a topic identifier. The rocket-multiplex
-    //! proprotocol allows sending messages to multiple topics using a single websocket connection.
+    //! Rocket uses the Origin URL of a WebSocket request as a topic identifier. The rocket-multiplex
+    //! proprotocol allows sending messages to multiple topics using a single WebSocket connection.
     //!
     //! # Design considerations
     //!
@@ -173,8 +173,8 @@ pub mod rocket_multiplex {
     //!
     //! # Handshake
     //!
-    //! rocket-multiplex acts as a subprotocol for websocket connections, like json or xml might
-    //! be. Most websocket libraries should provide functionality to request a subprotocol, and
+    //! rocket-multiplex acts as a subprotocol for WebSocket connections, like json or xml might
+    //! be. Most WebSocket libraries should provide functionality to request a subprotocol, and
     //! should therefore be able to complete the handshake. Use `'rocket-multiplex'`, case
     //! insesitively.
     //!
@@ -225,10 +225,10 @@ pub mod rocket_multiplex {
     //! # Actions
     //!
     //! - Subscribe: `SUBSCRIBE`, [Topic]; subscribed the client to a specific topic URL, as if the
-    //! client had opened a second websocket connection to the topic URL
+    //! client had opened a second WebSocket connection to the topic URL
     //! - Unsubscribe: `UNSUBSCRIBE`, [TOPIC, CODE?, REASON?]; unsubscribes the client from a specific
-    //! topic URL, as if the client has closed the second websocket connection to the topic URL
-    //! - Unsubscribe all: There is no specific unsubscribe all action, although closing the websocket
+    //! topic URL, as if the client has closed the second WebSocket connection to the topic URL
+    //! - Unsubscribe all: There is no specific unsubscribe all action, although closing the WebSocket
     //! connection is treated as an unsubscribe all
     //!
     //! - Ok: `OK`, [ACTION, PARAMS*]; Sent as a response to an action, this indicates that the action
@@ -261,9 +261,9 @@ pub mod rocket_multiplex {
     //! - Not subscribed: Inicates that the client was not subscribed to this topic, and therefore
     //! cannot be unsubscribed.
     //!
-    //! ### Websocket errors
+    //! ### WebSocket errors
     //!
-    //! When a websocket connection encounters an error defined by the RFC, the server is permitted
+    //! When a WebSocket connection encounters an error defined by the RFC, the server is permitted
     //! to close the connection with the error
     //!
     //! # Limits

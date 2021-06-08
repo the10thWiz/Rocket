@@ -33,7 +33,7 @@ fn other() -> Html<&'static str> {
                 const text = document.getElementById('text');
                 const status = document.getElementById('status');
                 // location.pathname extracts the path paramteters
-                const ws = new RocketWebsocket('ws://' + location.host + location.pathname);
+                const ws = new RocketWebSocket('ws://' + location.host + location.pathname);
                 ws.onopen = function(e) {
                     status.innerText = 'Connected :)';
                 };
@@ -78,7 +78,7 @@ fn index() -> Html<&'static str> {
                 const lines = document.getElementById('lines');
                 const text = document.getElementById('text');
                 const status = document.getElementById('status');
-                const ws = new RocketWebsocket('ws://' + location.host + '/listen/global');
+                const ws = new RocketWebSocket('ws://' + location.host + '/listen/global');
                 ws.onopen = function(e) {
                     status.innerText = 'Connected :)';
                 };

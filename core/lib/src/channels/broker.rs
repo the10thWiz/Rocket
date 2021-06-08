@@ -1,4 +1,4 @@
-//! Phoenix-like channels for Rocket websockets.
+//! Phoenix-like channels for Rocket webSockets.
 //!
 //! The implementation is somewhat complex, but quite flexible. A `Channel` object is created to
 //! share messages using a subscription based model. A client can subscribe to a specific
@@ -14,25 +14,25 @@ use tokio::sync::mpsc;
 
 use crate::{Request, request::{FromRequest, Outcome}};
 
-use super::{IntoMessage, Protocol, WebsocketChannel, WebsocketMessage, to_message};
+use super::{IntoMessage, Protocol, WebSocketChannel, WebSocketMessage, to_message};
 
 /// Internal enum for sharing messages between clients
-// TODO Forward is a MASSIVE variant, the websocket message should probably be boxed
+// TODO Forward is a MASSIVE variant, the webSocket message should probably be boxed
 enum BrokerMessage {
-    /// Registers a websocket to recieve messages from a topic. Only the first Protocol sent will
+    /// Registers a webSocket to recieve messages from a topic. Only the first Protocol sent will
     /// be used, and it controls whether messages sent to the client will have the topic attached.
-    Register(Origin<'static>, Protocol, mpsc::Sender<WebsocketMessage>),
+    Register(Origin<'static>, Protocol, mpsc::Sender<WebSocketMessage>),
 
     /// Removes a previously registered listener
     ///
     /// Note, this will remove all matching listeners, since there is no Eq bounds
-    Unregister(Origin<'static>, mpsc::Sender<WebsocketMessage>),
+    Unregister(Origin<'static>, mpsc::Sender<WebSocketMessage>),
 
     /// Removes all previously registered listeners for this client
-    UnregisterAll(mpsc::Sender<WebsocketMessage>),
+    UnregisterAll(mpsc::Sender<WebSocketMessage>),
 
     /// Sends a message that should be forwarded to every socket listening
-    Forward(Origin<'static>, WebsocketMessage),
+    Forward(Origin<'static>, WebSocketMessage),
 }
 
 /// A channel for sharing messages between multiple clients, and the central server.
@@ -72,7 +72,7 @@ impl Broker {
         &self,
         id: &Origin<'_>,
         protocol: Protocol,
-        channel: &WebsocketChannel
+        channel: &WebSocketChannel
     ) {
         let _ = self.channels.send(
             BrokerMessage::Register(id.clone().into_owned(), protocol, channel.subscribe_handle())
@@ -83,7 +83,7 @@ impl Broker {
     ///
     /// # Note
     /// This will unsubscribe this client from EVERY descriptor that matches `id`
-    pub(crate) async fn unsubscribe(&self, id: &Origin<'_>, channel: &WebsocketChannel) {
+    pub(crate) async fn unsubscribe(&self, id: &Origin<'_>, channel: &WebSocketChannel) {
         let _ = self.channels.send(
             BrokerMessage::Unregister(id.clone().into_owned(), channel.subscribe_handle())
         );
@@ -93,7 +93,7 @@ impl Broker {
     ///
     /// The client is automatically unsubscribed if they are disconnected, so this does not need
     /// to be called when the client is disconnecting
-    pub(crate) async fn unsubscribe_all(&self, channel: &WebsocketChannel) {
+    pub(crate) async fn unsubscribe_all(&self, channel: &WebSocketChannel) {
         let _ = self.channels.send(BrokerMessage::UnregisterAll(channel.subscribe_handle()));
     }
 
@@ -132,7 +132,7 @@ impl<'r> FromRequest<'r> for Broker {
 }
 
 /// Convient struct for holding channel subscribtions
-struct ChannelMap(Vec<(mpsc::Sender<WebsocketMessage>, Protocol, Vec<Origin<'static>>)>);
+struct ChannelMap(Vec<(mpsc::Sender<WebSocketMessage>, Protocol, Vec<Origin<'static>>)>);
 
 impl ChannelMap {
     /// Create map with capactity
@@ -143,7 +143,7 @@ impl ChannelMap {
     /// Add `descriptor` to the list of subscriptions for `tx`
     fn insert(
         &mut self,
-        tx: mpsc::Sender<WebsocketMessage>,
+        tx: mpsc::Sender<WebSocketMessage>,
         protocol: Protocol,
         descriptor: Origin<'static>
     ) {
@@ -157,12 +157,12 @@ impl ChannelMap {
     }
 
     /// Remove every descriptor `tx` is subscribed to
-    fn remove_key(&mut self, tx: mpsc::Sender<WebsocketMessage>) {
+    fn remove_key(&mut self, tx: mpsc::Sender<WebSocketMessage>) {
         self.0.retain(|(t, _, _)| !t.same_channel(&tx));
     }
 
     /// Remove every descriptor that `descriptor` matches and `tx` is subscribed to
-    fn remove_value(&mut self, tx: mpsc::Sender<WebsocketMessage>, descriptor: Origin<'static>) {
+    fn remove_value(&mut self, tx: mpsc::Sender<WebSocketMessage>, descriptor: Origin<'static>) {
         for (t, _, v) in self.0.iter_mut() {
             if t.same_channel(&tx) {
                 v.retain(|d| d != &descriptor);
@@ -173,7 +173,7 @@ impl ChannelMap {
 
     /// Forward a message to every client that is subscribed to a descriptor that matches
     /// `descriptor`
-    async fn send(&mut self, descriptor: Origin<'static>, message: WebsocketMessage) {
+    async fn send(&mut self, descriptor: Origin<'static>, message: WebSocketMessage) {
         let mut chs = vec![];
         let (header, _, mut data) = message.into_parts();
         for (t, protocol, v) in self.0.iter() {
@@ -182,12 +182,12 @@ impl ChannelMap {
                 // the raw data
                 let (data_tx, data_rx) = mpsc::channel(2);
                 let message = match protocol {
-                    Protocol::Naked => WebsocketMessage::from_parts(
+                    Protocol::Naked => WebSocketMessage::from_parts(
                         header.clone(),
                         None,
                         data_rx
                     ),
-                    Protocol::Multiplexed => WebsocketMessage::from_parts(
+                    Protocol::Multiplexed => WebSocketMessage::from_parts(
                         header.clone(),
                         Some(descriptor.clone()),
                         data_rx

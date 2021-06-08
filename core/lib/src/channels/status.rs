@@ -2,14 +2,14 @@ use std::{borrow::Cow, string::FromUtf8Error};
 
 use bytes::{Bytes, BytesMut};
 
-/// A websocket status code sent while closing the connection
+/// A webSocket status code sent while closing the connection
 #[derive(Debug, Clone, Eq)]
-pub struct WebsocketStatus<'a> {
+pub struct WebSocketStatus<'a> {
     code: u16,
     reason: Cow<'a, str>,
 }
 
-impl<'a> PartialEq for WebsocketStatus<'a> {
+impl<'a> PartialEq for WebSocketStatus<'a> {
     /// Status equality ignores the reason, since there is no offical, defined standard for what
     /// they are
     fn eq(&self, other: &Self) -> bool {
@@ -39,8 +39,8 @@ impl From<FromUtf8Error> for StatusError {
 macro_rules! websocket_status_impl {
     ($($name:ident => $code:expr),*) => {
         $(
-            /// Websocket pre-defined Status code
-            pub const $name: WebsocketStatus<'static> = WebsocketStatus {
+            /// WebSocket pre-defined Status code
+            pub const $name: WebSocketStatus<'static> = WebSocketStatus {
                 code: $code,
                 reason: Cow::Borrowed(stringify!($name))
             };
@@ -64,7 +64,7 @@ websocket_status_impl! {
     TLS_FAILURE => 1015
 }
 
-impl<'a> WebsocketStatus<'a> {
+impl<'a> WebSocketStatus<'a> {
     /// Create a new status with a code and reason.
     ///
     /// # Panics
@@ -77,7 +77,7 @@ impl<'a> WebsocketStatus<'a> {
         match code {
             0000..=0999 => panic!("Status codes in the range 0-999 are not used"),
             1000..=2999 => panic!(
-                "Status codes in the range 1000-2999 are reserved for the websocket protocol"
+                "Status codes in the range 1000-2999 are reserved for the WebSocket protocol"
             ),
             3000..=3999 => (),
             4000..=4999 => (),
@@ -114,7 +114,7 @@ impl<'a> WebsocketStatus<'a> {
 }
 
 // Maybe remove leading zeros?
-impl WebsocketStatus<'static> {
+impl WebSocketStatus<'static> {
     pub(crate) fn decode(mut bytes: Bytes) -> Result<Self, StatusError> {
         if bytes.len() < 2 {
             Err(StatusError::BadFrame)

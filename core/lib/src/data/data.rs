@@ -203,20 +203,20 @@ impl Data {
         self.is_complete
     }
 
-    /// Returns Some if this data was created from a websocket, and None otherwise
+    /// Returns Some if this data was created from a WebSocket, and None otherwise
     ///
-    /// The inner boolean is true when the websocket message was sent as binary, while
+    /// The inner boolean is true when the WebSocket message was sent as binary, while
     /// it is false if the type was text
     pub fn websocket_is_binary(&self) -> Option<bool> {
         self.ws_binary
     }
 
     /// Takes the first `num` bytes from this request. This violates the premise in `peek`, that
-    /// `Data` always contains all the data, however this is nessecary to implement Websocket
+    /// `Data` always contains all the data, however this is nessecary to implement WebSocket
     /// Multiplexing. For that reason, this method is pub(crate), so it cannot be used outside of
     /// Rocket itself.
     ///
-    /// In the case of Websocket Multiplexing, the premise outlined in `peek` doesn't really apply:
+    /// In the case of WebSocket Multiplexing, the premise outlined in `peek` doesn't really apply:
     /// the data actually carries header information (the topic).
     pub(crate) async fn take(&mut self, num: usize) -> Vec<u8> {
         let tmp = self.peek(num).await.len();

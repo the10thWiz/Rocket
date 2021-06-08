@@ -1,12 +1,12 @@
-# Websockets
+# WebSockets
 
-Unlike traditional web requests, websockets allow bidirectional communication.
+Unlike traditional web requests, WebSockets allow bidirectional communication.
 This means that servers can send events to clients, which is often useful,
 especially for things like chat rooms.
 
 ## Event handlers
 
-There are three types of events triggered during a websocket's lifetime. The only
+There are three types of events triggered during a WebSocket's lifetime. The only
 required event is `message`, which is triggered for every incoming message. This
 is a simple echo example
 
@@ -17,12 +17,12 @@ async fn echo(data: Data, ws: Channel<'_>) {
 }
 ```
 
-There are few things going on here. First, websockets have a path and query, just
+There are few things going on here. First, WebSockets have a path and query, just
 like any other web request. The data attribute will be the contents of the
 message sent. There are a few differences though, specifically in relation to
-request guards. Every request guard will work in a websocket channel, however the
+request guards. Every request guard will work in a WebSocket channel, however the
 reverse is not always true. In fact, `Channel` can only be used a guard in
-websocket handlers.
+WebSocket handlers.
 
 ### Other events
 
@@ -41,8 +41,8 @@ In may be the case the `message` is optional, and a `join` handler may be enough
 
 ### Mounting event handlers
 
-Websocket Event Handlers are attached to Rocket in the same way as any other route.
-In fact, Websocket Event Handlers actually also generate an HTTP route, to provide
+WebSocket Event Handlers are attached to Rocket in the same way as any other route.
+In fact, WebSocket Event Handlers actually also generate an HTTP route, to provide
 error responses. These default routes are given the lowest priority possible, to
 prevent collisions with existing routes.
 
@@ -88,11 +88,11 @@ for convience when sending messages based on requests.
 ## Rocket-Multiplex
 
 There is one large drawback to the Topics outlined above: the client needs to
-open a seperate websocket connection for every topic they wish to connect to.
-There are two ways to reduce the number of open TCP connections: Websockets
+open a seperate WebSocket connection for every topic they wish to connect to.
+There are two ways to reduce the number of open TCP connections: WebSockets
 over HTTP/2, or topic multiplexing. Rocket supports HTTP/2, but the underlying
-libraries don't support the required features for websocket connections, and
-only the most recent browsers have support for websocket over HTTP/2.
+libraries don't support the required features for WebSocket connections, and
+only the most recent browsers have support for WebSocket over HTTP/2.
 
 Rocket-Multiplex is the topic multiplexing protocol Rocket supports. It's a
 light-weight, simple protocol, and largely transparent. Rocket has support for

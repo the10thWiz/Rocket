@@ -223,15 +223,15 @@ impl std::ops::Deref for RouteUri {
     }
 }
 
-pub enum WebsocketEvent {
+pub enum WebSocketEvent {
     Join,
     Message,
     Leave,
 }
 
-/// The parsed `#[websocket(..)]`
+/// The parsed `#[webSocket(..)]`
 #[derive(Debug, FromMeta)]
-pub struct WebsocketAttribute {
+pub struct WebSocketAttribute {
     #[meta(naked)]
     pub uri: RouteUri,
     #[meta(naked)]
@@ -241,9 +241,9 @@ pub struct WebsocketAttribute {
     pub rank: Option<isize>,
 }
 
-pub struct WebsocketRoute {
+pub struct WebSocketRoute {
     /// The attribute: `#[message(path, ...)]`.
-    pub attr: WebsocketAttribute,
+    pub attr: WebSocketAttribute,
     /// The static and dynamic path parameters.
     pub path_params: Vec<Parameter>,
     /// The static and dynamic query parameters.
@@ -258,8 +258,8 @@ pub struct WebsocketRoute {
     pub arguments: Arguments,
 }
 
-impl WebsocketRoute {
-    pub fn from(attr: WebsocketAttribute, handler: syn::ItemFn) -> Result<Self> {
+impl WebSocketRoute {
+    pub fn from(attr: WebSocketAttribute, handler: syn::ItemFn) -> Result<Self> {
         let mut diags = Diagnostics::new();
 
         // Check the validity of function arguments.

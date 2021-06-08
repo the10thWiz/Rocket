@@ -7,7 +7,7 @@ use either::Either;
 use figment::{Figment, Provider};
 
 use crate::channels::Broker;
-use crate::{Catcher, Config, Route, Shutdown, channels::WebsocketRouter, sentinel, shield::Shield};
+use crate::{Catcher, Config, Route, Shutdown, channels::WebSocketRouter, sentinel, shield::Shield};
 use crate::router::Router;
 use crate::trip_wire::TripWire;
 use crate::fairing::{Fairing, Fairings};
@@ -492,7 +492,7 @@ impl Rocket<Build> {
             }
         };
 
-        let mut websocket_router = WebsocketRouter::new();
+        let mut websocket_router = WebSocketRouter::new();
         self.routes.clone().into_iter().for_each(|r| websocket_router.add_route(r));
         websocket_router.finalize().map_err(ErrorKind::Collisions)?;
 
