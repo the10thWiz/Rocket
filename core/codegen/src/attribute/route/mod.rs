@@ -746,7 +746,7 @@ fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<Tok
             #responder_outcome
         },
         WebSocketEvent::Message => quote! {
-            #Outcome::Failure(::rocket::channels::status::INTERNAL_SERVER_ERROR)
+            #Outcome::Success(())
         },
         WebSocketEvent::Leave => quote! {
             #Outcome::Failure(::rocket::channels::status::INTERNAL_SERVER_ERROR)
