@@ -5,6 +5,7 @@ use std::hash::Hash;
 use devise::{Spanned, SpanWrapped, Result, FromMeta, Diagnostic};
 use devise::ext::TypeExt as _;
 use proc_macro2::{TokenStream, Span};
+use syn::ReturnType;
 
 use crate::proc_macro_ext::StringLit;
 use crate::syn_ext::{IdentExt, TypeExt as _};
@@ -711,8 +712,12 @@ fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<Tok
 
     if let WebSocketEvent::Join = event {
         if let Some(guard) = route.data_guard {
-            return Err(Diagnostic::spanned(guard.fn_ident.span(), devise::Level::Error, "Join routes are not allowed to have a data attribute"))
+            return Err(Diagnostic::spanned(guard.fn_ident.span(), devise::Level::Error, "Join routes are not allowed to have a data attribute"));
         }
+    }
+
+    if route.handler.sig.output != ReturnType::Default {
+        return Err(Diagnostic::spanned(route.handler.sig.output.span(), devise::Level::Error, "WebSocket routes are not permitted to return values"));
     }
 
     // Generate the declarations for all of the guards.

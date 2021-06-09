@@ -93,9 +93,9 @@
 //! - [ ] Finalize the `IntoMessage` implementations
 //! - [ ] Subprotocol support. Depends on rocket-multiplex support for subprotocols
 //!
-//! - [ ] `data = `
+//! - [x] `data = `
 //! - [x] async `broadcast`s
-//! - [ ] Require message channel guards to pass
+//! - [x] Require message channel guards to pass
 //!
 //! ## Nice to haves
 //!
@@ -140,17 +140,18 @@ mod router;
 mod message;
 mod broker;
 mod channel;
-mod status;
 mod websocket;
 
 pub(crate) use router::*;
 pub(crate) use message::to_message;
 pub(crate) use channel::WebSocketChannel;
 
+pub mod status;
+
 pub use channel::Channel;
 pub use message::{WebSocketMessage, IntoMessage, into_message};
 pub use broker::Broker;
-pub use status::*;
+//pub use status::*;
 pub use websocket::{FromWebSocket, WebSocket};
 
 /// Soft maximum buffer size

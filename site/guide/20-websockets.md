@@ -130,4 +130,4 @@ full specification can be found in
 - [ ] Broker guide
 - [x] Authentication
 - [ ] Compiler Errors & Warnings
-- [ ] Runtime Errors & Warnings
+- [ ] Runtime Errors

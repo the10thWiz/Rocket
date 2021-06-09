@@ -286,33 +286,37 @@ route_attribute!(head => Method::Head);
 route_attribute!(patch => Method::Patch);
 route_attribute!(options => Method::Options);
 
-// TODO Complete documentation
-/// Route attribute for WebSocket connections.
-///
-/// Very similar to the other route macros
-///
-#[proc_macro_attribute]
-pub fn join(args: TokenStream, input: TokenStream) -> TokenStream {
-    emit!(attribute::route::websocket(WebSocketEvent::Join, args, input))
+macro_rules! websocket_attribute {
+    ($name:ident => $method:expr) => (
+        /// Route attribute for WebSocket event handlers
+        ///
+        /// There are three events: `join`, `message`, `leave`
+        ///
+        /// See [`route`] for more information related to the grammar and behaviour of Routes.
+        ///
+        /// The `join` event is called whenever a client connects. However, this handler is *not*
+        /// required to succeed in order for a client to connect. Authentication should always be
+        /// done with Request Guards in every applicable handler rather than just in the join handler.
+        ///
+        /// # Data
+        ///
+        /// Different event handlers have different requirements for the data parameter. `join` has
+        /// no data parameter, `message` allows any type that implements `FromData`, and `leave`
+        /// only allows the type `WebSocketStatus`, which indicates the close status of the
+        /// connection.
+        ///
+        /// Note that in addition to the requirements specified for a normal route, websocket
+        /// handlers are not permitted to return a value.
+        #[proc_macro_attribute]
+        pub fn $name(args: TokenStream, input: TokenStream) -> TokenStream {
+            emit!(attribute::route::websocket($method, args, input))
+        }
+    )
 }
 
-/// Route attribute for WebSocket connections.
-///
-/// Very similar to the other route macros
-///
-#[proc_macro_attribute]
-pub fn message(args: TokenStream, input: TokenStream) -> TokenStream {
-    emit!(attribute::route::websocket(WebSocketEvent::Message, args, input))
-}
-
-/// Route attribute for WebSocket connections.
-///
-/// Very similar to the other route macros
-///
-#[proc_macro_attribute]
-pub fn leave(args: TokenStream, input: TokenStream) -> TokenStream {
-    emit!(attribute::route::websocket(WebSocketEvent::Leave, args, input))
-}
+websocket_attribute!(join => WebSocketEvent::Join);
+websocket_attribute!(message => WebSocketEvent::Message);
+websocket_attribute!(leave => WebSocketEvent::Leave);
 
 /// Attribute to generate a [`Catcher`] and associated metadata.
 ///
