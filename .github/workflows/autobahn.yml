@@ -29,7 +29,7 @@ jobs:
       
       - name: Try to run server
         run: |
-          cd ${{ GITHUB_WORKSPACE }}/examples/websocket-echo/;
+          cd $GITHUB_WORKSPACE/examples/websocket-echo/;
           ROCKET_ADDRESS=0.0.0.0 cargo run
       - name: Tests
         run: wstest --help
