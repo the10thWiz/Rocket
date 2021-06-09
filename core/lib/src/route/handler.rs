@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::channels::{WebSocket, WebSocketStatus};
+use crate::channels::{WebSocket, status::WebSocketStatus};
 use crate::{Request, Data};
 use crate::response::{Response, Responder};
 use crate::http::Status;

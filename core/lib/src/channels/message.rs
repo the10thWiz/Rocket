@@ -10,7 +10,7 @@ use websocket_codec::protocol::FrameHeader;
 
 use crate::Data;
 
-use super::{MAX_BUFFER_SIZE, WebSocketStatus};
+use super::{MAX_BUFFER_SIZE, status::WebSocketStatus};
 
 /// A trait for types that can be sent on a webSocket.
 ///

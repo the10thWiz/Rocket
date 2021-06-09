@@ -15,7 +15,6 @@ use tokio::sync::oneshot;
 use websocket_codec::{ClientRequest, Opcode};
 
 use crate::channels::WebSocketMessage;
-use crate::channels::WebSocketStatus;
 use crate::route::WebSocketData;
 use crate::route::WebSocketEvent;
 use crate::route::WsOutcome;
@@ -23,7 +22,7 @@ use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
 use crate::router::{Collide, Collisions};
 use yansi::Paint;
 
-use super::WebSocket;
+use super::{WebSocket, status::{self, WebSocketStatus}};
 use super::rocket_multiplex::MAX_TOPIC_LENGTH;
 use super::rocket_multiplex::MULTIPLEX_CONTROL_CHAR;
 use super::rocket_multiplex::MULTIPLEX_CONTROL_STR;
@@ -153,7 +152,7 @@ impl WebSocketRouter {
                     Some(WsOutcome::Forward(d)) => message = d,
                     Some(WsOutcome::Failure(s)) => return Err(s),
                     Some(WsOutcome::Success(())) => return Ok(()),
-                    None => return Err(super::INTERNAL_SERVER_ERROR),
+                    None => return Err(status::INTERNAL_SERVER_ERROR),
                 }
             }
         }
@@ -177,7 +176,7 @@ impl WebSocketRouter {
                         Some(WsOutcome::Forward(d)) => message = d,
                         Some(WsOutcome::Failure(s)) => return Err(s),
                         Some(WsOutcome::Success(())) => return Ok(()),
-                        None => return Err(super::INTERNAL_SERVER_ERROR),
+                        None => return Err(status::INTERNAL_SERVER_ERROR),
                     }
                 }
             }
@@ -315,32 +314,32 @@ impl WebSocketRouter {
     async fn close_status(mut body: mpsc::Receiver<Bytes>) -> WebSocketStatus<'static> {
         if let Some(body) = body.recv().await {
             if let Ok(status) = WebSocketStatus::decode(body) {
-                if status == super::OK {
-                    super::OK
-                } else if status == super::GOING_AWAY {
-                    super::OK
-                } else if status == super::EXTENSION_REQUIRED {
-                    super::OK
-                } else if status == super::UNKNOWN_MESSAGE_TYPE {
-                    super::UNKNOWN_MESSAGE_TYPE
-                } else if status == super::INVALID_DATA_TYPE {
-                    super::INVALID_DATA_TYPE
-                } else if status == super::POLICY_VIOLATION {
-                    super::POLICY_VIOLATION
-                } else if status == super::MESSAGE_TOO_LARGE {
-                    super::MESSAGE_TOO_LARGE
-                } else if status == super::INTERNAL_SERVER_ERROR {
-                    super::INTERNAL_SERVER_ERROR
+                if status == status::OK {
+                    status::OK
+                } else if status == status::GOING_AWAY {
+                    status::OK
+                } else if status == status::EXTENSION_REQUIRED {
+                    status::OK
+                } else if status == status::UNKNOWN_MESSAGE_TYPE {
+                    status::UNKNOWN_MESSAGE_TYPE
+                } else if status == status::INVALID_DATA_TYPE {
+                    status::INVALID_DATA_TYPE
+                } else if status == status::POLICY_VIOLATION {
+                    status::POLICY_VIOLATION
+                } else if status == status::MESSAGE_TOO_LARGE {
+                    status::MESSAGE_TOO_LARGE
+                } else if status == status::INTERNAL_SERVER_ERROR {
+                    status::INTERNAL_SERVER_ERROR
                 } else if (3000..=4999).contains(&status.code()) {
-                    super::OK
+                    status::OK
                 } else {
-                    super::PROTOCOL_ERROR
+                    status::PROTOCOL_ERROR
                 }
             } else {
-                super::PROTOCOL_ERROR
+                status::PROTOCOL_ERROR
             }
         } else {
-            super::OK
+            status::OK
         }
     }
 
@@ -379,7 +378,7 @@ impl WebSocketRouter {
             let _e = request.rocket().websocket_router.handle_message(
                     Event::Leave,
                     request.clone(),
-                    WebSocketData::Leave(super::OK)
+                    WebSocketData::Leave(status::OK)
                 ).await;
         }
     }
@@ -470,7 +469,7 @@ impl WebSocketRouter {
                                     let _leave = rocket.websocket_router.handle_message(
                                         Event::Leave,
                                         leave_req.clone(),
-                                        WebSocketData::Leave(super::OK)
+                                        WebSocketData::Leave(status::OK)
                                     ).await;
                                     // TODO: handle errors in leave
                                 } else {
@@ -491,7 +490,7 @@ impl WebSocketRouter {
             let _e = rocket.websocket_router.handle_message(
                 Event::Leave,
                 subscriptions[0].clone(),
-                WebSocketData::Leave(super::OK)
+                WebSocketData::Leave(status::OK)
             ).await;
         }
     }

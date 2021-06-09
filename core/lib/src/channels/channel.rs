@@ -30,7 +30,7 @@ use super::FromWebSocket;
 use super::IntoMessage;
 use super::Protocol;
 use super::WebSocket;
-use super::WebSocketStatus;
+use super::status::{self, WebSocketStatus};
 use super::broker::Broker;
 use super::to_message;
 
@@ -155,7 +155,7 @@ impl WebSocketChannel {
                         },
                         Err(_e) => {
                             //error_!("WebSocket client broke protocol: {:?}", e);
-                            Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
+                            Self::close(&broker_tx, status::PROTOCOL_ERROR).await;
                             break;
                         },
                     };
@@ -168,13 +168,13 @@ impl WebSocketChannel {
                         r
                     }else {
                         // Send a protocol error if the datalength isn't valid
-                        Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
+                        Self::close(&broker_tx, status::PROTOCOL_ERROR).await;
                         break;
                     };
                     // Checks for some other protocol errors
                     if Self::protocol_error(&h, remaining) {
                         warn_!("Remote Protocol Error");
-                        Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
+                        Self::close(&broker_tx, status::PROTOCOL_ERROR).await;
                         break;
                     }
                     if h.opcode() == u8::from(Opcode::Ping) {
@@ -211,7 +211,7 @@ impl WebSocketChannel {
                     // If there is a frame to continue, it must be continued
                     if let Some(data_rx) = data_rx.take() {
                         if h.opcode() == 0x0 {
-                            Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
+                            Self::close(&broker_tx, status::PROTOCOL_ERROR).await;
                             break;
                         } else {
                             let message = WebSocketMessage::from_parts(h, None, data_rx);
@@ -225,7 +225,7 @@ impl WebSocketChannel {
                         let message = WebSocketMessage::from_parts(h, None, rx);
                         let _e = message_tx.send(message).await;
                     } else if h.opcode() != 0x0 {
-                        Self::close(&broker_tx, super::PROTOCOL_ERROR).await;
+                        Self::close(&broker_tx, status::PROTOCOL_ERROR).await;
                         break;
                     }
                     // Read and forward data - note that this will read (and discard) any data that
@@ -478,7 +478,7 @@ impl<'r> Channel<'r> {
     /// Sends a close notificaiton to the client, along with a reason for the close
     pub async fn close_with_status(&self, status: WebSocketStatus<'_>) {
         self.send_raw(
-            WebSocketMessage::close(Some(status))
+            WebSocketMessage::close(Some(status.to_owned()))
         ).await
     }
 

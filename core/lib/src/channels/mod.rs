@@ -42,9 +42,10 @@
 //! WebSocket libraries, Rocket needs to know whether a given message is Text or Binary. To this
 //! end, Rocket has the `IntoMessage` trait.
 //!
-//! TODO: initially, this is only implemented for Data and types that implement `AsyncRead`.
-//! The current implementation doesn't have AsyncRead, since I don't think it's a good idea, but
-//! rather I'm providing as many types as possible, including String, Vec, Json, MsgPack, etc.
+// TODO: initially, this is only implemented for Data and types that implement `AsyncRead`.
+// The current implementation doesn't have AsyncRead, since I don't think it's a good idea, but
+// rather I'm providing as many types as possible, including String, Vec, Json, MsgPack, etc.
+//! This is implmeneted on a number of types, including Json, MsgPack, String, Vec, etc.
 //!
 //! # Interactions with other requests
 //!
@@ -86,10 +87,11 @@
 //!     - [ ] Subprotocols
 //!     - [ ] Topic length limit on initial connect
 //! - [-] Rocket specific Opcode type, since Rocket handles many of them already
-//!     The `websocket-codec` Opcode type is no longer re-exported
+//!     The `websocket-codec` Opcode type is no longer re-exported, since it was only used
+//!     internally
 //! - [ ] Full examples for the guide
 //! - [x] Broker improvements
-//! - [ ] Finalize data portion of the attribute macros
+//! - [x] Finalize data portion of the attribute macros
 //! - [ ] Finalize the `IntoMessage` implementations
 //! - [ ] Subprotocol support. Depends on rocket-multiplex support for subprotocols
 //!
