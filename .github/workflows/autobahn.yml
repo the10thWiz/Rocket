@@ -23,13 +23,26 @@ jobs:
           toolchain: stable
           override: true
 
-      # Runs a single command using the runners shell
-      - name: Install autobahn client
-        run: pip install autobahntestsuite
-      - name: Tests
-        run: wstest --help
-      
       - name: Try to run server
         run: |
-          cd $GITHUB_WORKSPACE/examples/websocket-echo/;
-          ROCKET_ADDRESS=0.0.0.0 cargo run
+          cd $GITHUB_WORKSPACE/examples/websocket-echo/
+          cargo build
+          ROCKET_ADDRESS=0.0.0.0 cargo run &
+        shell: bash
+
+      - name: Run Autobahn|Testsuite
+        run: |
+          #until nc localhost 8000 -w 0; do sleep 1; done
+          sleep 1
+          docker run --add-host localhost:$(ip addr show docker0 | grep -Po 'inet \K[\d.]+') \
+          -v ${{ github.workspace }}/.github/autobahn:/config \
+          -v ${{ runner.temp }}:/reports \
+          crossbario/autobahn-testsuite \
+          wstest -m fuzzingclient -s /config/fuzzingclient.json
+          for $file in ${{ runner.temp }}/servers/*.json
+            do [[ $(jq ".behavior" $file) == "\"OK\"" ]]
+          done
+        shell: bash
+      - name: test output
+        run: |
+          ls ${{ runner.temp }}/servers

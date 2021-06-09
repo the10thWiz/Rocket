@@ -1,0 +1,28 @@
+{
+  "outdir": "./reports/servers",
+  "servers": [
+    {
+      "agent": "rocket",
+      "url": "ws://172.17.0.1:8000/echo"
+    }
+  ],
+  "cases": [
+    "5.19",
+    "5.20"
+  ],
+  "exclude-cases": [
+    "1.*",
+    "2.*",
+    "3.*",
+    "4.*",
+    "7.*",
+    "9.*",
+    "10.*",
+
+    "6.*",
+
+    "12.*",
+    "13.*"
+  ],
+  "exclude-agent-cases": {}
+}
