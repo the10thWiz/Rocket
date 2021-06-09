@@ -39,10 +39,10 @@ jobs:
           -v ${{ runner.temp }}:/reports \
           crossbario/autobahn-testsuite \
           wstest -m fuzzingclient -s /config/fuzzingclient.json
-          for $file in ${{ runner.temp }}/servers/*.json
-            do [[ $(jq ".behavior" $file) == "\"OK\"" ]]
-          done
         shell: bash
       - name: test output
         run: |
           ls ${{ runner.temp }}/servers
+          for file in ${{ runner.temp }}/servers/*.json;\
+            do [[ $(jq ".behavior" $file) == "\"OK\"" ]];\
+          done;
