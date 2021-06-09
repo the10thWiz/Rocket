@@ -746,16 +746,16 @@ fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<Tok
             #responder_outcome
         },
         WebSocketEvent::Message => quote! {
-            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+            #Outcome::Failure(::rocket::channels::status::INTERNAL_SERVER_ERROR)
         },
         WebSocketEvent::Leave => quote! {
-            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+            #Outcome::Failure(::rocket::channels::status::INTERNAL_SERVER_ERROR)
         },
     };
 
     let message = match event {
         WebSocketEvent::Join => quote! {
-            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+            #Outcome::Failure(::rocket::channels::status::INTERNAL_SERVER_ERROR)
         },
         WebSocketEvent::Message => quote! {
             #data_guard
@@ -763,16 +763,16 @@ fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<Tok
             #responder_outcome
         },
         WebSocketEvent::Leave => quote! {
-            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+            #Outcome::Failure(::rocket::channels::status::INTERNAL_SERVER_ERROR)
         },
     };
 
     let leave = match event {
         WebSocketEvent::Join => quote! {
-            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+            #Outcome::Failure(::rocket::channels::status::INTERNAL_SERVER_ERROR)
         },
         WebSocketEvent::Message => quote! {
-            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+            #Outcome::Failure(::rocket::channels::status::INTERNAL_SERVER_ERROR)
         },
         WebSocketEvent::Leave => quote! {
             #responder_outcome
