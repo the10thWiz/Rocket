@@ -27,8 +27,10 @@ WebSocket handlers.
 ### Other events
 
 The other two events are `join` and `leave` events, triggered when a client connects
-and disconnects, respectively. They behave in much the same way as `message`, although
-they don't have a data parameter.
+and disconnects, respectively. They behave in much the same way as `message`,
+the main difference lies in how they handle the data attribute. `join` handlers
+cannot have a data attribute, and `leave` events require the data attribute to
+be of the type `WebsocketStatus`.
 
 ! note: Join and Leave events are optional
 
@@ -116,3 +118,16 @@ case anyway.
 For those who want or need to implement rocket-multiplex for another language, the
 full specification can be found in
 [`rocket::channels::rocket_multiplex`](@api/rocket/channels/rocket_multiplex/)
+
+## Documentation and Guide todo
+
+- [x] Echo example
+  - [ ] Echo guide
+- [x] Broadcast example
+  - [ ] Broadcast guide
+- [ ] Multiplex example
+  - [ ] Multiplex guide
+- [ ] Broker guide
+- [x] Authentication
+- [ ] Compiler Errors & Warnings
+- [ ] Runtime Errors & Warnings

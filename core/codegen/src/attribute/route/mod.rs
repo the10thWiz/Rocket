@@ -709,6 +709,12 @@ fn websocket_sentinels_expr(route: &WebSocketRoute) -> TokenStream {
 fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<TokenStream> {
     use crate::exports::*;
 
+    if let WebSocketEvent::Join = event {
+        if let Some(guard) = route.data_guard {
+            return Err(Diagnostic::spanned(guard.fn_ident.span(), devise::Level::Error, "Join routes are not allowed to have a data attribute"))
+        }
+    }
+
     // Generate the declarations for all of the guards.
     let request_guards = route.request_guards.iter().map(websocket_request_guard_decl);
     let param_guards = route.param_guards().map(websocket_param_guard_decl);
