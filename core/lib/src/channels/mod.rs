@@ -131,6 +131,7 @@
 //!     consider the frame to have ended, despite the fact that it didn't. I don't think there is a
 //!     way to handle this correctly using the current model, since the server side handler is
 //!     already running by the time the error happens.
+//!     Can we get away with just not sending a fin frame?
 //!
 //! - [ ] (6.\*) fail since the echo server doesn't check UTF-8
 //! - [ ] (12.\*, 13.\*) test compression, which we don't implement (yet)

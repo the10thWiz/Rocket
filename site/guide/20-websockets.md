@@ -4,6 +4,9 @@ Unlike traditional web requests, WebSockets allow bidirectional communication.
 This means that servers can send events to clients, which is often useful,
 especially for things like chat rooms.
 
+For this guide, at least a passing familiarity with WebSockets and the JS
+WebSocket API is assumed.
+
 ## Event handlers
 
 There are three types of events triggered during a WebSocket's lifetime. The only
@@ -11,9 +14,16 @@ required event is `message`, which is triggered for every incoming message. This
 is a simple echo example
 
 ```rust
+#[macro_use] extern crate rocket;
+
 #[message("/echo", data = "<data>")]
 async fn echo(data: Data, ws: Channel<'_>) {
-  ws.send(data).await;
+    ws.send(data).await;
+}
+
+#[launch]
+fn rocket() -> _ {
+    rocket::build().mount("/", routes![echo])
 }
 ```
 
@@ -24,9 +34,70 @@ request guards. Every request guard will work in a WebSocket channel, however th
 reverse is not always true. In fact, `Channel` can only be used a guard in
 WebSocket handlers.
 
+The above example is technically a complete example, but it's not particularly interesting.
+To add functionality, an index route that contains the HTML and JS needed to connect
+to the server can be added, such as the following
+
+```rust
+#[get("/")]
+fn index() -> Html<&'static str> {
+    Html(r#"<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>WebSocket Echo Server</title>
+    </head>
+    <body>
+        <h1>Echo Server</h1>
+        <p id="status">Connecting...</p>
+        <input type="text" id="text" />
+        <button type="button" id="send">Send</button>
+        <div id="lines"></div>
+        <script type="text/javascript">
+            const lines = document.getElementById('lines');
+            const text = document.getElementById('text');
+            const status = document.getElementById('status');
+            const ws = new WebSocket('ws://' + location.host + '/echo');
+            ws.onopen = function(e) {
+                status.innerText = 'Connected :)';
+                console.log(e);
+            };
+            ws.onclose = function(e) {
+                status.innerText = 'Disconnected :(';
+                lines.innerHTML = '';
+                console.log(e);
+            };
+            ws.onmessage = function(msg, e) {
+                const line = document.createElement('p');
+                line.innerText = msg.data;
+                lines.prepend(line);
+                console.log(e);
+            };
+            send.onclick = function(e) {
+                ws.send(text.value);
+                text.value = '';
+                console.log(e);
+            };
+        </script>
+    </body>
+</html>"#)
+}
+```
+
+### Authentication
+
+Any and all authentication should be done with Request Guards, just like
+everywhere else in Rocket. It is highly inadvisable to rely on `join` handlers,
+since it is possible for a client to connection without triggering a `join` handler.
+
+To avoid running costly authentication procedures for every message, the request
+guard can cache tokens in the requests local cache.
+
+See [`Request::local_cache`](@api/rocket/request/struct.Request.html#method.local_cache)
+for more information.
+
 ### Other events
 
-The other two events are `join` and `leave` events, triggered when a client connects
+The other two events `join` and `leave`, are triggered when a client connects
 and disconnects, respectively. They behave in much the same way as `message`,
 the main difference lies in how they handle the data attribute. `join` handlers
 cannot have a data attribute, and `leave` events require the data attribute to
@@ -41,23 +112,13 @@ be of the type `WebsocketStatus`.
 The current implementation allows the `message` handler to be optional, as long
 as there is a matching `join` handler to accept their connection.
 
-## Authentication
-
-Any and all authentication should be done with Request Guards, just like
-everywhere else in Rocket. It is highly inadvisable to rely on `join` handlers,
-since it is possible for a client to connection without triggering a `join` handler.
-
-To avoid running costly authentication procedures for every message, the request
-guard can cache tokens in the requests local cache.
-
-TODO: Example
-
 ### Mounting event handlers
 
 WebSocket Event Handlers are attached to Rocket in the same way as any other route.
 In fact, WebSocket Event Handlers actually also generate an HTTP route, to provide
-error responses. These default routes are given the lowest priority possible, to
-prevent collisions with existing routes.
+error responses. These default routes are given the lowest priority possible, so
+every other route will be tried first. The defualt handler just returns an
+UpgradeRequired status code, to indicate that the route is actually a WebSocket Route.
 
 ### Channel
 
@@ -70,12 +131,14 @@ The `send(message)` method on `Channel` takes any parameter that implements
 although the details of implementing `IntoMessage` are beyond the scope of this
 guide.
 
-## Broadcasts & Topics
+## Broadcasts & Inter-client communication
 
-To send a message to more than one client, use the `broadcast(message)` method.
-This will broadcast the message to every client connected to the same topic.
-Rocket uses the Uri used to connect as the topic. E.g., in the following
-example, the topic is `'/listen'`.
+The first example presented is kind of boring. All it does is send a message back
+to the client that sent it. To make it more interesting, we could instead broadcast
+the message to every client.
+
+Rocket provides the capability to broadcast to multiple clients, so all we need
+to do is change the `send` to `broadcast`.
 
 ```rust
 #[message("/listen", data = "<data>")]
@@ -84,12 +147,26 @@ async fn echo(data: Data, ws: Channel<'_>) {
 }
 ```
 
-This handler will broadcast every message recieved to every client connected to
-`'/listen'`.
+This turns our simple echo server into a rudimentary chat room. However, this
+leads to a natural question: what if you only want to send a message to some
+clients? Rocket provides a way to do this as well, via Topics. Topics are just
+the Url used to connect (`'/listen'` in this case). `broadcast` doesn't actually
+forward the message to every client, it only sends it clients connected to the
+same topic. In fact, to create a second room, we could add a second handler with
+a different Url, or we could mount the broadcast route in multiple places. The best
+option (and the one we will go with) is to simply make the echo route dynamic.
 
-Similarly, the `broadcast_to(topic, message)` method broadcasts to a message, but
-it broadcasts to the topic specified, rather than the one it's responding to. When
-possible, use the `uri!` macro to construct topics.
+```rust
+#[message("/<_>", data = "<data>")]
+async fn echo(data: Data, ws: Channel<'_>) {
+  ws.broadcast(data).await;
+}
+```
+
+The `<_>` route parameter will match anything, without requiring us to add a
+parameter to the handler. Now, if two client connects to `'/listen'`, they will
+still be able to see eachother's messages, but a client connected to `'/global'`
+can't see them.
 
 ### Broker
 
@@ -122,9 +199,9 @@ full specification can be found in
 ## Documentation and Guide todo
 
 - [x] Echo example
-  - [ ] Echo guide
+  - [x] Echo guide
 - [x] Broadcast example
-  - [ ] Broadcast guide
+  - [x] Broadcast guide
 - [ ] Multiplex example
   - [ ] Multiplex guide
 - [ ] Broker guide
