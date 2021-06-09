@@ -9,6 +9,7 @@ use crate::http::{uri, Method, MediaType};
 use crate::route::{Handler, RouteUri, BoxFuture};
 use crate::sentinel::Sentry;
 
+use super::WebSocketData;
 use super::{BoxFutureWs, WebSocketHandler};
 
 /// A request handling route.
@@ -348,7 +349,7 @@ pub struct StaticInfo {
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data) -> BoxFuture<'r>,
     /// The route's webSocket handler, i.e, the annotated function.
     pub websocket_handler: WebSocketEvent<
-        for<'r> fn(Arc<crate::channels::WebSocket<'r>>, crate::Data) -> BoxFutureWs<'r>
+        for<'r> fn(Arc<crate::channels::WebSocket<'r>>, WebSocketData<'r>) -> BoxFutureWs<'r>
     >,
     /// The route's rank, if any.
     pub rank: Option<isize>,

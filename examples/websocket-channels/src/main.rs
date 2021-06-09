@@ -4,7 +4,7 @@ use rocket::channels::Channel;
 use rocket::response::content::Html;
 use rocket::{State, Data};
 
-#[message("/listen", "<data>")]
+#[message("/listen", data = "<data>")]
 async fn listen(data: Data, ws: Channel<'_>) {
     ws.broadcast(data).await;
 }

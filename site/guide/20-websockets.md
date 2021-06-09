@@ -32,12 +32,23 @@ they don't have a data parameter.
 
 ! note: Join and Leave events are optional
 
-  As mentioned above, `join` and `leave` events are not required. In order for a
-  client to sucsefully connect, a `join` event handler must sucseed, or no join
-  handlers match. Be careful to make sure that the `join` handlers are at least as
-  broad as the `message` handlers.
+  As mentioned above, `join` and `leave` events are not required. If a `join` route
+  matches the request, then it must succeed for the client to connect. Otherwise,
+  the request guards for the message handler will be checked.
 
-In may be the case the `message` is optional, and a `join` handler may be enough.
+The current implementation allows the `message` handler to be optional, as long
+as there is a matching `join` handler to accept their connection.
+
+## Authentication
+
+Any and all authentication should be done with Request Guards, just like
+everywhere else in Rocket. It is highly inadvisable to rely on `join` handlers,
+since it is possible for a client to connection without triggering a `join` handler.
+
+To avoid running costly authentication procedures for every message, the request
+guard can cache tokens in the requests local cache.
+
+TODO: Example
 
 ### Mounting event handlers
 

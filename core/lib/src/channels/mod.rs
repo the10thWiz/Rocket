@@ -95,10 +95,13 @@
 //!
 //! - [ ] `data = `
 //! - [x] async `broadcast`s
+//! - [ ] Require message channel guards to pass
 //!
 //! ## Nice to haves
 //!
 //! - [ ] Check for vaid UTF-8 in Text messages
+//! - [ ] ChannelLocal (probably just RequestLocal)
+//! - [ ] Fairings for Rocket-multiplex
 //!
 //! ## Implementation details
 //!

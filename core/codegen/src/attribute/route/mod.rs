@@ -523,7 +523,7 @@ fn websocket_query_decls(route: &WebSocketRoute) -> Option<TokenStream> {
 fn websocket_request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, _log, FromWebSocket, _Err, Outcome, _Some
+        __req, __data, _request, _log, FromWebSocket, _Err, Outcome, _Some, WebSocketStatus
     );
 
     quote_spanned! { ty.span() =>
@@ -535,7 +535,7 @@ fn websocket_request_guard_decl(guard: &Guard) -> TokenStream {
             },
             #Outcome::Failure((__c, _e)) => {
                 #_log::warn_!("`{}` request guard failed: {:?}.", stringify!(#ty), _e);
-                return #Outcome::Failure(__c);
+                return #Outcome::Failure(#WebSocketStatus::from(__c));
             }
         };
     }
@@ -587,17 +587,17 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn websocket_data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome);
+    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, WebSocketData, WebSocketStatus);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req.request(), #__data).await {
             #Outcome::Success(_m) => _m,
             #Outcome::Forward(_d) => {
-                return #Outcome::Forward(_d);
+                return #Outcome::Forward(#WebSocketData::Message(_d));
             }
             #Outcome::Failure((_c, _e)) => {
                 #_log::error_!("`{}` message conversion failed: {:?}.", stringify!(#ty), _e);
-                return #Outcome::Failure(_c);
+                return #Outcome::Failure(#WebSocketStatus::from(_c));
             }
         };
     }
@@ -653,6 +653,7 @@ fn websocket_responder_outcome_expr(route: &WebSocketRoute) -> TokenStream {
         let _res = #user_handler_fn_name(#(#parameter_names),*) #_await;
         #Outcome::Success(())
     }
+    // TODO allow failure ?
 }
 
 fn websocket_sentinels_expr(route: &WebSocketRoute) -> TokenStream {
@@ -727,8 +728,46 @@ fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<Tok
     //let method = route.attr.method;
     let uri = route.attr.uri.to_string();
     let rank = Optional(route.attr.rank);
-    let format = Optional(route.attr.format.as_ref());
+    //let format = Optional(route.attr.format.as_ref());
 
+    let join = match event {
+        WebSocketEvent::Join => quote! {
+            #responder_outcome
+        },
+        WebSocketEvent::Message => quote! {
+            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+        },
+        WebSocketEvent::Leave => quote! {
+            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+        },
+    };
+
+    let message = match event {
+        WebSocketEvent::Join => quote! {
+            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+        },
+        WebSocketEvent::Message => quote! {
+            #data_guard
+
+            #responder_outcome
+        },
+        WebSocketEvent::Leave => quote! {
+            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+        },
+    };
+
+    let leave = match event {
+        WebSocketEvent::Join => quote! {
+            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+        },
+        WebSocketEvent::Message => quote! {
+            #Outcome::Failure(::rocket::channels::INTERNAL_SERVER_ERROR)
+        },
+        WebSocketEvent::Leave => quote! {
+            #responder_outcome
+        },
+    };
+    
     let event = match event {
         WebSocketEvent::Join => quote! {
             #WebSocketEvent::Join
@@ -755,15 +794,24 @@ fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<Tok
             fn into_info(self) -> #_route::StaticInfo {
                 fn monomorphized_function<'_b>(
                     #__req: #_Arc<#WebSocket<'_b>>,
-                    #__data: #Data
+                    #__data: #WebSocketData<'_b>
                 ) -> #_route::BoxFutureWs<'_b> {
                     #_Box::pin(async move {
                         #(#request_guards)*
                         #(#param_guards)*
                         #query_guards
-                        #data_guard
 
-                        #responder_outcome
+                        match #__data {
+                            #WebSocketData::Join => {
+                                #join
+                            },
+                            #WebSocketData::Message(#__data) => {
+                                #message
+                            },
+                            #WebSocketData::Leave(#__data) => {
+                                #leave
+                            }
+                        }
                     })
                 }
 
@@ -781,8 +829,8 @@ fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<Tok
                     method: #_http::Method::Get,
                     uri: #uri,
                     handler: route_handler,
-                    webSocket_handler: #event(monomorphized_function),
-                    format: #format,
+                    websocket_handler: #event(monomorphized_function),
+                    format: #_None,//#format,
                     rank: #rank,
                     sentinels: #sentinels,
                 }

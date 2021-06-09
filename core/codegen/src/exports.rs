@@ -103,8 +103,10 @@ define_exported_paths! {
     SmallVec => ::rocket::http::private::SmallVec,
     Status => ::rocket::http::Status,
     WebSocketEvent => ::rocket::route::WebSocketEvent,
+    WebSocketData => ::rocket::route::WebSocketData,
     FromWebSocket => ::rocket::channels::FromWebSocket,
     WebSocket => ::rocket::channels::WebSocket,
+    WebSocketStatus => ::rocket::channels::WebSocketStatus,
 }
 
 macro_rules! define_spanned_export {

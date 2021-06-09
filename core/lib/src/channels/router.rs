@@ -16,6 +16,7 @@ use websocket_codec::{ClientRequest, Opcode};
 
 use crate::channels::WebSocketMessage;
 use crate::channels::WebSocketStatus;
+use crate::route::WebSocketData;
 use crate::route::WebSocketEvent;
 use crate::route::WsOutcome;
 use crate::{Data, Request, Response, Rocket, Route, phase::Orbit};
@@ -130,13 +131,12 @@ impl WebSocketRouter {
         Ok(())
     }
 
-    async fn handle_message<'r, 'a: 'r>(
+    async fn handle_message<'r, 'a: 'r, 'b: 'r>(
         &'a self,
         event: Event,
         req: Arc<WebSocket<'r>>,
-        mut message: Data,
-    ) -> Result<(), Status> {
-        let mut forwarded = false;
+        mut message: WebSocketData<'b>,
+    ) -> Result<(), WebSocketStatus<'r>> {
         for route in self.routes.get(&event)
             .into_iter()
             .flat_map(|routes| routes.iter()) {
@@ -153,21 +153,36 @@ impl WebSocketRouter {
                     Some(WsOutcome::Forward(d)) => message = d,
                     Some(WsOutcome::Failure(s)) => return Err(s),
                     Some(WsOutcome::Success(())) => return Ok(()),
-                    None => return Err(Status::InternalServerError),
+                    None => return Err(super::INTERNAL_SERVER_ERROR),
                 }
-                forwarded = true;
             }
         }
-        if event == Event::Join && self.routes.get(&Event::Message)
-            .into_iter()
-            .flat_map(|routes| routes.iter()).next().is_some()
-            && !forwarded
-        {
-            // Succeed if there were no matching join handlers
-            Ok(())
-        } else {
-            Err(Status::NotFound)
+        // Join events that were never failed are attempted against the message
+        // handlers as Join events. This will not run the data guards or the function, but it will
+        // check all of the request and parameter guards
+        if event == Event::Join {
+            for route in self.routes.get(&Event::Message)
+                .into_iter()
+                .flat_map(|routes| routes.iter()) {
+                if route.matches(req.request()) {
+                    req.request().set_route(route);
+
+                    let name = route.name.as_deref();
+                    // Note: unwrap_ref may panic. This shouldn't ever happen, becuase every handler
+                    // that would panic should have been filtered out by `add_route`
+                    let handler = route.websocket_handler.unwrap_ref();
+                    let res = handle(name, || handler.handle(req.clone(), message)).await;
+                    // Successfully ran
+                    match res {
+                        Some(WsOutcome::Forward(d)) => message = d,
+                        Some(WsOutcome::Failure(s)) => return Err(s),
+                        Some(WsOutcome::Success(())) => return Ok(()),
+                        None => return Err(super::INTERNAL_SERVER_ERROR),
+                    }
+                }
+            }
         }
+        Err(WebSocketStatus::internal(404))
     }
 
     pub fn is_upgrade(&self, hyper_request: &hyper::Request<hyper::Body>) -> bool {
@@ -225,7 +240,7 @@ impl WebSocketRouter {
         let join = rocket.websocket_router.handle_message(
                 Event::Join,
                 channels[0].clone(),
-                Data::local(vec![])
+                WebSocketData::Join,
             ).await;
         match join {
             Ok(()) => {
@@ -233,7 +248,7 @@ impl WebSocketRouter {
                 rocket.send_response(response, tx).await;
             },
             Err(s) => {
-                let response = Self::handle_error(s);
+                let response = Self::handle_error(s.to_http().unwrap_or(Status::NotFound));
                 rocket.send_response(response, tx).await;
                 return;
             },
@@ -357,14 +372,14 @@ impl WebSocketRouter {
                 let _res = request.rocket().websocket_router.handle_message(
                         Event::Message,
                         request.clone(),
-                        data
+                        WebSocketData::Message(data)
                     ).await;
             }
             broker.unsubscribe_all(&ws).await;
             let _e = request.rocket().websocket_router.handle_message(
                     Event::Leave,
                     request.clone(),
-                    Data::local(vec![])
+                    WebSocketData::Leave(super::OK)
                 ).await;
         }
     }
@@ -408,7 +423,7 @@ impl WebSocketRouter {
                         let res = rocket.websocket_router.handle_message(
                             Event::Message,
                             request,
-                            data
+                            WebSocketData::Message(data)
                         ).await;
                         match res {
                             Ok(()) => (),
@@ -428,7 +443,7 @@ impl WebSocketRouter {
                                     let join = rocket.websocket_router.handle_message(
                                             Event::Join,
                                             new_request.clone(),
-                                            Data::local(vec![])
+                                            WebSocketData::Join,
                                         ).await;
                                     match join {
                                         Ok(()) => {
@@ -455,7 +470,7 @@ impl WebSocketRouter {
                                     let _leave = rocket.websocket_router.handle_message(
                                         Event::Leave,
                                         leave_req.clone(),
-                                        Data::local(vec![])
+                                        WebSocketData::Leave(super::OK)
                                     ).await;
                                     // TODO: handle errors in leave
                                 } else {
@@ -476,11 +491,8 @@ impl WebSocketRouter {
             let _e = rocket.websocket_router.handle_message(
                 Event::Leave,
                 subscriptions[0].clone(),
-                Data::local(vec![])
+                WebSocketData::Leave(super::OK)
             ).await;
-            // TODO implement Ping/Pong (not exposed to the user)
-            // TODO handle Close correctly (we should reply with Close,
-            // unless we initiated it)
         }
     }
 

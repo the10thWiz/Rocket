@@ -5,7 +5,7 @@ use rocket::response::content::Html;
 use rocket::{State, Data};
 use rocket::fs::FileServer;
 
-#[message("/listen/<_>", "<data>")]
+#[message("/listen/<_>", data = "<data>")]
 async fn listen(data: Data, ws: Channel<'_>) {
     ws.broadcast(data).await;
 }

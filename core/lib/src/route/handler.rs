@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::channels::WebSocket;
+use crate::channels::{WebSocket, WebSocketStatus};
 use crate::{Request, Data};
 use crate::response::{Response, Responder};
 use crate::http::Status;
@@ -14,9 +14,9 @@ pub type Outcome<'r> = crate::outcome::Outcome<Response<'r>, Status, Data>;
 pub type BoxFuture<'r, T = Outcome<'r>> = futures::future::BoxFuture<'r, T>;
 
 /// Type alias for the return type of a `WebSocketRoute`
-pub type WsOutcome = crate::outcome::Outcome<(), Status, Data>;
+pub type WsOutcome<'r> = crate::outcome::Outcome<(), WebSocketStatus<'r>, WebSocketData<'r>>;
 /// Type alias for the return type of a _raw_ WebSocket Route
-pub type BoxFutureWs<'r, T = WsOutcome> = futures::future::BoxFuture<'r, T>;
+pub type BoxFutureWs<'r, T = WsOutcome<'r>> = futures::future::BoxFuture<'r, T>;
 
 /// Trait implemented by [`Route`](crate::Route) request handlers.
 ///
@@ -175,6 +175,13 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
     }
 }
 
+/// Data wrapper for WebSocket connections
+pub enum WebSocketData<'r> {
+    Join,
+    Message(Data),
+    Leave(WebSocketStatus<'r>)
+}
+
 /// Trait type implemented by Rocket WebSocket handlers
 #[crate::async_trait]
 pub trait WebSocketHandler: CloneableWs + Send + Sync + 'static {
@@ -183,22 +190,21 @@ pub trait WebSocketHandler: CloneableWs + Send + Sync + 'static {
     ///
     /// The variant of `Outcome` returned by the returned `Future` determines
     /// what Rocket does next.
-    async fn handle<'r>(&self, request: Arc<WebSocket<'_>>, data: Data) -> WsOutcome;
+    async fn handle<'r>(&self, request: Arc<WebSocket<'r>>, data: WebSocketData<'r>) -> WsOutcome<'r>;
 }
 
 // We write this manually to avoid double-boxing.
 impl<F: Clone + Sync + Send + 'static> WebSocketHandler for F
-    where for<'x> F: Fn(Arc<WebSocket<'x>>, Data) -> BoxFutureWs<'x>,
+    where for<'x> F: Fn(Arc<WebSocket<'x>>, WebSocketData<'x>) -> BoxFutureWs<'x>,
 {
     #[inline(always)]
-    fn handle<'r, 'life0, 'life1, 'async_trait, 'a>(
+    fn handle<'r, 'life0, 'async_trait>(
         &'life0 self,
-        req: Arc<WebSocket<'a>>,
-        data: Data,
-    ) -> BoxFutureWs<'a>
+        req: Arc<WebSocket<'r>>,
+        data: WebSocketData<'r>,
+    ) -> BoxFutureWs<'r>
         where 'r: 'async_trait,
               'life0: 'async_trait,
-              'life1: 'async_trait,
               Self: 'async_trait,
     {
         self(req, data)
@@ -329,6 +335,7 @@ pub fn dummy_handler<'r>(r: &'r Request<'_>, _: Data) -> BoxFuture<'r> {
 mod private {
     pub trait Sealed {}
     impl<T: super::Handler + Clone> Sealed for T {}
+
     pub trait SealedWs {}
     impl<T: super::WebSocketHandler + Clone> SealedWs for T {}
 }

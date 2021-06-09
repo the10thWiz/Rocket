@@ -1,6 +1,7 @@
 use std::{borrow::Cow, string::FromUtf8Error};
 
 use bytes::{Bytes, BytesMut};
+use rocket_http::Status;
 
 /// A webSocket status code sent while closing the connection
 #[derive(Debug, Clone, Eq)]
@@ -14,6 +15,12 @@ impl<'a> PartialEq for WebSocketStatus<'a> {
     /// they are
     fn eq(&self, other: &Self) -> bool {
         self.code == other.code
+    }
+}
+
+impl<'a> std::fmt::Display for WebSocketStatus<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.code, self.reason)
     }
 }
 
@@ -86,6 +93,13 @@ impl<'a> WebSocketStatus<'a> {
         Self { code, reason }
     }
 
+    /// Internal method for creating status codes. This does not attach a reason, and allows codes
+    /// outside of the normal range to be created. This is primarily useful for creating Status
+    /// codes that represent HTTP statuses, and can later be converted into one.
+    pub(crate) fn internal(code: u16) -> Self {
+        Self { code, reason: Cow::Borrowed("") }
+    }
+
     /// Encodes this status code into a buffer
     ///
     /// Does not add any bytes to the buffer is `self` is not permitted to be returned by the
@@ -110,6 +124,26 @@ impl<'a> WebSocketStatus<'a> {
     /// Gets the code sent with this status
     pub fn reason(&'a self) -> &'a str {
         self.reason.as_ref()
+    }
+
+    pub(crate) fn to_http(&self) -> Result<Status, ()> {
+        match self.code {
+            0..=999 => Status::from_code(self.code).ok_or(()),
+            1000 => Ok(Status::Ok),
+            1002 => Ok(Status::BadRequest),
+            1011 => Ok(Status::InternalServerError),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<Status> for WebSocketStatus<'static> {
+    fn from(s: Status) -> Self {
+        match s.code {
+            200 => OK,
+            // TODO expand table
+            _ => NO_STATUS_CODE,
+        }
     }
 }
 
