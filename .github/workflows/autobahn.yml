@@ -25,7 +25,11 @@ jobs:
 
       # Runs a single command using the runners shell
       - name: Install autobahn client
-        run: pip install autobahn
+        run: pip install autobahntestsuite
       
       - name: Try to run server
-        run: cargo build
+        run: |
+          cd ${{ GITHUB_WORKSPACE }}/examples/websocket-echo/;
+          ROCKET_ADDRESS=0.0.0.0 cargo run
+      - name: Tests
+        run: wstest --help
