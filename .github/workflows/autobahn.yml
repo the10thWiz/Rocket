@@ -41,9 +41,10 @@ jobs:
 
       - name: Check Test Output
         run: |
-          for file in ${{ runner.temp }}/servers/*.json; do
+          cd ${{ runner.temp }}/servers
+          for file in *.json; do
             if [[ $file != "index.json" ]]; then
-              [[ $(jq ".behavior" $file) == "\"OK\"" ]]
+              echo $file
+              [[ $(jq ".behavior" $file) != "\"FAILED\"" ]]
             fi
           done
-        continue-on-error: true
