@@ -103,5 +103,7 @@ fn index() -> Html<&'static str> {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![listen, index, other]).mount("/scripts", FileServer::from("scripts/"))
+    rocket::build()
+        .mount("/", routes![listen, index, other])
+        .mount("/scripts", FileServer::from("scripts/"))
 }

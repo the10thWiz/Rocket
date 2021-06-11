@@ -588,7 +588,9 @@ fn websocket_param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn websocket_data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, WebSocketData, WebSocketStatus);
+    define_spanned_export!(ty.span() =>
+        _log, __req, __data, FromData, Outcome, WebSocketData, WebSocketStatus
+    );
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req.request(), #__data).await {
@@ -712,12 +714,20 @@ fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<Tok
 
     if let WebSocketEvent::Join = event {
         if let Some(guard) = route.data_guard {
-            return Err(Diagnostic::spanned(guard.fn_ident.span(), devise::Level::Error, "Join routes are not allowed to have a data attribute"));
+            return Err(Diagnostic::spanned(
+                    guard.fn_ident.span(),
+                    devise::Level::Error,
+                    "Join routes are not allowed to have a data attribute"
+                ));
         }
     }
 
     if route.handler.sig.output != ReturnType::Default {
-        return Err(Diagnostic::spanned(route.handler.sig.output.span(), devise::Level::Error, "WebSocket routes are not permitted to return values"));
+        return Err(Diagnostic::spanned(
+                route.handler.sig.output.span(),
+                devise::Level::Error,
+                "WebSocket routes are not permitted to return values"
+            ));
     }
 
     // Generate the declarations for all of the guards.
@@ -778,7 +788,7 @@ fn codegen_websocket(event: WebSocketEvent, route: WebSocketRoute) -> Result<Tok
             #responder_outcome
         },
     };
-    
+
     let event = match event {
         WebSocketEvent::Join => quote! {
             #WebSocketEvent::Join

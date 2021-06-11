@@ -194,14 +194,20 @@ impl WebSocketMessage {
     /// Converts this message into the internal parts
     ///
     /// See [`WebSocketMessage::from_parts`] for the reverse
-    pub(crate) fn into_parts(self) -> (FrameHeader, Option<Origin<'static>>, mpsc::Receiver<Bytes>) {
+    pub(crate) fn into_parts(self)
+        -> (FrameHeader, Option<Origin<'static>>, mpsc::Receiver<Bytes>)
+    {
         (self.header, self.topic, self.data)
     }
 
     /// Converts the internal parts into a webSocket message
     ///
     /// See [`WebSocketMessage::into_parts`] for the reverse
-    pub(crate) fn from_parts(header: FrameHeader, topic: Option<Origin<'static>>, data: mpsc::Receiver<Bytes>) -> Self {
+    pub(crate) fn from_parts(
+        header: FrameHeader,
+        topic: Option<Origin<'static>>,
+        data: mpsc::Receiver<Bytes>
+    ) -> Self {
         Self { header, topic, data, }
     }
 

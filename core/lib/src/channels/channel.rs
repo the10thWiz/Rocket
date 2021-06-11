@@ -132,7 +132,7 @@ impl WebSocketChannel {
             // least in the version I looked at). Since the writer and reader are executed
             // concurrently, but not in parallel (by the join! macro), they should never be polled
             // at the same time.
-            
+
             let recv_close = Arc::new(AtomicBool::new(false));
             let recv_close2 = recv_close.clone();
             let (ping_tx, ping_rx) = mpsc::channel(1);
@@ -345,7 +345,9 @@ impl WebSocketChannel {
                         if let Some(header) = running_header.take() {
                             // Prevent message from finishing if the closing handshake has already
                             // started
-                            if recv_close.load(atomic::Ordering::Acquire) && header.opcode() != u8::from(Opcode::Close) {
+                            if recv_close.load(atomic::Ordering::Acquire)
+                                && header.opcode() != u8::from(Opcode::Close)
+                            {
                                 break;
                             }
                             if header.mask().is_some() {
@@ -358,7 +360,10 @@ impl WebSocketChannel {
                                     header.opcode(),
                                     None,
                                     // .chain is used to add the length of the topic (if any)
-                                    parts.iter().map(|s| s.len()).chain(topic_buf.iter().map(|b| b.len() + 2)).sum::<usize>().into(),
+                                    parts.iter()
+                                        .map(|s| s.len())
+                                        .chain(topic_buf.iter().map(|b| b.len() + 2))
+                                        .sum::<usize>().into(),
                                 );
                             let _e = codec.encode(int_header, &mut write_buf);
                             let _e = write.write_all_buf(&mut write_buf).await;
@@ -399,7 +404,9 @@ impl WebSocketChannel {
                         // if opcode = close => always write
                         // if opcode != close, recv_close = false => write
                         // if opcode != close, recv_close = true => ignore
-                        if header.opcode() == u8::from(Opcode::Close) || !recv_close.load(atomic::Ordering::Acquire) {
+                        if header.opcode() == u8::from(Opcode::Close)
+                            || !recv_close.load(atomic::Ordering::Acquire)
+                        {
                             let int_header = FrameHeader::new(
                                     true,
                                     header.rsv(),

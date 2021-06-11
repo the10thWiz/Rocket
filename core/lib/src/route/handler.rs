@@ -193,7 +193,11 @@ pub trait WebSocketHandler: CloneableWs + Send + Sync + 'static {
     ///
     /// The variant of `Outcome` returned by the returned `Future` determines
     /// what Rocket does next.
-    async fn handle<'r>(&self, request: Arc<WebSocket<'r>>, data: WebSocketData<'r>) -> WsOutcome<'r>;
+    async fn handle<'r>(
+        &self,
+        request: Arc<WebSocket<'r>>,
+        data: WebSocketData<'r>
+    ) -> WsOutcome<'r>;
 }
 
 // We write this manually to avoid double-boxing.

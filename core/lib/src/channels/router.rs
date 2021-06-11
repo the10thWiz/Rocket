@@ -446,7 +446,11 @@ impl WebSocketRouter {
                                         ).await;
                                     match join {
                                         Ok(()) => {
-                                            broker.subscribe(new_request.topic(), Protocol::Multiplexed, &ws).await;
+                                            broker.subscribe(
+                                                new_request.topic(),
+                                                Protocol::Multiplexed,
+                                                &ws
+                                            ).await;
                                             subscriptions.push(new_request);
                                         },
                                         Err(s) => {
@@ -537,7 +541,8 @@ impl WebSocketRouter {
 
     async fn handle_control<'r>(mut data: Data) -> Result<MultiplexAction, &'static str> {
         // Take the first 512 bytes of the message - which must be the entire message
-        let message = String::from_utf8(data.take(512).await).map_err(|_| "INVALID\u{B7}Non UTF-8")?;
+        let message = String::from_utf8(data.take(512).await)
+            .map_err(|_| "INVALID\u{B7}Non UTF-8")?;
         let mut parts = message.split(MULTIPLEX_CONTROL_STR);
         let first = parts.next().ok_or("INVALID\u{B7}Improperly formatted message")?;
         if !first.is_empty() {// Err if the message did not start with the control char
