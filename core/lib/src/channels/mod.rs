@@ -127,11 +127,13 @@
 //!     this is not always the case. Based on some peliminary testing, is looks like 5.20 always
 //!     fails, but 5.19 occasionally passes. The only difference between the two cases is that 5.20
 //!     splits the messages up and sends them byte by byte.
-//! - [ ] (7.1.5) fails since Rocket will forward part of a message back. This is because Rocket will
+//! - [x] (7.1.5) fails since Rocket will forward part of a message back. This is because Rocket will
 //!     consider the frame to have ended, despite the fact that it didn't. I don't think there is a
 //!     way to handle this correctly using the current model, since the server side handler is
 //!     already running by the time the error happens.
-//!     Can we get away with just not sending a fin frame?
+//!     Can we get away with just not sending a fin frame? Yes! I added an atomic bool that tracks
+//!     whether we have recieved a close frame from the client, and just don't send any more frames
+//!     other than close frames.
 //!
 //! - [ ] (6.\*) fail since the echo server doesn't check UTF-8
 //! - [ ] (12.\*, 13.\*) test compression, which we don't implement (yet)

@@ -177,8 +177,11 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
 
 /// Data wrapper for WebSocket connections
 pub enum WebSocketData<'r> {
+    /// Represents the data provided to a Join handler
     Join,
+    /// Represents the data provided to a Message handler
     Message(Data),
+    /// Represents the data provided to a Leave handler
     Leave(WebSocketStatus<'r>)
 }
 

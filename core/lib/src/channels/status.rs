@@ -1,3 +1,14 @@
+//! WebSocket Status codes
+//!
+//! The RFC defines a number of specific status codes, in the 1000 range, which are provided as
+//! constants here. The RFC also defines ranges for the IANA to define status codes, and for
+//! private use. Status codes can be created and used as needed, within the RFC's definitions.
+//!
+//! There are a number of status codes, as well as some ranges of codes that the RFC specifically
+//! forbids servers from sending to clients. The `WebSocketStatus::encode` method implemenets this
+//! by printing an error to the console, and encoding `INTERNAL_SERVER_ERROR`, indicating to the
+//! client that something went wrong on the server.
+
 use std::{borrow::Cow, string::FromUtf8Error};
 
 use bytes::{Bytes, BytesMut};
@@ -106,7 +117,10 @@ impl<'a> WebSocketStatus<'a> {
     /// server
     pub(crate) fn encode(&self) -> Bytes {
         match self.code {
-            1005 | 1006 | 1010 | 1015 => return INTERNAL_SERVER_ERROR.encode(),
+            1005 | 1006 | 1010 | 1015 => {
+                error_!("Status code {} is not permitted to be sent by a server", self.code);
+                return INTERNAL_SERVER_ERROR.encode()
+            },
             _ => (),
         }
         //crate::log::info_!("Closing connection: {:?}", self);
