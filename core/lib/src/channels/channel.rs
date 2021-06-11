@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::Future;
 use rocket_http::ext::IntoOwned;
 use rocket_http::uri::Origin;
 use rocket_http::hyper::upgrade::Upgraded;
@@ -18,6 +19,7 @@ use tokio_util::codec::{Decoder, Encoder};
 use websocket_codec::Opcode;
 use websocket_codec::protocol::FrameHeader;
 use websocket_codec::protocol::FrameHeaderCodec;
+use state::Container;
 
 use crate::channels::MAX_BUFFER_SIZE;
 use crate::channels::rocket_multiplex::MULTIPLEX_CONTROL_CHAR;
@@ -531,7 +533,7 @@ impl Utf8Validator {
     fn fin(&self) -> bool {
         matches!(self, Self::Start)
     }
-//   Utf8Validator
+
     fn error(&self) -> bool {
         matches!(self, Self::Error)
     }
@@ -572,17 +574,19 @@ pub struct Channel<'r> {
     broker: Broker,
     uri: &'r Origin<'r>,
     protocol: Protocol,
+    cache: Arc<Container![Send + Sync]>,
 }
 
 impl<'r> Channel<'r> {
-    fn from(inner: InnerChannel, uri: &'r Origin<'r>) -> Self {
-        Self {
-            client: inner.client,
-            broker: inner.broker,
-            uri,
-            protocol: inner.protocol,
-        }
-    }
+    //fn from(inner: InnerChannel, uri: &'r Origin<'r>) -> Self {
+        //Self {
+            //client: inner.client,
+            //broker: inner.broker,
+            //uri,
+            //protocol: inner.protocol,
+            //cache,
+        //}
+    //}
 
     /// Sends a raw Message to the client
     pub(crate) async fn send_raw(&self, message: WebSocketMessage) {
@@ -622,6 +626,77 @@ impl<'r> Channel<'r> {
     pub async fn broadcast_to(&self, topic: &Origin<'_>, message: impl IntoMessage) {
         self.broker.send(topic, to_message(message)).await;
     }
+
+    /// Retrieves the cached value for type `T` from the channel-local cached
+    /// state of `self`. If no such value has previously been cached for this
+    /// request, `f` is called to produce the value which is subsequently
+    /// returned.
+    ///
+    /// Different values of the same type _cannot_ be cached without using a
+    /// proxy, wrapper type. To avoid the need to write these manually, or for
+    /// libraries wishing to store values of public types, use the
+    /// [`local_cache!`](crate::request::local_cache) macro to generate a
+    /// locally anonymous wrapper type, store, and retrieve the wrapped value
+    /// from request-local cache.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # let c = rocket::local::blocking::Client::debug_with(vec![]).unwrap();
+    /// # let request = c.get("/");
+    /// // The first store into local cache for a given type wins.
+    /// let value = request.local_cache(|| "hello");
+    /// assert_eq!(*request.local_cache(|| "hello"), "hello");
+    ///
+    /// // The following return the cached, previously stored value for the type.
+    /// assert_eq!(*request.local_cache(|| "goodbye"), "hello");
+    /// ```
+    #[inline]
+    pub fn local_cache<T, F>(&self, f: F) -> &T
+        where F: FnOnce() -> T,
+              T: Send + Sync + 'static
+    {
+        self.cache.try_get()
+            .unwrap_or_else(|| {
+                self.cache.set(f());
+                self.cache.get()
+            })
+    }
+
+    /// Retrieves the cached value for type `T` from the channel-local cached
+    /// state of `self`. If no such value has previously been cached for this
+    /// request, `fut` is `await`ed to produce the value which is subsequently
+    /// returned.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use rocket::Request;
+    /// # type User = ();
+    /// async fn current_user<'r>(request: &Request<'r>) -> User {
+    ///     // validate request for a given user, load from database, etc
+    /// }
+    ///
+    /// # rocket::async_test(async move {
+    /// # let c = rocket::local::asynchronous::Client::debug_with(vec![]).await.unwrap();
+    /// # let request = c.get("/");
+    /// let current_user = request.local_cache_async(async {
+    ///     current_user(&request).await
+    /// }).await;
+    /// # })
+    #[inline]
+    pub async fn local_cache_async<'a, T, F>(&'a self, fut: F) -> &'a T
+        where F: Future<Output = T>,
+              T: Send + Sync + 'static
+    {
+        match self.cache.try_get() {
+            Some(s) => s,
+            None => {
+                self.cache.set(fut.await);
+                self.cache.get()
+            }
+        }
+    }
 }
 
 #[crate::async_trait]
@@ -629,6 +704,14 @@ impl<'r> FromWebSocket<'r> for Channel<'r> {
     type Error = &'static str;
 
     async fn from_websocket(request: &'r WebSocket<'_>) -> Outcome<Self, Self::Error> {
-        Outcome::Success(Self::from(request.inner_channel(), request.topic()))
+        let inner = request.inner_channel();
+        Outcome::Success(Self {
+            client: inner.client,
+            broker: inner.broker,
+            uri: request.topic(),
+            protocol: inner.protocol,
+            cache: Arc::clone(&request.request().state.cache),
+        })
+        //Outcome::Success(Self::from(request.inner_channel(), request.topic()))
     }
 }

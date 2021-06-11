@@ -234,7 +234,7 @@ pub enum WebSocketEvent {
 pub struct WebSocketAttribute {
     #[meta(naked)]
     pub uri: RouteUri,
-    pub data: SpanWrapped<Dynamic>,
+    pub data: Option<SpanWrapped<Dynamic>>,
     //pub format: Option<MediaType>,
     pub rank: Option<isize>,
 }
@@ -296,7 +296,7 @@ impl WebSocketRoute {
         };
 
         // Remove the `SpanWrapped` layer and upgrade to a guard.
-        let data_guard = Some(attr.data.clone())
+        let data_guard = attr.data.clone()
             .map(|p| Route::upgrade_dynamic(p.value, &arguments))
             .and_then(|p| p.map_err(|e| diags.push(e.into())).ok());
 
