@@ -101,7 +101,7 @@
 //!
 //! ## Nice to haves
 //!
-//! - [ ] Check for vaid UTF-8 in Text messages
+//! - [x] Check for vaid UTF-8 in Text messages
 //! - [ ] ChannelLocal (probably just RequestLocal)
 //! - [ ] Fairings for Rocket-multiplex
 //!
@@ -119,7 +119,7 @@
 //! back. This means that pongs often don't arrive in the order Autobahn expects, and Rocket can
 //! start echoing a message before it has finished recieving it.
 //!
-//! - [ ] (5.19, 5.20) sometimes fail to send pongs & message in the correct order - this is likely a data
+//! - [x] (5.19, 5.20) sometimes fail to send pongs & message in the correct order - this is likely a data
 //!   race between reading and replying - it starts replying right away, before it's finished reading
 //!   the frame
 //!     Interestingly, the `Case Expectation` provided by Autobahn seems to indicate that our
@@ -127,6 +127,10 @@
 //!     this is not always the case. Based on some peliminary testing, is looks like 5.20 always
 //!     fails, but 5.19 occasionally passes. The only difference between the two cases is that 5.20
 //!     splits the messages up and sends them byte by byte.
+//!     Curiously, there is one line in channel.rs which effects these tests. When the timeout is
+//!     zero, 5.20 occasionally fails, when it is greater than zero, 5.19 occasionally fails.
+//!     Increeasing the timeout to 10+ms causes both to consitently fail. I don't think we can
+//!     expect consistent behaviour out of these test.
 //! - [x] (7.1.5) fails since Rocket will forward part of a message back. This is because Rocket will
 //!     consider the frame to have ended, despite the fact that it didn't. I don't think there is a
 //!     way to handle this correctly using the current model, since the server side handler is
@@ -135,7 +139,7 @@
 //!     whether we have recieved a close frame from the client, and just don't send any more frames
 //!     other than close frames.
 //!
-//! - [ ] (6.\*) fail since the echo server doesn't check UTF-8
+//! - [x] (6.\*) fail since the echo server doesn't check UTF-8
 //! - [ ] (12.\*, 13.\*) test compression, which we don't implement (yet)
 //!
 //! There are also a number of informational tests, which don't have correct behaviour specified by

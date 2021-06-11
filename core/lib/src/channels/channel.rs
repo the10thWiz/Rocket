@@ -141,6 +141,8 @@ impl WebSocketChannel {
                 let mut read_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
                 let (mut data_tx, data_rx) = mpsc::channel(3);
                 let mut data_rx = Some(data_rx);
+                let mut validator = Utf8Validator::new();
+                let mut utf8 = false;
                 loop {
                     let h = match codec.decode(&mut read_buf) {
                         Ok(Some(h)) => h,
@@ -157,8 +159,8 @@ impl WebSocketChannel {
                             }
                             continue;
                         },
-                        Err(_e) => {
-                            //error_!("WebSocket client broke protocol: {:?}", e);
+                        Err(e) => {
+                            error_!("WebSocket client broke protocol: {:?}", e);
                             Self::close(&broker_tx, status::PROTOCOL_ERROR).await;
                             break;
                         },
@@ -217,9 +219,11 @@ impl WebSocketChannel {
                     // If there is a frame to continue, it must be continued
                     if let Some(data_rx) = data_rx.take() {
                         if h.opcode() == 0x0 {
+                            error_!("Unexpected continue frame");
                             Self::close(&broker_tx, status::PROTOCOL_ERROR).await;
                             break;
                         } else {
+                            utf8 = h.opcode() == u8::from(Opcode::Text);
                             let message = WebSocketMessage::from_parts(h, None, data_rx);
                             let _e = message_tx.send(message).await;
                         }
@@ -230,7 +234,9 @@ impl WebSocketChannel {
                         data_tx = tx;
                         let message = WebSocketMessage::from_parts(h, None, rx);
                         let _e = message_tx.send(message).await;
+                        utf8 = false;
                     } else if h.opcode() != 0x0 {
+                        error_!("Expected continue frame");
                         Self::close(&broker_tx, status::PROTOCOL_ERROR).await;
                         break;
                     }
@@ -244,6 +250,11 @@ impl WebSocketChannel {
                                 *mask = mask.rotate_right(8);
                             }
                         }
+                        if utf8 && !validator.validate(&chunk) {
+                            error_!("WebSocket client sent Invalid UTF-8");
+                            Self::close(&broker_tx, status::INVALID_DATA_TYPE).await;
+                            break;
+                        }
                         remaining -= chunk.len();
                         let _e = data_tx.send(chunk.into()).await;
                         if read_buf.len() < remaining {
@@ -251,7 +262,20 @@ impl WebSocketChannel {
                             let _e = read.read_buf(&mut read_buf).await;
                         }
                     }
+                    if validator.error() {
+                        // Break above only breaks out of the inner loop
+                        break;
+                    }
                     if fin {
+                        if utf8 && !validator.fin() {
+                            error_!("WebSocket client sent Incomplete UTF-8");
+                            Self::close(&broker_tx, status::INVALID_DATA_TYPE).await;
+                            // Note that combining any two valid UTF-8 sequences must still be a
+                            // valid UTF-8 sequence. Therefore, the validator doesn't need to be
+                            // recreated. This is easy to see when looking at the implementation,
+                            // since the validator just holds the number of continue sequences seen
+                            break;
+                        }
                         // If this was the final frame, prepare for the next message
                         let (tx, rx) = mpsc::channel(3);
                         // explicitly drop data_tx
@@ -265,6 +289,10 @@ impl WebSocketChannel {
                         break;
                     }
                 }
+                // If we broke out at any point, we should set the flag to prevent messages in
+                // flight from sending invalid frames
+                recv_close.store(true, atomic::Ordering::Release);
+                // This return to try and prevent dropping early
                 read
             };
 
@@ -357,7 +385,7 @@ impl WebSocketChannel {
                                 break;
                             }
                         }else {
-                            todo!("")
+                            unreachable!()
                         }
                     }
                     // If no data was sent, we send the header with an empty body anyway
@@ -366,7 +394,10 @@ impl WebSocketChannel {
                             error_!("WebSocket messages should not be sent with masks");
                         }
                         // Only write the fin frame if a close hasn't been received
-                        if !(recv_close.load(atomic::Ordering::Acquire) && header.opcode() != u8::from(Opcode::Close)) {
+                        // if opcode = close => always write
+                        // if opcode != close, recv_close = false => write
+                        // if opcode != close, recv_close = true => ignore
+                        if header.opcode() == u8::from(Opcode::Close) || !recv_close.load(atomic::Ordering::Acquire) {
                             let int_header = FrameHeader::new(
                                     true,
                                     header.rsv(),
@@ -390,9 +421,9 @@ impl WebSocketChannel {
             };
             //let reader = tokio::spawn(reader);
             //let writer = tokio::spawn(writer);
-            let _e = join! {
-                writer,
+            let (_w, _r) = join! {
                 reader,
+                writer,
             };
         }
     }
@@ -423,6 +454,86 @@ impl WebSocketChannel {
                 },
             }
         }
+    }
+}
+
+enum Utf8Validator {
+    Start,
+    Continue,
+    ContinueTwo,
+    ContinueThree,
+    E0,
+    ED,
+    F0,
+    F4,
+    Error,
+}
+
+impl Utf8Validator {
+    fn new() -> Self {
+        Self::Start
+    }
+
+    fn set_error(&mut self) -> bool {
+        *self = Self::Error;
+        false
+    }
+
+    fn validate(&mut self, bytes: &[u8]) -> bool {
+        for b in bytes.iter() {
+            match self {
+                Self::Start => match b {
+                    0x00..=0x7F => (),
+                    0xC2..=0xDF => *self = Self::Continue,
+                    0xE1..=0xEC => *self = Self::ContinueTwo,
+                    0xEE..=0xEF => *self = Self::ContinueTwo,
+                    0xF1..=0xF3 => *self = Self::ContinueThree,
+                    0xE0 => *self = Self::E0,
+                    0xED => *self = Self::ED,
+                    0xF0 => *self = Self::F0,
+                    0xF4 => *self = Self::F4,
+                    _ => return self.set_error(),
+                }
+                Self::Continue => match b {
+                    0x80..=0xBF => *self = Self::Start,
+                    _ => return self.set_error(),
+                }
+                Self::ContinueTwo => match b {
+                    0x80..=0xBF => *self = Self::Continue,
+                    _ => return self.set_error(),
+                }
+                Self::ContinueThree => match b {
+                    0x80..=0xBF => *self = Self::ContinueTwo,
+                    _ => return self.set_error(),
+                }
+                Self::E0 => match b {
+                    0xA0..=0xBF => *self = Self::Continue,
+                    _ => return self.set_error(),
+                },
+                Self::ED => match b {
+                    0x80..=0x9F => *self = Self::Continue,
+                    _ => return self.set_error(),
+                },
+                Self::F0 => match b {
+                    0x90..=0xBF => *self = Self::ContinueTwo,
+                    _ => return self.set_error(),
+                },
+                Self::F4 => match b {
+                    0x80..=0x8F => *self = Self::ContinueTwo,
+                    _ => return self.set_error(),
+                },
+                Self::Error => return false,
+            }
+        }
+        true
+    }
+
+    fn fin(&self) -> bool {
+        matches!(self, Self::Start)
+    }
+//   Utf8Validator
+    fn error(&self) -> bool {
+        matches!(self, Self::Error)
     }
 }
 
