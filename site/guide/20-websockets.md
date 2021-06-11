@@ -166,14 +166,24 @@ async fn echo(data: Data, ws: Channel<'_>) {
 The `<_>` route parameter will match anything, without requiring us to add a
 parameter to the handler. Now, if two client connects to `'/listen'`, they will
 still be able to see eachother's messages, but a client connected to `'/global'`
-can't see them.
+(or any other url) can't see them.
 
 ### Broker
 
 It is not possible to get a `Channel` outside of an Event Handler. This is where
 the `Broker` comes in. It only has the `broadcast_to` method, but it can be extracted
 from the Rocket instance anywhere in the application. It is also a Request Guard,
-for convience when sending messages based on requests.
+for convience when sending messages based on HTTP requests.
+
+## Message caching and Re-sending
+
+Rocket does not perform any caching or automatic retry of messages. Rocket only attempts
+to send the message once, so it is quite possible for a client to miss a message.
+
+Both of these issues are typically solved by saving the messages to a database of
+some kind, and providing an HTTP route to get messages that have been sent
+previously. Then, if a client did not recieve a message, or wishes to get
+previous messages, they can use the HTTP route to get them.
 
 ## Rocket-Multiplex
 
