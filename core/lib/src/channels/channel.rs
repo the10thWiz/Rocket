@@ -130,8 +130,12 @@ impl WebSocketChannel {
             // least in the version I looked at). Since the writer and reader are executed
             // concurrently, but not in parallel (by the join! macro), they should never be polled
             // at the same time.
+            
+            let recv_close = Arc::new(AtomicBool::new(false));
+            let recv_close2 = recv_close.clone();
             let (ping_tx, ping_rx) = mpsc::channel(1);
             let reader = async move {
+                let recv_close = recv_close;
                 let mut codec = websocket_codec::protocol::FrameHeaderCodec;
                 let mut read = read;
                 let mut read_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
@@ -162,7 +166,9 @@ impl WebSocketChannel {
                     // A frame has been decoded
                     // Save some attributes
                     let fin = h.fin();
-                    let close = h.opcode() == u8::from(Opcode::Close);
+                    if h.opcode() == u8::from(Opcode::Close) {
+                        recv_close.store(true, atomic::Ordering::Release);
+                    }
                     let mut mask: Option<u32> = h.mask().map(|m| m.into());
                     let mut remaining = if let Ok(r) = usize::try_from(h.data_len()) {
                         r
@@ -255,7 +261,7 @@ impl WebSocketChannel {
                         data_rx = Some(rx);
                     }
                     // If this was a close frame, stop recieving messages
-                    if close {
+                    if recv_close.load(atomic::Ordering::Acquire) {
                         break;
                     }
                 }
@@ -264,6 +270,7 @@ impl WebSocketChannel {
 
             let writer = async move {
                 // Explicit moves - probably not needed
+                let recv_close = recv_close2;
                 let mut write = write;
                 let mut ping_rx = ping_rx;
                 let mut codec = websocket_codec::protocol::FrameHeaderCodec;
@@ -294,7 +301,9 @@ impl WebSocketChannel {
                             // if the duration is zero, the rx will be polled at least once.
                             // However, because rx has backpressure, we want to suspend the current
                             // taks and allow new, ready chunks to be added.
-                            match timeout(Duration::from_millis(3), rx.recv()).await {
+                            // However, the backpressure can be taken advantage of to make 5.19 &
+                            // 5.20 pass
+                            match timeout(Duration::from_millis(0), rx.recv()).await {
                                 Ok(Some(chunk)) => parts.push(chunk),
                                 Ok(None) => {
                                     fin = true;
@@ -304,6 +313,11 @@ impl WebSocketChannel {
                             }
                         }
                         if let Some(header) = running_header.take() {
+                            // Prevent message from finishing if the closing handshake has already
+                            // started
+                            if recv_close.load(atomic::Ordering::Acquire) && header.opcode() != u8::from(Opcode::Close) {
+                                break;
+                            }
                             if header.mask().is_some() {
                                 error_!("WebSocket messages should not be sent with masks");
                             }
@@ -351,15 +365,18 @@ impl WebSocketChannel {
                         if header.mask().is_some() {
                             error_!("WebSocket messages should not be sent with masks");
                         }
-                        let int_header = FrameHeader::new(
-                                true,
-                                header.rsv(),
-                                header.opcode(),
-                                None,
-                                0usize.into(),
-                            );
-                        let _e = codec.encode(int_header, &mut write_buf);
-                        let _e = write.write_all_buf(&mut write_buf).await;
+                        // Only write the fin frame if a close hasn't been received
+                        if !(recv_close.load(atomic::Ordering::Acquire) && header.opcode() != u8::from(Opcode::Close)) {
+                            let int_header = FrameHeader::new(
+                                    true,
+                                    header.rsv(),
+                                    header.opcode(),
+                                    None,
+                                    0usize.into(),
+                                );
+                            let _e = codec.encode(int_header, &mut write_buf);
+                            let _e = write.write_all_buf(&mut write_buf).await;
+                        }
                     }
                     if close_sent.load(atomic::Ordering::Acquire) {
                         break;
@@ -368,6 +385,7 @@ impl WebSocketChannel {
                 if !close_sent.load(atomic::Ordering::Acquire) {
                     warn_!("Writer task did not send close");
                 }
+                let _e = write.shutdown().await;
                 write
             };
             //let reader = tokio::spawn(reader);
