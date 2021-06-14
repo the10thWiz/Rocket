@@ -3,8 +3,11 @@
 //! WebSocket Routes are very similar to normal routes, and have many of the same properties.
 //!
 //! A simple echo handler:
-//! ```ignore
-//! #[message("/echo", "<data>")]
+//! ```rust
+//! # #[macro_use] extern crate rocket;
+//! # use rocket::channels::Channel;
+//! # use rocket::Data;
+//! #[message("/echo", data = "<data>")]
 //! async fn echo(data: Data, websocket: Channel<'_>) {
 //!     websocket.send(data).await;
 //! }

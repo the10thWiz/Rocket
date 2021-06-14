@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -585,16 +586,6 @@ pub struct Channel<'r> {
 }
 
 impl<'r> Channel<'r> {
-    //fn from(inner: InnerChannel, uri: &'r Origin<'r>) -> Self {
-        //Self {
-            //client: inner.client,
-            //broker: inner.broker,
-            //uri,
-            //protocol: inner.protocol,
-            //cache,
-        //}
-    //}
-
     /// Sends a raw Message to the client
     pub(crate) async fn send_raw(&self, message: WebSocketMessage) {
         let _e = self.client.send(message).await;
@@ -634,74 +625,31 @@ impl<'r> Channel<'r> {
         self.broker.send(topic, to_message(message)).await;
     }
 
-    /// Retrieves the cached value for type `T` from the channel-local cached
-    /// state of `self`. If no such value has previously been cached for this
-    /// request, `f` is called to produce the value which is subsequently
-    /// returned.
-    ///
-    /// Different values of the same type _cannot_ be cached without using a
-    /// proxy, wrapper type. To avoid the need to write these manually, or for
-    /// libraries wishing to store values of public types, use the
-    /// [`local_cache!`](crate::request::local_cache) macro to generate a
-    /// locally anonymous wrapper type, store, and retrieve the wrapped value
-    /// from request-local cache.
-    ///
-    /// # Example
+    /// Creates a ChannelLocal value. It can be retrieved later using `ChannelLocal` as a request
+    /// guard.
     ///
     /// ```rust
-    /// # let c = rocket::local::blocking::Client::debug_with(vec![]).unwrap();
-    /// # let request = c.get("/");
-    /// // The first store into local cache for a given type wins.
-    /// let value = request.local_cache(|| "hello");
-    /// assert_eq!(*request.local_cache(|| "hello"), "hello");
-    ///
-    /// // The following return the cached, previously stored value for the type.
-    /// assert_eq!(*request.local_cache(|| "goodbye"), "hello");
-    /// ```
-    #[inline]
-    pub fn local_cache<T, F>(&self, f: F) -> &T
-        where F: FnOnce() -> T,
-              T: Send + Sync + 'static
-    {
-        self.cache.try_get()
-            .unwrap_or_else(|| {
-                self.cache.set(f());
-                self.cache.get()
-            })
-    }
-
-    /// Retrieves the cached value for type `T` from the channel-local cached
-    /// state of `self`. If no such value has previously been cached for this
-    /// request, `fut` is `await`ed to produce the value which is subsequently
-    /// returned.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use rocket::Request;
-    /// # type User = ();
-    /// async fn current_user<'r>(request: &Request<'r>) -> User {
-    ///     // validate request for a given user, load from database, etc
+    /// #[message("/<_>", data = "<message>", rank = 2)]
+    /// async fn set_username(message: String, ws: Channel<'_>) {
+    ///     ws.create_local(|| message);
     /// }
     ///
-    /// # rocket::async_test(async move {
-    /// # let c = rocket::local::asynchronous::Client::debug_with(vec![]).await.unwrap();
-    /// # let request = c.get("/");
-    /// let current_user = request.local_cache_async(async {
-    ///     current_user(&request).await
-    /// }).await;
-    /// # })
-    #[inline]
-    pub async fn local_cache_async<'a, T, F>(&'a self, fut: F) -> &'a T
-        where F: Future<Output = T>,
-              T: Send + Sync + 'static
-    {
-        match self.cache.try_get() {
-            Some(s) => s,
-            None => {
-                self.cache.set(fut.await);
-                self.cache.get()
-            }
+    /// #[message("/<_>", data = "<message>")]
+    /// async fn message(message: String, ws: Channel<'_>, username: &ChannelLocal<String>) {
+    /// }
+    /// ```
+    ///
+    /// This function does nothing if the value has been previously set. Like the
+    /// `Request::local_cache`, this can only store one value of any given type.
+    ///
+    /// # Note
+    ///
+    /// This method uses the same cache as the Request, so overlap will cause issues. Wrapper types
+    /// are the recommended solution to avoid overlap.
+    pub fn create_local<T: Send + Sync + 'static>(&self, f: impl Fn() -> T) {
+        match self.cache.try_get::<T>() {
+            Some(_) => (),
+            None => {self.cache.set(ChannelLocal(f()));},
         }
     }
 }
@@ -719,6 +667,53 @@ impl<'r> FromWebSocket<'r> for Channel<'r> {
             protocol: inner.protocol,
             cache: Arc::clone(&request.request().state.cache),
         })
-        //Outcome::Success(Self::from(request.inner_channel(), request.topic()))
+    }
+}
+
+/// A ChannelLocal value. This type is used to wrap types that should be stored in the local cache,
+/// and apply across a channel's lifetime.
+///
+/// For convience, `ChannelLocal` implements `FromWebSocket`, and only succeeds if the value has
+/// been previously set. This allows the creation of a sort of state machine, where a connection
+/// can transition from one state to another by adding a ChannelLocal variable. For example,
+/// authentication on a Channel can be handled after connecting like this:
+///
+/// ```rust
+/// struct UserInfo { name: String, /* fields */ }
+///
+/// #[message("/<_>", data = "<message>")]
+/// async fn message(message: String, ws: Channel<'_>, username: &ChannelLocal<UserInfo>) {
+///     // Actual message handling
+/// }
+///
+/// #[message("/<_>", data = "<message>", rank = 2)]
+/// async fn set_username(message: String, ws: Channel<'_>) {
+///     ws.create_local(|| UserInfo { name, /* fields */ });
+/// }
+/// ```
+///
+/// The first handler can only be run if the channel already has a `UserInfo` associated with
+/// it. The second handler will get every message before the `UserInfo` is attached.
+///
+/// TODO: Maybe prevent them from recieving broadcasts?
+struct ChannelLocal<T>(T);
+
+#[crate::async_trait]
+impl<'r, T: Send + Sync + 'static> FromWebSocket<'r> for &'r ChannelLocal<T> {
+    type Error = ();
+
+    async fn from_websocket(request: &'r WebSocket<'_>) -> Outcome<Self, Self::Error> {
+        match request.request().state.cache.try_get::<ChannelLocal<T>>() {
+            Some(s) => Outcome::Success(s),
+            None => Outcome::Forward(()),
+        }
+    }
+}
+
+impl<T> Deref for ChannelLocal<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

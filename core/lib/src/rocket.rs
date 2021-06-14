@@ -607,6 +607,9 @@ impl Rocket<Ignite> {
     /// # Example
     ///
     /// ```rust,no_run
+    /// # use std::time::Duration;
+    /// use rocket::tokio::{self, time};
+    ///
     /// #[rocket::main]
     /// async fn main() -> Result<(), rocket::Error> {
     ///     let rocket = rocket::build().ignite().await?;
@@ -724,6 +727,9 @@ impl Rocket<Orbit> {
     /// # Example
     ///
     /// ```rust,no_run
+    /// # use std::time::Duration;
+    /// use rocket::tokio::{self, time};
+    ///
     /// #[rocket::main]
     /// async fn main() -> Result<(), rocket::Error> {
     ///     let rocket = rocket::build().ignite().await?;
