@@ -79,6 +79,7 @@ impl Collide for Route {
             && self.rank == other.rank
             && paths_collide(self, other)
             && formats_collide(self, other)
+            && self.websocket_handler.collides(&other.websocket_handler)
     }
 }
 
