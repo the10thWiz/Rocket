@@ -9,7 +9,7 @@ use quote::ToTokens;
 
 use crate::proc_macro_ext::StringLit;
 use crate::syn_ext::{IdentExt, TypeExt as _};
-use crate::http_codegen::{Method, Optional};
+use crate::http_codegen::{Method, Optional, WebSocketEvent};
 use crate::attribute::param::Guard;
 
 use self::parse::{Route, Attribute, MethodAttribute};
@@ -113,11 +113,11 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 fn request_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, _log, FromRequest, Outcome
+        __req, __data, _request, _log, FromRequest, FromWebSocket, Outcome
     );
 
     let conversion = if websocket {
-        quote!(<#ty as #FromRequest>::from_request(#__req))
+        quote!(<#ty as #FromWebSocket>::from_websocket(#__req))
     } else {
         quote!(<#ty as #FromRequest>::from_request(#__req))
     };
@@ -371,6 +371,7 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
             fn into_info(self) -> #_route::StaticInfo {
                 #function
 
+                #[allow(dead_code)]
                 fn upgrade_required<'__r>(
                     #__req: &'__r #Request<'_>,
                     #__data: #Data<'__r>,
@@ -452,6 +453,51 @@ pub fn route_attribute<M: Into<Option<crate::http::Method>>>(
 ) -> TokenStream {
     let result = match method.into() {
         Some(method) => incomplete_route(method, args.into(), input.into()),
+        None => complete_route(args.into(), input.into())
+    };
+
+    result.unwrap_or_else(|diag| diag.emit_as_item_tokens())
+}
+
+fn incomplete_ws_route(
+    method: WebSocketEvent,
+    args: TokenStream,
+    input: TokenStream
+) -> Result<TokenStream> {
+    let method_str = method.to_string().to_lowercase();
+    // FIXME(proc_macro): there should be a way to get this `Span`.
+    let method_span = StringLit::new(format!("#[{}]", method), Span::call_site())
+        .subspan(2..2 + method_str.len());
+
+    let method_ident = syn::Ident::new(&method_str, method_span.into());
+
+    let function: syn::ItemFn = syn::parse2(input)
+        .map_err(|e| Diagnostic::from(e))
+        .map_err(|d| d.help(format!("#[{}] can only be used on functions", method_str)))?;
+
+    let full_attr = quote!(#method_ident(#args));
+    let method_attribute = MethodAttribute::from_meta(&syn::parse2(full_attr)?)?;
+
+    let attribute = Attribute {
+        method: SpanWrapped {
+            full_span: method_span, key_span: None, span: method_span, value: method,
+        },
+        uri: method_attribute.uri,
+        data: method_attribute.data,
+        format: method_attribute.format,
+        rank: method_attribute.rank,
+    };
+
+    codegen_route(Route::from(attribute, function)?)
+}
+
+pub fn websocket_attribute<M: Into<Option<WebSocketEvent>>>(
+    method: M,
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream
+) -> TokenStream {
+    let result = match method.into() {
+        Some(method) => incomplete_ws_route(method, args.into(), input.into()),
         None => complete_route(args.into(), input.into())
     };
 

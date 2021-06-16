@@ -89,6 +89,7 @@ define_exported_paths! {
     Outcome => ::rocket::outcome::Outcome,
     FromForm => ::rocket::form::FromForm,
     FromRequest => ::rocket::request::FromRequest,
+    FromWebSocket => ::rocket::request::FromWebSocket,
     FromData => ::rocket::data::FromData,
     FromSegments => ::rocket::request::FromSegments,
     FromParam => ::rocket::request::FromParam,
