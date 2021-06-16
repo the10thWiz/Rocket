@@ -1,6 +1,6 @@
 #[macro_use] extern crate rocket;
 
-use rocket::channels::Channel;
+use rocket::websocket::Channel;
 use rocket::response::content::Html;
 use rocket::Data;
 
