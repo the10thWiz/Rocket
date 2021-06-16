@@ -8,6 +8,8 @@ use crate::http::{uri, Method, MediaType};
 use crate::route::{Handler, RouteUri, BoxFuture};
 use crate::sentinel::Sentry;
 
+use super::WebSocketHandler;
+
 /// A request handling route.
 ///
 /// A route consists of exactly the information in its fields. While a `Route`
@@ -183,7 +185,7 @@ pub struct Route {
     /// The function that should be called when the route matches.
     pub handler: Box<dyn Handler>,
     /// The function that should be called when a websocket event matches
-    pub websocket_handler: WebSocketEvent<()>,
+    pub websocket_handler: WebSocketEvent<Box<dyn WebSocketHandler>>,
     /// The route URI.
     pub uri: RouteUri<'static>,
     /// The rank of this route. Lower ranks have higher priorities.
@@ -383,7 +385,7 @@ impl From<StaticInfo> for Route {
             name: Some(info.name.into()),
             method: info.method,
             handler: Box::new(info.handler),
-            websocket_handler: info.websocket_handler.map(|h| {Box::new(h); ()}),// TODO
+            websocket_handler: info.websocket_handler.map(|h| Box::new(h) as Box<_>),
             rank: info.rank.unwrap_or_else(|| uri.default_rank()),
             format: info.format,
             sentinels: info.sentinels.into_iter().collect(),
@@ -427,6 +429,13 @@ impl<T> WebSocketEvent<T> {
             (Self::Message(_), Self::Message(_)) => true,
             (Self::Leave(_), Self::Leave(_)) => true,
             _ => false,
+        }
+    }
+
+    pub fn unwrap_ref(&self) -> &T {
+        match self {
+            Self::Join(t) | Self::Message(t) | Self::Leave(t) => t,
+            Self::None => panic!("WebSocketEvent::None is not a valid websocket event"),
         }
     }
 }

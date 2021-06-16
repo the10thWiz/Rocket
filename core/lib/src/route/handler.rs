@@ -304,6 +304,25 @@ pub trait WebSocketHandler: CloneableWS + Send + Sync + 'static {
     async fn handle<'r>(&self, request: &'r Request<'_>, data: Data<'r>) -> Outcome<'r>;
 }
 
+// We write this manually to avoid double-boxing.
+impl<F: Clone + Sync + Send + 'static> WebSocketHandler for F
+    where for<'x> F: Fn(&'x Request<'_>, Data<'x>) -> BoxFuture<'x>,
+{
+    #[inline(always)]
+    fn handle<'r, 'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        req: &'r Request<'life1>,
+        data: Data<'r>,
+    ) -> BoxFuture<'r>
+        where 'r: 'async_trait,
+              'life0: 'async_trait,
+              'life1: 'async_trait,
+              Self: 'async_trait,
+    {
+        self(req, data)
+    }
+}
+
 mod private {
     pub trait Sealed {}
     impl<T: super::Handler + Clone> Sealed for T {}
