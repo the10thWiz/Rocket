@@ -113,11 +113,11 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 fn request_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, _log, FromRequest, FromWebSocket, Outcome
+        __req, __data, _request, _log, FromRequest, FromWebSocket, Outcome, __ws
     );
 
     let conversion = if websocket {
-        quote!(<#ty as #FromWebSocket>::from_websocket(#__req))
+        quote!(<#ty as #FromWebSocket>::from_websocket(#__req, #__ws))
     } else {
         quote!(<#ty as #FromRequest>::from_request(#__req))
     };
@@ -314,10 +314,17 @@ fn monomorphized_function(route: &Route) -> TokenStream {
     
     let responder_outcome = responder_outcome_expr(&route);
 
+    let websocket_param = if route.attr.method.is_websocket() {
+        quote!(#__ws: &'__w #WebSocket<'_>,)
+    } else {
+        quote!()
+    };
+
     quote! {
-        fn monomorphized_function<'__r>(
+        fn monomorphized_function<'__r, '__w>(
             #__req: &'__r #Request<'_>,
             #__data: #Data<'__r>,
+            #websocket_param
         ) -> #_route::BoxFuture<'__r> {
             #_Box::pin(async move {
                 #(#request_guards)*

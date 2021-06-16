@@ -1,3 +1,4 @@
+use crate::websocket::websocket::WebSocket;
 use crate::{Request, Data};
 use crate::response::{Response, Responder};
 use crate::http::Status;
@@ -301,25 +302,28 @@ pub trait WebSocketHandler: CloneableWS + Send + Sync + 'static {
     /// generate a response. Otherwise, if the return value is `Forward(Data)`,
     /// the next matching route is attempted. If there are no other matching
     /// routes, the `404` error catcher is invoked.
-    async fn handle<'r>(&self, request: &'r Request<'_>, data: Data<'r>) -> Outcome<'r>;
+    async fn handle<'r>(&self, request: &'r Request<'_>, data: Data<'r>, websocket: &WebSocket<'_>) -> Outcome<'r>;
 }
 
 // We write this manually to avoid double-boxing.
 impl<F: Clone + Sync + Send + 'static> WebSocketHandler for F
-    where for<'x> F: Fn(&'x Request<'_>, Data<'x>) -> BoxFuture<'x>,
+    where for<'x> F: Fn(&'x Request<'_>, Data<'x>, &WebSocket<'_>) -> BoxFuture<'x>,
 {
     #[inline(always)]
-    fn handle<'r, 'life0, 'life1, 'async_trait>(
+    fn handle<'r, 'life0, 'life1, 'life2, 'life3, 'async_trait>(
         &'life0 self,
         req: &'r Request<'life1>,
         data: Data<'r>,
+        websocket: &'life2 WebSocket<'life3>
     ) -> BoxFuture<'r>
         where 'r: 'async_trait,
               'life0: 'async_trait,
               'life1: 'async_trait,
+              'life2: 'async_trait,
+              'life3: 'async_trait,
               Self: 'async_trait,
     {
-        self(req, data)
+        self(req, data, websocket)
     }
 }
 

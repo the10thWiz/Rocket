@@ -9,6 +9,8 @@ pub(crate) mod channel;
 pub(crate) mod message;
 pub(crate) mod status;
 
+pub mod websocket;
+
 pub use channel::Channel;
 
 /// Soft maximum for chunks reasons

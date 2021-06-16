@@ -31,6 +31,7 @@ use state::Container;
 
 use crate::Request;
 use crate::request::{FromWebSocket, Outcome};
+use crate::websocket::websocket::WebSocket;
 
 use super::message::WebSocketMessage;
 //use super::FromWebSocket;
@@ -590,10 +591,11 @@ impl<'r> Channel<'r> {
 }
 
 #[crate::async_trait]
-impl<'r> FromWebSocket<'r> for Channel<'r> {
+impl<'r, 'w> FromWebSocket<'r, 'w> for Channel<'r> {
     type Error = ();
 
-    async fn from_websocket(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+    async fn from_websocket(request: &'r Request<'_>, topic: &'w WebSocket<'_>) -> Outcome<Self, Self::Error> {
+        info_!("{}", topic.topic());
         Outcome::Forward(())
     }
 }

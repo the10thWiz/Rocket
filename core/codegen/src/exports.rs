@@ -66,6 +66,7 @@ define_exported_paths! {
     __data => __data,
     __error => __error,
     __trail => __trail,
+    __ws => __ws,
     _request => ::rocket::request,
     _response => ::rocket::response,
     _route => ::rocket::route,
@@ -104,6 +105,7 @@ define_exported_paths! {
     Status => ::rocket::http::Status,
 
     WebSocketEvent => ::rocket::route::WebSocketEvent,
+    WebSocket => ::rocket::websocket::websocket::WebSocket,
 }
 
 macro_rules! define_spanned_export {

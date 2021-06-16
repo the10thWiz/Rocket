@@ -15,6 +15,7 @@ use crate::websocket::WebSocketEvent;
 use crate::websocket::WebsocketUpgrade;
 use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
+use crate::websocket::websocket::WebSocket;
 use crate::{Rocket, Orbit, Request, Response, Data, route};
 use crate::form::Form;
 use crate::outcome::Outcome;
@@ -109,12 +110,12 @@ async fn hyper_service_fn(
             // req.clone() is nessecary since the request is borrowed to hande the response. This
             // copy can (and will) outlive the actual request, but will not outlive the websocket
             // connection.
-            let req_copy = req.clone();
+            let mut req_copy = req.clone();
             // I don't know if I need to pin it, but I think it's a good idea
             let (accept, upgrade) = upgrade.split();
             let r = rocket.dispatch_ws(token, &mut req, accept).await;
             rocket.send_response(r, tx).await;
-            rocket.ws_event_loop(&req_copy, upgrade).await;
+            rocket.ws_event_loop(&mut req_copy, upgrade).await;
         } else {
             let r = rocket.dispatch(token, &mut req, data).await;
             rocket.send_response(r, tx).await;
@@ -432,7 +433,8 @@ impl Rocket<Orbit> {
         request: &'r Request<'s>,
         mut data: Data<'r>,
         event: WebSocketEvent,
-    ) -> route::Outcome<'r> {
+        websocket: &WebSocket<'_>,
+    ) {
         // Go through the list of matching routes until we fail or succeed.
         for route in self.router.route_event(request, event) {
             // Retrieve and set the requests parameters.
@@ -440,7 +442,7 @@ impl Rocket<Orbit> {
             request.set_route(route);
 
             let name = route.name.as_deref();
-            let outcome = handle(name, || route.websocket_handler.unwrap_ref().handle(request, data)).await
+            let outcome = handle(name, || route.websocket_handler.unwrap_ref().handle(request, data, websocket)).await
                 .unwrap_or_else(|| Outcome::Failure(Status::InternalServerError));
 
             // Check if the request processing completed (Some) or if the
@@ -448,16 +450,13 @@ impl Rocket<Orbit> {
             // (None) to try again.
             info_!("{} {}", Paint::default("Outcome:").bold(), outcome);
             match outcome {
-                o@Outcome::Success(_) | o@Outcome::Failure(_) => return o,
+                o@Outcome::Success(_) | o@Outcome::Failure(_) => break,
                 Outcome::Forward(unused_data) => data = unused_data,
             }
         }
-
-        error_!("No matching routes for {}.", request);
-        Outcome::Forward(data)
     }
 
-    async fn ws_event_loop<'r: 's, 's>(&'r self, req: &'r Request<'r>, upgrade: OnUpgrade) {
+    async fn ws_event_loop<'r: 's, 's>(&'r self, req: &'r mut Request<'r>, upgrade: OnUpgrade) {
         if let Ok(upgrade) = upgrade.await {
             let (ch, a, b) = WebSocketChannel::new(upgrade);
             let event_loop = async move {
@@ -473,7 +472,9 @@ impl Rocket<Orbit> {
                         _ => panic!("An unexpected error occured while processing websocket messages. {:?} has an invalid opcode", message),
                     };
                     // TODO Message event
-                    let _e = self.route_event(req, data, WebSocketEvent::Message).await;
+                    //req.set_uri(Origin::parse("/echo/2").unwrap());
+                    let websocket = WebSocket::from(Origin::parse("/echo/2").unwrap(), ch.subscribe_handle());
+                    let _e = self.route_event(req, data, WebSocketEvent::Message, &websocket).await;
                 }
                 // TODO Leave event
             };
