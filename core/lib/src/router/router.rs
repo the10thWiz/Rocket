@@ -61,12 +61,21 @@ impl Router {
 
     pub fn route<'r, 'a: 'r>(
         &'a self,
-        req: &'r Request<'r>
+        req: &'r Request<'r>,
     ) -> impl Iterator<Item = &'a Route> + 'r {
         // Note that routes are presorted by ascending rank on each `add`.
         self.routes.get(&req.method())
             .into_iter()
             .flat_map(move |routes| routes.iter().filter(move |r| r.matches(req)))
+    }
+
+    pub fn route_event<'a>(
+        &'a self,
+        event: WebSocketEvent,
+    ) -> impl Iterator<Item = &'a Route> {
+        self.websocket.get(&event)
+            .into_iter()
+            .flat_map(|routes| routes.iter())
     }
 
     // For many catchers, using aho-corasick or similar should be much faster.

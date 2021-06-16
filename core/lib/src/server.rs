@@ -1,4 +1,6 @@
+use std::cell::UnsafeCell;
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,8 +10,11 @@ use tokio::sync::oneshot;
 use futures::stream::StreamExt;
 use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 
+use crate::route::WebSocketHandler;
 use crate::websocket::Extensions;
+use crate::websocket::MutableRequest::MutableRequest;
 use crate::websocket::Protocol;
+use crate::websocket::WebSocketEvent;
 use crate::websocket::WebsocketUpgrade;
 use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
@@ -106,9 +111,13 @@ async fn hyper_service_fn(
             // connection.
             let req_copy = req.clone();
             let (accept, upgrade) = upgrade.split();
-            let r = rocket.dispatch_ws(token, &mut req, data, accept).await;
+            let r = rocket.dispatch_ws(token, &req, data, accept).await;
+            let upgraded = r.status() == Status::SwitchingProtocols;
             rocket.send_response(r, tx).await;
-            rocket.ws_event_loop(req_copy, upgrade).await;
+            // This prevents the websocket code from attempting to upgrade if the uprade failed
+            if upgraded {
+                rocket.ws_event_loop(req_copy, upgrade).await;
+            }
         } else {
             let r = rocket.dispatch(token, &mut req, data).await;
             rocket.send_response(r, tx).await;
@@ -385,7 +394,7 @@ impl Rocket<Orbit> {
         request: &'r Request<'s>,
         _data: Data<'r>,
         accept: String,
-    ) -> Response<'r> {
+    ) -> Response<'_> {
         info!("{}:", request);
 
         // remeber the protocol for later
@@ -421,14 +430,33 @@ impl Rocket<Orbit> {
         response
     }
 
-    async fn ws_event_loop(&self, req: Request<'_>, upgrade: OnUpgrade) {
-        // I don't know if I need to pin it, but I think it's a good idea
-        tokio::pin!(req);
+    async fn route_event<'s, 'a, 'b>(&'s self, request: &Request<'s>, event: WebSocketEvent, mut data: Data<'a>) {
+        for route in self.router.route_event(event) {
+            if route.matches(request) {
+                info_!("Matched: {}", route);
+                request.set_route(route);
+
+                let name = route.name.as_deref();
+                let outcome = handle(name, || route.websocket_handler.unwrap_ref().handle(request, data)).await
+                    .unwrap_or_else(|| Outcome::Failure(Status::InternalServerError));
+
+                info_!("{} {}", Paint::default("Outcome:").bold(), outcome);
+                match outcome {
+                    Outcome::Forward(unused_data) => data = unused_data,
+                    _ => break,
+                }
+            }
+        }
+    }
+
+    async fn ws_event_loop<'s, 'r: 's>(&'s self, mut request: Request<'s>, upgrade: OnUpgrade) {
         if let Ok(upgrade) = upgrade.await {
             let (ch, a, b) = WebSocketChannel::new(upgrade);
+            //tokio::pin!(request);
             let event_loop = async move {
                 // Explicit moves
                 let mut ch = ch;
+
                 // TODO Join event
                 while let Some(message) = ch.next().await {
                     let data = match message.opcode() {
@@ -438,6 +466,8 @@ impl Rocket<Orbit> {
                         _ => panic!("An unexpected error occured while processing websocket messages. {:?} has an invalid opcode", message),
                     };
                     // TODO Message event
+                    request.set_uri(Origin::parse("/echo/2").unwrap());
+                    self.route_event(&request, WebSocketEvent::Message, data).await;
                 }
                 // TODO Leave event
             };

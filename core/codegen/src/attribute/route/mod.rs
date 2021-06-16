@@ -5,7 +5,6 @@ use std::hash::Hash;
 use devise::{Spanned, SpanWrapped, Result, FromMeta, Diagnostic};
 use devise::ext::TypeExt as _;
 use proc_macro2::{TokenStream, Span};
-use quote::ToTokens;
 
 use crate::proc_macro_ext::StringLit;
 use crate::syn_ext::{IdentExt, TypeExt as _};
@@ -232,7 +231,7 @@ fn internal_uri_macro_decl(route: &Route) -> TokenStream {
     }
 }
 
-fn responder_outcome_expr(route: &Route) -> TokenStream {
+fn responder_outcome_expr(route: &Route, websocket: bool) -> TokenStream {
     let ret_span = match route.handler.sig.output {
         syn::ReturnType::Default => route.handler.sig.ident.span(),
         syn::ReturnType::Type(_, ref ty) => ty.span().into()
@@ -246,9 +245,14 @@ fn responder_outcome_expr(route: &Route) -> TokenStream {
         .map(|a| quote_spanned!(a.span().into() => .await));
 
     define_spanned_export!(ret_span => __req, _route);
+    let outcome = if websocket {
+        quote!(#_route::WsOutcome::Success(()))
+    } else {
+        quote!(#_route::Outcome::from(#__req, ___responder))
+    };
     quote_spanned! { ret_span =>
         let ___responder = #user_handler_fn_name(#(#parameter_names),*) #_await;
-        #_route::Outcome::from(#__req, ___responder)
+        #outcome
     }
 }
 
@@ -312,13 +316,30 @@ fn monomorphized_function(route: &Route) -> TokenStream {
     let query_guards = query_decls(&route);
     let data_guard = route.data_guard.as_ref().map(data_guard_decl);
     
-    let responder_outcome = responder_outcome_expr(&route);
+    let responder_outcome = responder_outcome_expr(&route, route.attr.method.is_websocket());
+    
+    let (params, return_type) = if route.attr.method.is_websocket() {
+        (
+            quote! {
+                #__req: &#Request<'_>,
+                #__data: #Data<'__r>,
+            },
+            quote!(#_route::WsBoxFuture<'__r>)
+        )
+    } else {
+        (
+            quote! {
+                #__req: &'__r #Request<'_>,
+                #__data: #Data<'__r>,
+            },
+            quote!(#_route::BoxFuture<'__r>)
+        )
+    };
 
     quote! {
         fn monomorphized_function<'__r>(
-            #__req: &'__r #Request<'_>,
-            #__data: #Data<'__r>,
-        ) -> #_route::BoxFuture<'__r> {
+            #params
+        ) -> #return_type {
             #_Box::pin(async move {
                 #(#request_guards)*
                 #(#param_guards)*

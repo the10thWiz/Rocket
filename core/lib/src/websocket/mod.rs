@@ -118,3 +118,32 @@ impl WebsocketUpgrade {
         (self.accept, self.on_upgrade)
     }
 }
+
+pub(crate) mod MutableRequest {
+    use std::cell::UnsafeCell;
+    use futures::Future;
+
+    use crate::Request;
+
+    pub struct MutableRequest(UnsafeCell<Request<'static>>);
+
+    impl MutableRequest {
+        pub fn new(req: Request<'static>) -> Self {
+            Self(UnsafeCell::new(req))
+        }
+
+        pub fn as_ref<'a>(&'a self) -> &'a Request<'static> {
+            // Safety: We never give out mutable references
+            //
+            // (Ignoring as_mut)
+            unsafe { &*self.0.get() }
+        }
+
+        pub unsafe fn as_mut<'a>(&'a self) -> &'a mut Request<'static> {
+            &mut *self.0.get()
+        }
+    }
+
+    unsafe impl Send for MutableRequest {}
+    unsafe impl Sync for MutableRequest {}
+}
