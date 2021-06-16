@@ -1,3 +1,4 @@
+use rocket_http::Header;
 use rocket_http::Status;
 use rocket_http::hyper::upgrade::OnUpgrade;
 use websocket_codec::ClientRequest;
@@ -55,6 +56,28 @@ pub(crate) fn upgrade(req: &mut hyper::Request<hyper::Body>) -> Option<Websocket
         })
     } else {
         None
+    }
+}
+
+pub(crate) struct Extensions {
+    protocol: Protocol,
+    extensions: (),
+}
+
+impl Extensions {
+    pub fn new(req: &Request<'_>) -> Self {
+        Self {
+            protocol: Protocol::new(req),
+            extensions: (),
+        }
+    }
+
+    pub fn headers(&self) -> impl Iterator<Item = Header<'static>> {
+        self.protocol.get_name().into_iter().map(|s| Header::new("Sec-WebSocket-Protocol", s))
+    }
+
+    pub fn is_err(&self) -> Option<Status> {
+        self.protocol.is_err()
     }
 }
 

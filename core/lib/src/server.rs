@@ -2,11 +2,17 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
+use rocket_http::hyper::upgrade::OnUpgrade;
 use yansi::Paint;
 use tokio::sync::oneshot;
 use futures::stream::StreamExt;
 use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 
+use crate::websocket::Extensions;
+use crate::websocket::Protocol;
+use crate::websocket::WebsocketUpgrade;
+use crate::websocket::channel;
+use crate::websocket::channel::WebSocketChannel;
 use crate::{Rocket, Orbit, Request, Response, Data, route};
 use crate::form::Form;
 use crate::outcome::Outcome;
@@ -64,7 +70,7 @@ async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
 async fn hyper_service_fn(
     rocket: Arc<Rocket<Orbit>>,
     addr: std::net::SocketAddr,
-    hyp_req: hyper::Request<hyper::Body>,
+    mut hyp_req: hyper::Request<hyper::Body>,
 ) -> Result<hyper::Response<hyper::Body>, io::Error> {
     // This future must return a hyper::Response, but the response body might
     // borrow from the request. Instead, write the body in another future that
@@ -72,6 +78,7 @@ async fn hyper_service_fn(
     let (tx, rx) = oneshot::channel();
 
     tokio::spawn(async move {
+        let upgrade = crate::websocket::upgrade(&mut hyp_req);
         // Convert a Hyper request into a Rocket request.
         let (h_parts, mut h_body) = hyp_req.into_parts();
         let mut req = match Request::from_hyp(&rocket, &h_parts, addr) {
@@ -93,8 +100,19 @@ async fn hyper_service_fn(
 
         // Dispatch the request to get a response, then write that response out.
         let token = rocket.preprocess_request(&mut req, &mut data).await;
-        let r = rocket.dispatch(token, &mut req, data).await;
-        rocket.send_response(r, tx).await;
+        if let Some(upgrade) = upgrade {
+            // req.clone() is nessecary since the request is borrowed to hande the response. This
+            // copy can (and will) outlive the actual request, but will not outlive the websocket
+            // connection.
+            let req_copy = req.clone();
+            let (accept, upgrade) = upgrade.split();
+            let r = rocket.dispatch_ws(token, &mut req, data, accept).await;
+            rocket.send_response(r, tx).await;
+            rocket.ws_event_loop(req_copy, upgrade).await;
+        } else {
+            let r = rocket.dispatch(token, &mut req, data).await;
+            rocket.send_response(r, tx).await;
+        }
     });
 
     // Receive the response written to `tx` by the task above.
@@ -353,6 +371,82 @@ impl Rocket<Orbit> {
         // If it failed again or if it was already a 500, use Rocket's default.
         error_!("{} catcher failed. Using Rocket default 500.", status.code);
         crate::catcher::default_handler(Status::InternalServerError, req)
+    }
+
+    /// Dispatch the Websocket response. This does not invoke ANY user handlers.
+    ///
+    /// Instead, the join handler is allowed to fail the connection after the first message, with a
+    /// Websocket Status Code. This should check the router's websocket connections, to return a
+    /// 404 if the endpoint doesn't exist.
+    #[inline]
+    pub(crate) async fn dispatch_ws<'s, 'r: 's>(
+        &'s self,
+        _token: RequestToken,
+        request: &'r Request<'s>,
+        _data: Data<'r>,
+        accept: String,
+    ) -> Response<'r> {
+        info!("{}:", request);
+
+        // remeber the protocol for later
+        let extensions = Extensions::new(request);
+
+        // Handle the case where the protocol is invalid
+        let mut response = if let Some(status) = extensions.is_err() {
+            self.handle_error(status, request).await
+        } else {
+            use rocket_http::hyper::header::{CONNECTION, UPGRADE};
+            let mut response = Response::build();
+            response.status(Status::SwitchingProtocols);
+            response.header(Header::new(CONNECTION.as_str(), "upgrade"));
+            response.header(Header::new(UPGRADE.as_str(), "websocket"));
+            response.header(Header::new("Sec-WebSocket-Accept", accept));
+            
+            extensions.headers().for_each(|h| {response.header(h);});
+
+            response.finalize()
+        };
+
+        // Add a default 'Server' header if it isn't already there.
+        // TODO: If removing Hyper, write out `Date` header too.
+        if let Some(ident) = request.rocket().config.ident.as_str() {
+            if !response.headers().contains("Server") {
+                response.set_header(Header::new("Server", ident));
+            }
+        }
+
+        // Run the response fairings.
+        self.fairings.handle_response(request, &mut response).await;
+
+        response
+    }
+
+    async fn ws_event_loop(&self, req: Request<'_>, upgrade: OnUpgrade) {
+        // I don't know if I need to pin it, but I think it's a good idea
+        tokio::pin!(req);
+        if let Ok(upgrade) = upgrade.await {
+            let (ch, a, b) = WebSocketChannel::new(upgrade);
+            let event_loop = async move {
+                // Explicit moves
+                let mut ch = ch;
+                // TODO Join event
+                while let Some(message) = ch.next().await {
+                    let data = match message.opcode() {
+                        websocket_codec::Opcode::Text => Data::from_ws(message, Some(false)),
+                        websocket_codec::Opcode::Binary => Data::from_ws(message, Some(true)),
+                        websocket_codec::Opcode::Close => break,
+                        _ => panic!("An unexpected error occured while processing websocket messages. {:?} has an invalid opcode", message),
+                    };
+                    // TODO Message event
+                }
+                // TODO Leave event
+            };
+            // This will poll each future, on the same thread. This should actually be more
+            // preformant than spawning tasks for each.
+            tokio::join!(a, b, event_loop);
+        } else {
+            todo!("Handle upgrade error")
+        }
     }
 
     pub(crate) async fn default_tcp_http_server<C>(mut self, ready: C) -> Result<(), Error>
