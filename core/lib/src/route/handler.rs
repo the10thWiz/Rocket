@@ -2,6 +2,122 @@ use crate::{Request, Data};
 use crate::response::{Response, Responder};
 use crate::http::Status;
 
+// FIXME!
+impl<'r, 'o: 'r> Outcome<'o> {
+    /// Return the `Outcome` of response to `req` from `responder`.
+    ///
+    /// If the responder returns `Ok`, an outcome of `Success` is returned with
+    /// the response. If the responder returns `Err`, an outcome of `Failure` is
+    /// returned with the status code.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use rocket::{Request, Data, route};
+    ///
+    /// fn str_responder<'r>(req: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
+    ///     route::Outcome::from(req, "Hello, world!")
+    /// }
+    /// ```
+    #[inline]
+    pub fn from<R: Responder<'r, 'o>>(req: &'r Request<'_>, responder: R) -> Outcome<'r> {
+        match responder.respond_to(req) {
+            Ok(response) => Outcome::Success(response),
+            Err(status) => Outcome::Failure(status)
+        }
+    }
+
+    /// Return the `Outcome` of response to `req` from `responder`.
+    ///
+    /// If the responder returns `Ok`, an outcome of `Success` is returned with
+    /// the response. If the responder returns `Err`, an outcome of `Failure` is
+    /// returned with the status code.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use rocket::{Request, Data, route};
+    ///
+    /// fn str_responder<'r>(req: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
+    ///     route::Outcome::from(req, "Hello, world!")
+    /// }
+    /// ```
+    #[inline]
+    pub fn try_from<R, E>(req: &'r Request<'_>, result: Result<R, E>) -> Outcome<'r>
+        where R: Responder<'r, 'o>, E: std::fmt::Debug
+    {
+        let responder = result.map_err(crate::response::Debug);
+        match responder.respond_to(req) {
+            Ok(response) => Outcome::Success(response),
+            Err(status) => Outcome::Failure(status)
+        }
+    }
+
+    /// Return the `Outcome` of response to `req` from `responder`.
+    ///
+    /// If the responder returns `Ok`, an outcome of `Success` is returned with
+    /// the response. If the responder returns `Err`, an outcome of `Forward` is
+    /// returned.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use rocket::{Request, Data, route};
+    ///
+    /// fn str_responder<'r>(req: &'r Request, data: Data<'r>) -> route::Outcome<'r> {
+    ///     route::Outcome::from_or_forward(req, data, "Hello, world!")
+    /// }
+    /// ```
+    #[inline]
+    pub fn from_or_forward<R>(req: &'r Request<'_>, data: Data<'r>, responder: R) -> Outcome<'r>
+        where R: Responder<'r, 'o>
+    {
+        match responder.respond_to(req) {
+            Ok(response) => Outcome::Success(response),
+            Err(_) => Outcome::Forward(data)
+        }
+    }
+
+    /// Return an `Outcome` of `Failure` with the status code `code`. This is
+    /// equivalent to `Outcome::Failure(code)`.
+    ///
+    /// This method exists to be used during manual routing.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use rocket::{Request, Data, route};
+    /// use rocket::http::Status;
+    ///
+    /// fn bad_req_route<'r>(_: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
+    ///     route::Outcome::failure(Status::BadRequest)
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn failure(code: Status) -> Outcome<'r> {
+        Outcome::Failure(code)
+    }
+
+    /// Return an `Outcome` of `Forward` with the data `data`. This is
+    /// equivalent to `Outcome::Forward(data)`.
+    ///
+    /// This method exists to be used during manual routing.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use rocket::{Request, Data, route};
+    ///
+    /// fn always_forward<'r>(_: &'r Request, data: Data<'r>) -> route::Outcome<'r> {
+    ///     route::Outcome::forward(data)
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn forward(data: Data<'r>) -> Outcome<'r> {
+        Outcome::Forward(data)
+    }
+}
+
 /// Type alias for the return type of a [`Route`](crate::Route)'s
 /// [`Handler::handle()`].
 pub type Outcome<'r> = crate::outcome::Outcome<Response<'r>, Status, Data<'r>>;
@@ -167,131 +283,32 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
     }
 }
 
-// FIXME!
-impl<'r, 'o: 'r> Outcome<'o> {
-    /// Return the `Outcome` of response to `req` from `responder`.
-    ///
-    /// If the responder returns `Ok`, an outcome of `Success` is returned with
-    /// the response. If the responder returns `Err`, an outcome of `Failure` is
-    /// returned with the status code.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use rocket::{Request, Data, route};
-    ///
-    /// fn str_responder<'r>(req: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
-    ///     route::Outcome::from(req, "Hello, world!")
-    /// }
-    /// ```
-    #[inline]
-    pub fn from<R: Responder<'r, 'o>>(req: &'r Request<'_>, responder: R) -> Outcome<'r> {
-        match responder.respond_to(req) {
-            Ok(response) => Outcome::Success(response),
-            Err(status) => Outcome::Failure(status)
-        }
-    }
-
-    /// Return the `Outcome` of response to `req` from `responder`.
-    ///
-    /// If the responder returns `Ok`, an outcome of `Success` is returned with
-    /// the response. If the responder returns `Err`, an outcome of `Failure` is
-    /// returned with the status code.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use rocket::{Request, Data, route};
-    ///
-    /// fn str_responder<'r>(req: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
-    ///     route::Outcome::from(req, "Hello, world!")
-    /// }
-    /// ```
-    #[inline]
-    pub fn try_from<R, E>(req: &'r Request<'_>, result: Result<R, E>) -> Outcome<'r>
-        where R: Responder<'r, 'o>, E: std::fmt::Debug
-    {
-        let responder = result.map_err(crate::response::Debug);
-        match responder.respond_to(req) {
-            Ok(response) => Outcome::Success(response),
-            Err(status) => Outcome::Failure(status)
-        }
-    }
-
-    /// Return the `Outcome` of response to `req` from `responder`.
-    ///
-    /// If the responder returns `Ok`, an outcome of `Success` is returned with
-    /// the response. If the responder returns `Err`, an outcome of `Forward` is
-    /// returned.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use rocket::{Request, Data, route};
-    ///
-    /// fn str_responder<'r>(req: &'r Request, data: Data<'r>) -> route::Outcome<'r> {
-    ///     route::Outcome::from_or_forward(req, data, "Hello, world!")
-    /// }
-    /// ```
-    #[inline]
-    pub fn from_or_forward<R>(req: &'r Request<'_>, data: Data<'r>, responder: R) -> Outcome<'r>
-        where R: Responder<'r, 'o>
-    {
-        match responder.respond_to(req) {
-            Ok(response) => Outcome::Success(response),
-            Err(_) => Outcome::Forward(data)
-        }
-    }
-
-    /// Return an `Outcome` of `Failure` with the status code `code`. This is
-    /// equivalent to `Outcome::Failure(code)`.
-    ///
-    /// This method exists to be used during manual routing.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use rocket::{Request, Data, route};
-    /// use rocket::http::Status;
-    ///
-    /// fn bad_req_route<'r>(_: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
-    ///     route::Outcome::failure(Status::BadRequest)
-    /// }
-    /// ```
-    #[inline(always)]
-    pub fn failure(code: Status) -> Outcome<'r> {
-        Outcome::Failure(code)
-    }
-
-    /// Return an `Outcome` of `Forward` with the data `data`. This is
-    /// equivalent to `Outcome::Forward(data)`.
-    ///
-    /// This method exists to be used during manual routing.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use rocket::{Request, Data, route};
-    ///
-    /// fn always_forward<'r>(_: &'r Request, data: Data<'r>) -> route::Outcome<'r> {
-    ///     route::Outcome::forward(data)
-    /// }
-    /// ```
-    #[inline(always)]
-    pub fn forward(data: Data<'r>) -> Outcome<'r> {
-        Outcome::Forward(data)
-    }
-}
-
 // INTERNAL: A handler to use when one is needed temporarily.
 #[doc(hidden)]
 pub fn dummy_handler<'r>(r: &'r Request<'_>, _: Data<'r>) -> BoxFuture<'r> {
     Outcome::from(r, ()).pin()
 }
 
+#[crate::async_trait]
+pub trait WebSocketHandler: CloneableWS + Send + Sync + 'static {
+    /// Called by Rocket when a `Request` with its associated `Data` should be
+    /// handled by this handler.
+    ///
+    /// The variant of `Outcome` returned by the returned `Future` determines
+    /// what Rocket does next. If the return value is a `Success(Response)`, the
+    /// wrapped `Response` is used to respond to the client. If the return value
+    /// is a `Failure(Status)`, the error catcher for `Status` is invoked to
+    /// generate a response. Otherwise, if the return value is `Forward(Data)`,
+    /// the next matching route is attempted. If there are no other matching
+    /// routes, the `404` error catcher is invoked.
+    async fn handle<'r>(&self, request: &'r Request<'_>, data: Data<'r>) -> Outcome<'r>;
+}
+
 mod private {
     pub trait Sealed {}
     impl<T: super::Handler + Clone> Sealed for T {}
+    pub trait SealedWS {}
+    impl<T: super::WebSocketHandler + Clone> SealedWS for T {}
 }
 
 /// Helper trait to make a [`Route`](crate::Route)'s `Box<dyn Handler>`
@@ -313,6 +330,23 @@ impl<T: Handler + Clone> Cloneable for T {
 
 impl Clone for Box<dyn Handler> {
     fn clone(&self) -> Box<dyn Handler> {
+        self.clone_handler()
+    }
+}
+
+pub trait CloneableWS: private::SealedWS {
+    #[doc(hidden)]
+    fn clone_handler(&self) -> Box<dyn WebSocketHandler>;
+}
+
+impl<T: WebSocketHandler + Clone> CloneableWS for T {
+    fn clone_handler(&self) -> Box<dyn WebSocketHandler> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn WebSocketHandler> {
+    fn clone(&self) -> Box<dyn WebSocketHandler> {
         self.clone_handler()
     }
 }

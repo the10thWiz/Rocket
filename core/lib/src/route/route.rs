@@ -182,6 +182,8 @@ pub struct Route {
     pub method: Method,
     /// The function that should be called when the route matches.
     pub handler: Box<dyn Handler>,
+    /// The function that should be called when a websocket event matches
+    pub websocket_handler: WebSocketEvent<()>,
     /// The route URI.
     pub uri: RouteUri<'static>,
     /// The rank of this route. Lower ranks have higher priorities.
@@ -252,6 +254,7 @@ impl Route {
             format: None,
             sentinels: Vec::new(),
             handler: Box::new(handler),
+            websocket_handler: WebSocketEvent::None,
             rank, uri, method,
         }
     }
@@ -287,6 +290,26 @@ impl Route {
         let base = mapper(self.uri.base);
         self.uri = RouteUri::try_new(&base, &self.uri.unmounted_origin.to_string())?;
         Ok(self)
+    }
+
+    /// Gets the HTTP rank of this route. This is the same as `self.rank`, unless this is
+    /// a WebSocket event handler. In that case, this is `isize::max_value()`
+    pub fn http_rank(&self) -> isize {
+        if self.websocket_handler.is_none() {
+            self.rank
+        } else {
+            isize::max_value()
+        }
+    }
+
+    /// Gets the WebSocket rank of this route. This is the same as `self.rank`, unless this
+    /// is an HTTP route. In that case, this is `isize::max_value()`
+    pub fn websocket_rank(&self) -> isize {
+        if self.websocket_handler.is_some() {
+            self.rank
+        } else {
+            isize::max_value()
+        }
     }
 }
 
@@ -340,6 +363,9 @@ pub struct StaticInfo {
     pub format: Option<MediaType>,
     /// The route's handler, i.e, the annotated function.
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data<'r>) -> BoxFuture<'r>,
+    /// The route's websocket handler, i.e, the annotated function.
+    pub websocket_handler: 
+        WebSocketEvent<for<'r> fn(&'r crate::Request<'_>, crate::Data<'r>) -> BoxFuture<'r>>,
     /// The route's rank, if any.
     pub rank: Option<isize>,
     /// Route-derived sentinels, if any.
@@ -357,10 +383,50 @@ impl From<StaticInfo> for Route {
             name: Some(info.name.into()),
             method: info.method,
             handler: Box::new(info.handler),
+            websocket_handler: info.websocket_handler.map(|h| {Box::new(h); ()}),// TODO
             rank: info.rank.unwrap_or_else(|| uri.default_rank()),
             format: info.format,
             sentinels: info.sentinels.into_iter().collect(),
             uri,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum WebSocketEvent<T> {
+    Join(T),
+    Message(T),
+    Leave(T),
+    None,
+}
+
+impl<T> WebSocketEvent<T> {
+    /// Maps `Self<T>` to `Self<E>`, using the provided function, while preserving the event type.
+    pub(crate) fn map<E>(self, f: impl Fn(T) -> E) -> WebSocketEvent<E> {
+        match self {
+            Self::Join(t) => WebSocketEvent::Join(f(t)),
+            Self::Message(t) => WebSocketEvent::Message(f(t)),
+            Self::Leave(t) => WebSocketEvent::Leave(f(t)),
+            Self::None => WebSocketEvent::None,
+        }
+    }
+
+    /// Returns true if this event is None
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    /// Returns true if this event is not None
+    pub fn is_some(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    pub fn collides(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Join(_), Self::Join(_)) => true,
+            (Self::Message(_), Self::Message(_)) => true,
+            (Self::Leave(_), Self::Leave(_)) => true,
+            _ => false,
         }
     }
 }
