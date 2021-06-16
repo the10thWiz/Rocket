@@ -1,0 +1,88 @@
+use rocket_http::Status;
+use rocket_http::hyper::upgrade::OnUpgrade;
+use websocket_codec::ClientRequest;
+
+use crate::Data;
+
+pub(crate) mod channel;
+pub(crate) mod message;
+pub(crate) mod status;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WebSocketEvent {
+    Join,
+    Message,
+    Leave,
+}
+
+impl WebSocketEvent {
+    pub(crate) fn from_handler<T>(h: &crate::route::WebSocketEvent<T>) -> Option<Self> {
+        match h {
+            crate::route::WebSocketEvent::Join(_) => Some(Self::Join),
+            crate::route::WebSocketEvent::Message(_) => Some(Self::Message),
+            crate::route::WebSocketEvent::Leave(_) => Some(Self::Leave),
+            crate::route::WebSocketEvent::None => None,
+        }
+    }
+}
+
+pub enum WebSocketData<'r> {
+    Join(Data<'r>),
+    Message(Data<'r>),
+    Leave(),
+}
+
+use crate::Request;
+use crate::http::hyper;
+
+/// Create the upgrade object associated with this request IF the request should be upgraded
+pub(crate) fn upgrade(req: &mut hyper::Request<hyper::Body>) -> Option<WebsocketUpgrade> {
+    if req.method() == hyper::Method::GET {
+        ClientRequest::parse(|n| 
+            req.headers().get(n).map(|s| s.to_str().unwrap_or(""))
+        ).ok().map(|accept| WebsocketUpgrade {
+            accept: accept.ws_accept(), on_upgrade: hyper::upgrade::on(req)
+        })
+    } else {
+        None
+    }
+}
+
+pub(crate) enum Protocol {
+    Multiplex,
+    Naked,
+    Invalid,
+}
+
+impl Protocol {
+    pub fn new(_req: &Request<'_>) -> Self {
+        Self::Invalid
+    }
+
+    /// Gets a status code if the Protocol requested was invalid
+    pub fn is_err(&self) -> Option<Status> {
+        match self {
+            Self::Invalid => Some(Status::ImATeapot),
+            _ => None,
+        }
+    }
+
+    /// Gets the name to set for the WebSocket Protocol header
+    pub fn get_name(&self) -> Option<&'static str> {
+        match self {
+            _ => None,
+        }
+    }
+}
+
+pub(crate) struct WebsocketUpgrade {
+    accept: String,
+    on_upgrade: OnUpgrade,
+}
+
+impl WebsocketUpgrade {
+    pub fn split(self) -> (String, OnUpgrade) {
+        (self.accept, self.on_upgrade)
+    }
+}
+
