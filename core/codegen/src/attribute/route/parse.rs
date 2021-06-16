@@ -4,7 +4,7 @@ use indexmap::{IndexSet, IndexMap};
 use proc_macro2::Span;
 
 use crate::proc_macro_ext::Diagnostics;
-use crate::http_codegen::{Method, MediaType};
+use crate::http_codegen::{MediaType, Method, WebSocketEvent};
 use crate::attribute::param::{Parameter, Dynamic, Guard};
 use crate::syn_ext::FnArgExt;
 use crate::name::Name;
@@ -42,7 +42,7 @@ pub struct Arguments {
 #[derive(Debug, FromMeta)]
 pub struct Attribute {
     #[meta(naked)]
-    pub method: SpanWrapped<Method>,
+    pub method: SpanWrapped<WebSocketEvent>,
     pub uri: RouteUri,
     pub data: Option<SpanWrapped<Dynamic>>,
     pub format: Option<MediaType>,
@@ -127,8 +127,8 @@ impl Route {
 
         // Emit a warning if a `data` param was supplied for non-payload methods.
         if let Some(ref data) = attr.data {
-            if !attr.method.0.supports_payload() {
-                let msg = format!("'{}' does not typically support payloads", attr.method.0);
+            if !attr.method.supports_payload() {
+                let msg = format!("'{}' does not typically support payloads", *attr.method);
                 // FIXME(diag: warning)
                 data.full_span.warning("`data` used with non-payload-supporting method")
                     .span_note(attr.method.span, msg)
