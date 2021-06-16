@@ -8,10 +8,19 @@ pub(crate) mod channel;
 pub(crate) mod message;
 pub(crate) mod status;
 
+pub use channel::Channel;
+
+/// Soft maximum for chunks reasons
+pub const MAX_BUFFER_SIZE: usize = 1024;
+
+/// Identifier of WebSocketEvent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WebSocketEvent {
+    /// A Join event, triggered when a client connects
     Join,
+    /// A Message event, triggered when a client sends a message
     Message,
+    /// A Leave event, triggered when a client disconnects
     Leave,
 }
 
@@ -26,6 +35,7 @@ impl WebSocketEvent {
     }
 }
 
+/// Data types for websockets
 pub enum WebSocketData<'r> {
     Join(Data<'r>),
     Message(Data<'r>),
@@ -85,4 +95,3 @@ impl WebsocketUpgrade {
         (self.accept, self.on_upgrade)
     }
 }
-

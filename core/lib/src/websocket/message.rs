@@ -40,9 +40,10 @@ pub trait IntoMessage {
     fn into_message(self) -> mpsc::Receiver<Bytes>;
 }
 
-impl IntoMessage for Data {
+impl IntoMessage for Data<'static> {
     fn is_binary(&self) -> bool {
-        self.was_ws_binary().unwrap_or(true)
+        //self.was_ws_binary().unwrap_or(true)
+        true
     }
 
     fn into_message(self) -> mpsc::Receiver<Bytes> {
