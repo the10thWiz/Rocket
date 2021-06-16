@@ -4,8 +4,8 @@ use rocket::channels::Channel;
 use rocket::response::content::Html;
 use rocket::Data;
 
-#[message("/echo", data = "<data>")]
-async fn echo(data: Data, websocket: Channel<'_>) {
+#[route(MESSAGE, uri = "/echo", data = "<data>")]
+async fn echo(data: Data<'_>, websocket: Channel<'_>) {
     websocket.send(data).await;
 }
 
