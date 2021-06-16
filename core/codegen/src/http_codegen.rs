@@ -213,6 +213,10 @@ impl WebSocketEvent {
             _ => true,
         }
     }
+
+    pub fn is_websocket(&self) -> bool {
+        !matches!(self, Self::Http(_))
+    }
 }
 
 impl std::fmt::Display for WebSocketEvent {

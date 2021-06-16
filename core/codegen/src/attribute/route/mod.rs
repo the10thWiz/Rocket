@@ -5,6 +5,7 @@ use std::hash::Hash;
 use devise::{Spanned, SpanWrapped, Result, FromMeta, Diagnostic};
 use devise::ext::TypeExt as _;
 use proc_macro2::{TokenStream, Span};
+use quote::ToTokens;
 
 use crate::proc_macro_ext::StringLit;
 use crate::syn_ext::{IdentExt, TypeExt as _};
@@ -109,14 +110,20 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
     })
 }
 
-fn request_guard_decl(guard: &Guard) -> TokenStream {
+fn request_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
         __req, __data, _request, _log, FromRequest, Outcome
     );
 
+    let conversion = if websocket {
+        quote!(<#ty as #FromRequest>::from_request(#__req))
+    } else {
+        quote!(<#ty as #FromRequest>::from_request(#__req))
+    };
+
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromRequest>::from_request(#__req).await {
+        let #ident: #ty = match #conversion.await {
             #Outcome::Success(__v) => __v,
             #Outcome::Forward(_) => {
                 #_log::warn_!("Request guard `{}` is forwarding.", stringify!(#ty));
@@ -296,14 +303,36 @@ fn sentinels_expr(route: &Route) -> TokenStream {
     quote!(::std::vec![#(#sentinel),*])
 }
 
-fn codegen_route(route: Route) -> Result<TokenStream> {
+fn monomorphized_function(route: &Route) -> TokenStream {
     use crate::exports::*;
 
     // Generate the declarations for all of the guards.
-    let request_guards = route.request_guards.iter().map(request_guard_decl);
+    let request_guards = route.request_guards.iter().map(|r| request_guard_decl(r, route.attr.method.is_websocket()));
     let param_guards = route.param_guards().map(param_guard_decl);
     let query_guards = query_decls(&route);
     let data_guard = route.data_guard.as_ref().map(data_guard_decl);
+    
+    let responder_outcome = responder_outcome_expr(&route);
+
+    quote! {
+        fn monomorphized_function<'__r>(
+            #__req: &'__r #Request<'_>,
+            #__data: #Data<'__r>,
+        ) -> #_route::BoxFuture<'__r> {
+            #_Box::pin(async move {
+                #(#request_guards)*
+                #(#param_guards)*
+                #query_guards
+                #data_guard
+
+                #responder_outcome
+            })
+        }
+    }
+}
+
+fn codegen_route(route: Route) -> Result<TokenStream> {
+    use crate::exports::*;
 
     // Extract the sentinels from the route.
     let sentinels = sentinels_expr(&route);
@@ -312,12 +341,21 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
     let (vis, handler_fn) = (&route.handler.vis, &route.handler);
     let handler_fn_name = &handler_fn.sig.ident;
     let internal_uri_macro = internal_uri_macro_decl(&route);
-    let responder_outcome = responder_outcome_expr(&route);
 
-    let method = route.attr.method;
+    let method = route.attr.method.http_method();
+    let method = quote_spanned!(route.attr.method.span() => #method);
     let uri = route.attr.uri.to_string();
     let rank = Optional(route.attr.rank);
     let format = Optional(route.attr.format.as_ref());
+
+    let function = monomorphized_function(&route);
+
+    let (handler, websocket_handler) = if route.attr.method.is_websocket() {
+        let ws = route.attr.method;
+        (quote!(upgrade_required), quote!(#ws(monomorphized_function)))
+    } else {
+        (quote!(monomorphized_function), quote!(#WebSocketEvent::None))
+    };
 
     Ok(quote! {
         #handler_fn
@@ -331,17 +369,14 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
         impl #handler_fn_name {
             #[allow(non_snake_case, unreachable_patterns, unreachable_code)]
             fn into_info(self) -> #_route::StaticInfo {
-                fn monomorphized_function<'__r>(
+                #function
+
+                fn upgrade_required<'__r>(
                     #__req: &'__r #Request<'_>,
-                    #__data: #Data<'__r>
+                    #__data: #Data<'__r>,
                 ) -> #_route::BoxFuture<'__r> {
                     #_Box::pin(async move {
-                        #(#request_guards)*
-                        #(#param_guards)*
-                        #query_guards
-                        #data_guard
-
-                        #responder_outcome
+                        #_route::Outcome::from(#__req, #Status::UpgradeRequired)
                     })
                 }
 
@@ -349,8 +384,8 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
                     name: stringify!(#handler_fn_name),
                     method: #method,
                     uri: #uri,
-                    handler: monomorphized_function,
-                    webSocket_handler: #WebSocketEvent::None,
+                    handler: #handler,
+                    websocket_handler: #websocket_handler,
                     format: #format,
                     rank: #rank,
                     sentinels: #sentinels,
