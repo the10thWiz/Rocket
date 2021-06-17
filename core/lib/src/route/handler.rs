@@ -355,6 +355,12 @@ impl Clone for Box<dyn Handler> {
     }
 }
 
+/// Helper trait to make a [`Route`](crate::Route)'s `Box<dyn WebSocketHandler>`
+/// `Clone`.
+///
+/// This trait cannot be implemented directly. Instead, implement `Clone` and
+/// [`WebSocketHandler`]; all types that implement `Clone` and `WebSocketHandler`
+/// automatically implement `CloneableWs`.
 pub trait CloneableWS: private::SealedWS {
     #[doc(hidden)]
     fn clone_handler(&self) -> Box<dyn WebSocketHandler>;

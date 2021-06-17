@@ -1,5 +1,4 @@
 use std::convert::TryFrom;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -7,40 +6,25 @@ use std::time::Duration;
 use bytes::Bytes;
 use bytes::BytesMut;
 use futures::Future;
-use rocket_http::ext::IntoOwned;
 use rocket_http::uri::Origin;
 use rocket_http::hyper::upgrade::Upgraded;
 use tokio::io::{AsyncWrite, ReadHalf, WriteHalf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::join;
 use tokio::select;
 use tokio::time::timeout;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio_util::codec::{Decoder, Encoder};
 use websocket_codec::Opcode;
 use websocket_codec::protocol::FrameHeader;
 use websocket_codec::protocol::FrameHeaderCodec;
-use state::Container;
-
-//use crate::channels::MAX_BUFFER_SIZE;
-//use crate::channels::rocket_multiplex::MULTIPLEX_CONTROL_CHAR;
-//use crate::channels::WebSocketMessage;
-//use crate::request::Outcome;
-
-//use crate::log::*;
+//use state::Container;
 
 use crate::Request;
 use crate::form::ValueField;
 use crate::request::{FromWebSocket, Outcome};
 
 use super::message::{IntoMessage, WebSocketMessage, to_message};
-//use super::FromWebSocket;
-//use super::IntoMessage;
-//use super::Protocol;
-//use super::WebSocket;
 use super::status::WebSocketStatus;
-//use super::broker::Broker;
-//use super::to_message;
 use validation::Utf8Validator;
 
 const MAX_BUFFER_SIZE: usize = 1024;
@@ -49,7 +33,6 @@ const MAX_BUFFER_SIZE: usize = 1024;
 pub(crate) struct WebSocketChannel {
     inner: mpsc::Receiver<WebSocketMessage>,
     sender: mpsc::Sender<WebSocketMessage>,
-    close_sent: Arc<AtomicBool>,
 }
 
 impl WebSocketChannel {
@@ -61,18 +44,15 @@ impl WebSocketChannel {
     pub fn new(upgrade: Upgraded) -> (Self, impl Future<Output = ()>, impl Future<Output = ()>) {
         let (broker_tx, broker_rx) = mpsc::channel(50);
         let (message_tx, message_rx) = mpsc::channel(1);
-        let close_sent = Arc::new(AtomicBool::new(false));
         let (a, b) = Self::message_handler(
             upgrade,
             broker_tx.clone(),
             broker_rx,
             message_tx,
-            close_sent.clone()
         );
         (Self {
                 inner: message_rx,
                 sender: broker_tx,
-                close_sent,
         }, a, b)
     }
 
@@ -86,12 +66,6 @@ impl WebSocketChannel {
     /// This method also forwards messages sent from any channels the client is subscribed to
     pub async fn next(&mut self) -> Option<WebSocketMessage> {
         self.inner.recv().await
-    }
-
-    /// Gets the close_sent flag. This function returns true iff we have not sent a close message
-    /// yet, i.e. we should send a close message.
-    pub fn should_send_close(&self) -> bool {
-        !self.close_sent.load(atomic::Ordering::Acquire)
     }
 
     // TODO maybe avoid repeated if blocks?
@@ -299,10 +273,10 @@ impl WebSocketChannel {
         mut write: WriteHalf<Upgraded>,
         mut broker_rx: mpsc::Receiver<WebSocketMessage>,
         mut ping_rx: mpsc::Receiver<Bytes>,
-        close_sent: Arc<AtomicBool>,
     ) {
         let mut codec = websocket_codec::protocol::FrameHeaderCodec;
         let mut write_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+        let mut close_sent = false;
         while let Some(message) = Self::await_or_ping(
             &mut broker_rx,
             &mut ping_rx,
@@ -312,7 +286,7 @@ impl WebSocketChannel {
         {
             let (header, mut topic, mut rx) = message.into_parts();
             if header.opcode() == u8::from(Opcode::Close) {
-                close_sent.store(true, atomic::Ordering::Release);
+                close_sent = true;
             }
             let mut running_header = Some(header);
             while let Some(chunk) = Self::await_or_ping(
@@ -370,7 +344,7 @@ impl WebSocketChannel {
                     // (since it is replaced with None by take), so it will only be sent
                     // once at the beginning of a message. Naked messages will send topic
                     // as None, and therefore nothing will be appended
-                    if let Some(topic) = topic_buf {
+                    if let Some(_topic) = topic_buf {
                         //let _e = write.write_all(topic.as_bytes()).await;
                         //let _e = write.write_all(MULTIPLEX_CONTROL_CHAR).await;
                     }
@@ -416,11 +390,11 @@ impl WebSocketChannel {
                     let _e = write.write_all_buf(&mut write_buf).await;
                 }
             }
-            if close_sent.load(atomic::Ordering::Acquire) {
+            if close_sent {
                 break;
             }
         }
-        if !close_sent.load(atomic::Ordering::Acquire) {
+        if !close_sent {
             warn_!("Writer task did not send close");
         }
         let _e = write.shutdown().await;
@@ -433,7 +407,6 @@ impl WebSocketChannel {
         broker_tx: mpsc::Sender<WebSocketMessage>,
         broker_rx: mpsc::Receiver<WebSocketMessage>,
         message_tx: mpsc::Sender<WebSocketMessage>,
-        close_sent: Arc<AtomicBool>,
     ) -> (impl Future<Output = ()>, impl Future<Output = ()>) {
         // Split creates a mutex to syncronize access to the underlying io stream
         // This should be okay, since the lock shouldn't be in high contention, although it
@@ -449,7 +422,7 @@ impl WebSocketChannel {
         let (ping_tx, ping_rx) = mpsc::channel(1);
 
         let reader = Self::reader(recv_close.clone(), read, broker_tx, ping_tx, message_tx);
-        let writer = Self::writer(recv_close, write, broker_rx, ping_rx, close_sent);
+        let writer = Self::writer(recv_close, write, broker_rx, ping_rx);
         (reader, writer)
     }
 
@@ -598,6 +571,7 @@ impl<'r> WebSocket<'r> {
     }
 
     /// Sets the topic URI for this WebSocket
+    #[allow(unused)]
     pub(crate) fn set_topic(&mut self, topic: Origin<'r>) {
         self.request.set_uri(topic);
     }

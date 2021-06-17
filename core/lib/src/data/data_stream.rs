@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use crate::http::hyper;
 use crate::ext::{PollExt, Chain};
 use crate::data::{Capped, N};
-use crate::websocket::message::{IntoMessage, WebSocketMessage};
+use crate::websocket::message::WebSocketMessage;
 
 /// Raw data stream of a request body.
 ///

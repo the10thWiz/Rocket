@@ -4,7 +4,7 @@ use indexmap::{IndexSet, IndexMap};
 use proc_macro2::Span;
 
 use crate::proc_macro_ext::Diagnostics;
-use crate::http_codegen::{MediaType, Method, WebSocketEvent};
+use crate::http_codegen::{MediaType, WebSocketEvent};
 use crate::attribute::param::{Parameter, Dynamic, Guard};
 use crate::syn_ext::FnArgExt;
 use crate::name::Name;

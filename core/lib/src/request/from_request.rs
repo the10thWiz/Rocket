@@ -2,7 +2,6 @@ use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr};
 
 use crate::websocket::WebSocket;
-use crate::websocket::status::WebSocketStatus;
 use crate::{Request, Route};
 use crate::outcome::{self, IntoOutcome};
 use crate::outcome::Outcome::*;

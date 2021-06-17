@@ -1,4 +1,3 @@
-use std::cell::UnsafeCell;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,9 +10,7 @@ use futures::stream::StreamExt;
 use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 
 use crate::websocket::Extensions;
-use crate::websocket::Protocol;
 use crate::websocket::WebSocketEvent;
-use crate::websocket::WebsocketUpgrade;
 use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
 use crate::websocket::message::WebSocketMessage;
@@ -111,7 +108,7 @@ async fn hyper_service_fn(
             // req.clone() is nessecary since the request is borrowed to hande the response. This
             // copy can (and will) outlive the actual request, but will not outlive the websocket
             // connection.
-            let mut req_copy = req.clone();
+            let req_copy = req.clone();
             let (accept, upgrade) = upgrade.split();
             let r = rocket.dispatch_ws(token, &mut req, data, accept).await;
             rocket.send_response(r, tx).await;
@@ -408,7 +405,7 @@ impl Rocket<Orbit> {
             response.header(Header::new(CONNECTION.as_str(), "upgrade"));
             response.header(Header::new(UPGRADE.as_str(), "websocket"));
             response.header(Header::new("Sec-WebSocket-Accept", accept));
-            
+
             extensions.headers().for_each(|h| {response.header(h);});
 
             response.finalize()
@@ -443,7 +440,8 @@ impl Rocket<Orbit> {
                 req.request().set_route(route);
 
                 let name = route.name.as_deref();
-                let outcome = handle(name, || route.websocket_handler.unwrap_ref().handle(req, data)).await
+                let handler = route.websocket_handler.unwrap_ref();
+                let outcome = handle(name, || handler.handle(req, data)).await
                     .unwrap_or_else(|| Outcome::Failure(Status::InternalServerError));
 
                 // Check if the request processing completed (Some) or if the
@@ -462,7 +460,7 @@ impl Rocket<Orbit> {
     async fn ws_event_loop<'r>(&'r self, req: Request<'r>, upgrade: OnUpgrade) {
         if let Ok(upgrade) = upgrade.await {
             let (ch, a, b) = WebSocketChannel::new(upgrade);
-            let mut req = WebSocket::new(req, ch.subscribe_handle());
+            let req = WebSocket::new(req, ch.subscribe_handle());
             let event_loop = async move {
                 // Explicit moves
                 let mut ch = ch;
@@ -478,7 +476,9 @@ impl Rocket<Orbit> {
                             }
                             break;
                         },
-                        _ => panic!("An unexpected error occured while processing websocket messages. {:?} has an invalid opcode", message),
+                        _ => panic!("An unexpected error occured while\
+                                    processing websocket messages. {:?}\
+                                    has an invalid opcode", message),
                     };
                     // TODO Message event
                     //req.set_topic(Origin::parse("/echo/we").unwrap());
@@ -491,7 +491,8 @@ impl Rocket<Orbit> {
                 // TODO Leave event
                 info_!("Websocket closed with status: {:?}", close_status);
                 // Note: If a close has already been sent, the writer task will just drop this
-                let _e = ch.subscribe_handle().send(WebSocketMessage::default_response(close_status)).await;
+                let _e = ch.subscribe_handle()
+                    .send(WebSocketMessage::default_response(close_status)).await;
             };
             // This will poll each future, on the same thread. This should actually be more
             // preformant than spawning tasks for each.
@@ -632,23 +633,3 @@ impl Rocket<Orbit> {
         }
     }
 }
-
-struct DangerBox<'r>(UnsafeCell<Request<'r>>);
-
-impl<'r> DangerBox<'r> {
-    fn new(r: Request<'r>) -> Self {
-        Self(UnsafeCell::new(r))
-    }
-
-    unsafe fn as_ref(&'r self) -> &'r Request<'r> {
-        &*self.0.get()
-    }
-
-    unsafe fn as_mut(&'r self) -> &'r mut Request<'r> {
-        &mut *self.0.get()
-    }
-}
-
-// This isn't safe
-unsafe impl<'r> Send for DangerBox<'r> {}
-unsafe impl<'r> Sync for DangerBox<'r> {}

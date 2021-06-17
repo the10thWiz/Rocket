@@ -1,5 +1,3 @@
-use std::io::Cursor;
-
 use bytes::{Bytes, BytesMut};
 use rocket_http::uri::Origin;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -15,10 +13,7 @@ use super::{MAX_BUFFER_SIZE, status::WebSocketStatus};
 
 /// A trait for types that can be sent on a webSocket.
 ///
-// This has default implementations for many common types, such as `String`, `Vec<u8>`, etc
-/// There is a default implementation for [`crate::Data`] and `T: AsyncRead`. `Data` will
-/// correctly return is_binary if the `Data` came from webSocket handler. The default
-/// implementation for `T: AsyncRead` always returns binary.
+/// This has default implementations for many common types, such as `String`, `Vec<u8>`, etc
 ///
 /// # Text vs Binary
 ///
@@ -69,77 +64,52 @@ pub async fn into_message<T: AsyncRead + Unpin>(mut t: T, tx: mpsc::Sender<Bytes
     }
 }
 
-//impl<T: AsyncRead + Send + Unpin + 'static> IntoMessage for T {
-    //fn is_binary(&self) -> bool {
-        //true
-    //}
+macro_rules! impl_into_message {
+    ($($name:ty => $binary:expr$(,)?)*) => {
+        $(
+            #[crate::async_trait]
+            impl IntoMessage for $name {
+                fn is_binary(&self) -> bool {
+                    $binary
+                }
 
-    //fn into_message(mut self) -> mpsc::Receiver<Bytes> {
-        //let (tx, rx) = mpsc::channel(1);
-        //tokio::spawn(async move {
-            //let mut buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
-            //while let Ok(n) = self.read_buf(&mut buf).await {
-                //if n == 0 {
-                    //break;
-                //}
-                //let tmp = buf.split();
-                //let _e = tx.send(tmp.into()).await;
-                //if buf.capacity() <= 0 {
-                    //buf.reserve(MAX_BUFFER_SIZE);
-                //}
-            //}
-        //});
-        //rx
-    //}
-//}
+                async fn into_message(self, sender: mpsc::Sender<Bytes>) {
+                    let _e = sender.send(Bytes::from(self)).await;
+                }
+            }
+        )*
+    };
+}
 
-// Compliler error, since AsyncRead could be implemented on String in future versions (probably of
-// Tokio)
-// Alternative is implementing on every type manally (or macro), but this makes writing custom
-// IntoMessage types harder.
+// These implementations are extremely efficient since they don't need to copy or allocate, with
+// the possible exception of BytesMut.
+impl_into_message! {
+    String        => false,
+    &'static str  => false,
+    Vec<u8>       => true,
+    &'static [u8] => true,
+    Bytes         => true,
+    BytesMut      => true,
+}
 
-//impl IntoMessage for String {
-    //fn is_binary(&self) -> bool {
-        //false
-    //}
+#[crate::async_trait]
+impl IntoMessage for WebSocketMessage {
+    fn is_binary(&self) -> bool {
+        self.header.opcode() != u8::from(Opcode::Text)
+    }
 
-    //fn into_message(self) -> mpsc::Receiver<Bytes> {
-        //into_message(Cursor::new(self))
-    //}
-//}
-
-//impl IntoMessage for &str {
-    //fn is_binary(&self) -> bool {
-        //false
-    //}
-
-    //fn into_message(self) -> mpsc::Receiver<Bytes> {
-        //into_message(Cursor::new(self.to_string()))
-    //}
-//}
-
-//impl IntoMessage for Vec<u8> {
-    //fn is_binary(&self) -> bool {
-        //true
-    //}
-
-    //fn into_message(self) -> mpsc::Receiver<Bytes> {
-        //into_message(Cursor::new(self))
-    //}
-//}
-
-//impl IntoMessage for &[u8] {
-    //fn is_binary(&self) -> bool {
-        //true
-    //}
-
-    //fn into_message(self) -> mpsc::Receiver<Bytes> {
-        //into_message(Cursor::new(self.to_vec()))
-    //}
-//}
+    async fn into_message(mut self, sender: mpsc::Sender<Bytes>) {
+        while let Some(bytes) = self.data.recv().await {
+            let _e = sender.send(bytes).await;
+        }
+    }
+}
 
 /// Convience function to convert an `impl IntoMessage` into a `Message`
-pub(crate) async fn to_message(message: impl IntoMessage, message_tx: &mpsc::Sender<WebSocketMessage>) {
+pub(crate) async fn to_message(
+    message: impl IntoMessage,
+    message_tx: &mpsc::Sender<WebSocketMessage>
+) {
     let (tx, rx) = mpsc::channel(1);
     if let Ok(()) = message_tx.send(WebSocketMessage::new(message.is_binary(), rx)).await {
         message.into_message(tx).await;
@@ -215,6 +185,7 @@ impl WebSocketMessage {
     }
 
     /// Set the topic of this message
+    #[allow(unused)]
     pub(crate) fn with_topic(mut self, topic: Origin<'static>) -> Self {
         self.topic = Some(topic);
         self
@@ -228,16 +199,25 @@ impl WebSocketMessage {
     pub(crate) fn default_response(status: Result<WebSocketStatus<'_>, StatusError>) -> Self {
         match status {
             // Specific matches
-            Ok(s) if s == WebSocketStatus::Ok => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::GoingAway => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::ExtensionRequired => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::UnknownMessageType => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::InvalidDataType => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::PolicyViolation => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::MessageTooLarge => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::InternalServerError => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::Ok
+                => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::GoingAway
+                => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::ExtensionRequired
+                => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::UnknownMessageType
+                => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::InvalidDataType
+                => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::PolicyViolation
+                => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::MessageTooLarge
+                => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::InternalServerError
+                => Self::close(Some(WebSocketStatus::Ok)),
             // 3000..=3999 is defined by the IANA, 4000..=4999 is private use
-            Ok(s) if (3000..=4999).contains(&s.code()) => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if (3000..=4999).contains(&s.code())
+                => Self::close(Some(WebSocketStatus::Ok)),
             // If the frame was empty (not malformed), we response with Ok
             Err(StatusError::NoStatus) => Self::close(Some(WebSocketStatus::Ok)),
             // Default to protocol error
@@ -245,18 +225,3 @@ impl WebSocketMessage {
         }
     }
 }
-
-// Trivial conversion
-//impl IntoMessage for WebSocketMessage {
-    //fn is_binary(&self) -> bool {
-        //match Opcode::try_from(self.header.opcode()) {
-            //Some(Opcode::Text) => false,
-            //_ => true,
-        //}
-    //}
-
-    //fn into_message(self) -> mpsc::Receiver<Bytes> {
-        //self.data
-    //}
-//}
-

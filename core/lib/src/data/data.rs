@@ -50,7 +50,9 @@ impl<'r> Data<'r> {
         Self::from_ws(stream, None)
     }
 
-    pub(crate) fn from_ws<S: Into<StreamReader<'r>>>(stream: S, ws_binary: Option<bool>) -> Data<'r> {
+    pub(crate) fn from_ws<S>(stream: S, ws_binary: Option<bool>) -> Data<'r>
+        where S: Into<StreamReader<'r>>
+    {
         // TODO.async: This used to also set the read timeout to 5 seconds.
         // Such a short read timeout is likely no longer necessary, but some
         // kind of idle timeout should be implemented.

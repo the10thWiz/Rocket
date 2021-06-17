@@ -7,6 +7,7 @@ use yansi::Paint;
 use crate::http::{uri, Method, MediaType};
 use crate::route::{Handler, RouteUri, BoxFuture};
 use crate::sentinel::Sentry;
+use crate::websocket::WebSocket;
 
 use super::WebSocketHandler;
 
@@ -368,8 +369,8 @@ pub struct StaticInfo {
     /// The route's handler, i.e, the annotated function.
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data<'r>) -> BoxFuture<'r>,
     /// The route's websocket handler, i.e, the annotated function.
-    pub websocket_handler: 
-        WebSocketEvent<for<'r> fn(&'r crate::websocket::WebSocket<'_>, crate::Data<'r>) -> BoxFuture<'r>>,
+    pub websocket_handler:
+        WebSocketEvent<for<'r> fn(&'r WebSocket<'_>, crate::Data<'r>) -> BoxFuture<'r>>,
     /// The route's rank, if any.
     pub rank: Option<isize>,
     /// Route-derived sentinels, if any.
@@ -396,11 +397,16 @@ impl From<StaticInfo> for Route {
     }
 }
 
+/// Type to represent a Websocket Event.
 #[derive(Clone, Debug)]
 pub enum WebSocketEvent<T> {
+    /// A Join event, triggered when a client joins
     Join(T),
+    /// A Message event, triggered for every message the client sends
     Message(T),
+    /// A Leave event, triggered when a client disconnects
     Leave(T),
+    /// None, for routes which don't handle Websocket Events
     None,
 }
 
@@ -425,15 +431,23 @@ impl<T> WebSocketEvent<T> {
         !matches!(self, Self::None)
     }
 
+    /// Checks if self and other collide. This more or less just checks if they are the same
+    /// variant.
     pub fn collides(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Join(_), Self::Join(_)) => true,
             (Self::Message(_), Self::Message(_)) => true,
             (Self::Leave(_), Self::Leave(_)) => true,
+            (Self::None, Self::None) => true,
             _ => false,
         }
     }
 
+    /// Unwraps a reference to the inner T.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is `WebSocketEvent::None`, since it has no inner T.
     pub(crate) fn unwrap_ref(&self) -> &T {
         match self {
             Self::None => panic!("WebSocketEvent::None is not a valid websocket event"),

@@ -1,4 +1,3 @@
-use std::fmt::write;
 
 use quote::ToTokens;
 use devise::{FromMeta, MetaItem, Result, ext::{Split2, PathExt, SpanDiagnosticExt}};

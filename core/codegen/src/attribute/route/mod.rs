@@ -5,11 +5,10 @@ use std::hash::Hash;
 use devise::{Spanned, SpanWrapped, Result, FromMeta, Diagnostic};
 use devise::ext::TypeExt as _;
 use proc_macro2::{TokenStream, Span};
-use quote::ToTokens;
 
 use crate::proc_macro_ext::StringLit;
 use crate::syn_ext::{IdentExt, TypeExt as _};
-use crate::http_codegen::{Method, Optional, WebSocketEvent};
+use crate::http_codegen::{Optional, WebSocketEvent};
 use crate::attribute::param::Guard;
 
 use self::parse::{Route, Attribute, MethodAttribute};
@@ -137,7 +136,7 @@ fn request_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
     }
 }
 
-fn param_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
+fn param_guard_decl(guard: &Guard, _websocket: bool) -> TokenStream {
     let (i, name, ty) = (guard.index, &guard.name, &guard.ty);
     define_spanned_export!(ty.span() =>
         __req, __data, _log, _None, _Some, _Ok, _Err,
@@ -320,11 +319,14 @@ fn monomorphized_function(route: &Route) -> TokenStream {
     use crate::exports::*;
 
     // Generate the declarations for all of the guards.
-    let request_guards = route.request_guards.iter().map(|r| request_guard_decl(r, route.attr.method.is_websocket()));
-    let param_guards = route.param_guards().map(|r| param_guard_decl(r, route.attr.method.is_websocket()));
+    let request_guards = route.request_guards.iter()
+        .map(|r| request_guard_decl(r, route.attr.method.is_websocket()));
+    let param_guards = route.param_guards()
+        .map(|r| param_guard_decl(r, route.attr.method.is_websocket()));
     let query_guards = query_decls(&route);
-    let data_guard = route.data_guard.as_ref().map(|r| data_guard_decl(r, route.attr.method.is_websocket()));
-    
+    let data_guard = route.data_guard.as_ref()
+        .map(|r| data_guard_decl(r, route.attr.method.is_websocket()));
+
     let responder_outcome = responder_outcome_expr(&route, route.attr.method.is_websocket());
 
     let request = if route.attr.method.is_websocket() {

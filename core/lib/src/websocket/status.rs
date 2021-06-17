@@ -107,18 +107,12 @@ impl<'a> WebSocketStatus<'a> {
         Self { code, reason }
     }
 
-    pub fn with_reason<'b>(&self, reason: Cow<'b, str>) -> WebSocketStatus<'b> {
+    /// Constructs a new Status with the provided reason
+    pub fn with_reason<'b>(&self, reason: impl Into<Cow<'b, str>>) -> WebSocketStatus<'b> {
         WebSocketStatus {
             code: self.code,
-            reason,
+            reason: reason.into(),
         }
-    }
-
-    /// Internal method for creating status codes. This does not attach a reason, and allows codes
-    /// outside of the normal range to be created. This is primarily useful for creating Status
-    /// codes that represent HTTP statuses, and can later be converted into one.
-    pub(crate) fn internal(code: u16) -> Self {
-        Self { code, reason: Cow::Borrowed("") }
     }
 
     /// Encodes this status code into a buffer
@@ -148,16 +142,6 @@ impl<'a> WebSocketStatus<'a> {
     /// Gets the code sent with this status
     pub fn reason(&'a self) -> &'a str {
         self.reason.as_ref()
-    }
-
-    pub(crate) fn to_http(&self) -> Result<Status, ()> {
-        match self.code {
-            0..=999 => Status::from_code(self.code).ok_or(()),
-            1000 => Ok(Status::Ok),
-            1002 => Ok(Status::BadRequest),
-            1011 => Ok(Status::InternalServerError),
-            _ => Err(()),
-        }
     }
 }
 
