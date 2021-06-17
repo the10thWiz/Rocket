@@ -434,51 +434,6 @@ fn complete_route(args: TokenStream, input: TokenStream) -> Result<TokenStream> 
 }
 
 fn incomplete_route(
-    method: crate::http::Method,
-    args: TokenStream,
-    input: TokenStream
-) -> Result<TokenStream> {
-    let method_str = method.to_string().to_lowercase();
-    // FIXME(proc_macro): there should be a way to get this `Span`.
-    let method_span = StringLit::new(format!("#[{}]", method), Span::call_site())
-        .subspan(2..2 + method_str.len());
-
-    let method_ident = syn::Ident::new(&method_str, method_span.into());
-
-    let function: syn::ItemFn = syn::parse2(input)
-        .map_err(|e| Diagnostic::from(e))
-        .map_err(|d| d.help(format!("#[{}] can only be used on functions", method_str)))?;
-
-    let full_attr = quote!(#method_ident(#args));
-    let method_attribute = MethodAttribute::from_meta(&syn::parse2(full_attr)?)?;
-
-    let attribute = Attribute {
-        method: SpanWrapped {
-            full_span: method_span, key_span: None, span: method_span, value: Method(method).into()
-        },
-        uri: method_attribute.uri,
-        data: method_attribute.data,
-        format: method_attribute.format,
-        rank: method_attribute.rank,
-    };
-
-    codegen_route(Route::from(attribute, function)?)
-}
-
-pub fn route_attribute<M: Into<Option<crate::http::Method>>>(
-    method: M,
-    args: proc_macro::TokenStream,
-    input: proc_macro::TokenStream
-) -> TokenStream {
-    let result = match method.into() {
-        Some(method) => incomplete_route(method, args.into(), input.into()),
-        None => complete_route(args.into(), input.into())
-    };
-
-    result.unwrap_or_else(|diag| diag.emit_as_item_tokens())
-}
-
-fn incomplete_ws_route(
     method: WebSocketEvent,
     args: TokenStream,
     input: TokenStream
@@ -510,13 +465,13 @@ fn incomplete_ws_route(
     codegen_route(Route::from(attribute, function)?)
 }
 
-pub fn websocket_attribute<M: Into<Option<WebSocketEvent>>>(
+pub fn route_attribute<M: Into<Option<N>>, N: Into<WebSocketEvent>>(
     method: M,
     args: proc_macro::TokenStream,
     input: proc_macro::TokenStream
 ) -> TokenStream {
     let result = match method.into() {
-        Some(method) => incomplete_ws_route(method, args.into(), input.into()),
+        Some(method) => incomplete_route(method.into(), args.into(), input.into()),
         None => complete_route(args.into(), input.into())
     };
 

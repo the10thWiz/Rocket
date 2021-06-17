@@ -168,6 +168,12 @@ impl From<Method> for WebSocketEvent {
     }
 }
 
+impl From<http::Method> for WebSocketEvent {
+    fn from(m: http::Method) -> Self {
+        Self::Http(Method(m))
+    }
+}
+
 impl ToTokens for Method {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let method_tokens = match self.0 {
