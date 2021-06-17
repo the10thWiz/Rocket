@@ -1,3 +1,4 @@
+use std::cell::UnsafeCell;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,6 +11,7 @@ use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 
 use crate::websocket::Extensions;
 use crate::websocket::Protocol;
+use crate::websocket::WebSocketEvent;
 use crate::websocket::WebsocketUpgrade;
 use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
@@ -52,7 +54,7 @@ async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
     }
 
     let run = AssertUnwindSafe(run);
-    let fut = std::panic::catch_unwind(move || run())
+    let fut = std::panic::catch_unwind(run)
         .map_err(|e| panic_info!(name, e))
         .ok()?;
 
@@ -62,6 +64,7 @@ async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
         .map_err(|e| panic_info!(name, e))
         .ok()
 }
+
 
 // This function tries to hide all of the Hyper-ness from Rocket. It essentially
 // converts Hyper types into Rocket types, then calls the `dispatch` function,
@@ -104,11 +107,11 @@ async fn hyper_service_fn(
             // req.clone() is nessecary since the request is borrowed to hande the response. This
             // copy can (and will) outlive the actual request, but will not outlive the websocket
             // connection.
-            let req_copy = req.clone();
+            let mut req_copy = req.clone();
             let (accept, upgrade) = upgrade.split();
             let r = rocket.dispatch_ws(token, &mut req, data, accept).await;
             rocket.send_response(r, tx).await;
-            rocket.ws_event_loop(req_copy, upgrade).await;
+            rocket.ws_event_loop(&mut req_copy, upgrade).await;
         } else {
             let r = rocket.dispatch(token, &mut req, data).await;
             rocket.send_response(r, tx).await;
@@ -421,14 +424,42 @@ impl Rocket<Orbit> {
         response
     }
 
-    async fn ws_event_loop(&self, req: Request<'_>, upgrade: OnUpgrade) {
-        // I don't know if I need to pin it, but I think it's a good idea
-        tokio::pin!(req);
+    /// Routes a websocket event. This is different from an HTTP route in that the event is passed
+    /// seperately, but the reqest still holds all the nessecary information
+    // TODO: Simplify the lifetime bounds
+    async fn route_event<'s, 'r, 'ri, 'd>(&'s self, req: &'r Request<'ri>, event: WebSocketEvent, mut data: Data<'r>)
+    -> route::Outcome<'r>
+        where 's: 'ri
+    {
+        for route in self.router.route_event(event) {
+            if route.matches(req) {
+                info_!("Matched: {}", route);
+                req.set_route(route);
+
+                let name = route.name.as_deref();
+                let outcome = handle(name, || route.handler.handle(req, data)).await
+                    .unwrap_or_else(|| Outcome::Failure(Status::InternalServerError));
+
+                // Check if the request processing completed (Some) or if the
+                // request needs to be forwarded. If it does, continue the loop
+                // (None) to try again.
+                info_!("{} {}", Paint::default("Outcome:").bold(), outcome);
+                match outcome {
+                    o@Outcome::Success(_) | o@Outcome::Failure(_) => return o,
+                    Outcome::Forward(unused_data) => data = unused_data,
+                }
+            }
+        }
+        route::Outcome::Forward(data)
+    }
+
+    async fn ws_event_loop<'r>(&'r self, req: &'r mut Request<'r>, upgrade: OnUpgrade) {
         if let Ok(upgrade) = upgrade.await {
             let (ch, a, b) = WebSocketChannel::new(upgrade);
             let event_loop = async move {
                 // Explicit moves
                 let mut ch = ch;
+                //let req = unsafe { req.as_mut() };
                 // TODO Join event
                 while let Some(message) = ch.next().await {
                     let data = match message.opcode() {
@@ -438,6 +469,11 @@ impl Rocket<Orbit> {
                         _ => panic!("An unexpected error occured while processing websocket messages. {:?} has an invalid opcode", message),
                     };
                     // TODO Message event
+                    //unsafe { req.as_mut() }
+                    //req.set_uri(Origin::parse("/echo/we").unwrap());
+                    //let _o = self.route(req, data).await;
+                    let _o = self.route_event(req, WebSocketEvent::Message, data).await;
+                    //drop(iter);
                 }
                 // TODO Leave event
             };
@@ -580,3 +616,23 @@ impl Rocket<Orbit> {
         }
     }
 }
+
+struct DangerBox<'r>(UnsafeCell<Request<'r>>);
+
+impl<'r> DangerBox<'r> {
+    fn new(r: Request<'r>) -> Self {
+        Self(UnsafeCell::new(r))
+    }
+
+    unsafe fn as_ref(&'r self) -> &'r Request<'r> {
+        &*self.0.get()
+    }
+
+    unsafe fn as_mut(&'r self) -> &'r mut Request<'r> {
+        &mut *self.0.get()
+    }
+}
+
+// This isn't safe
+unsafe impl<'r> Send for DangerBox<'r> {}
+unsafe impl<'r> Sync for DangerBox<'r> {}

@@ -89,14 +89,14 @@ pub(crate) enum Protocol {
 
 impl Protocol {
     pub fn new(_req: &Request<'_>) -> Self {
-        Self::Invalid
+        Self::Naked
     }
 
     /// Gets a status code if the Protocol requested was invalid
     pub fn is_err(&self) -> Option<Status> {
         match self {
-            Self::Invalid => Some(Status::ImATeapot),
-            _ => None,
+            Self::Naked => None,
+            _ => Some(Status::ImATeapot),
         }
     }
 

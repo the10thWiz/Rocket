@@ -594,6 +594,7 @@ impl<'r> FromWebSocket<'r> for Channel<'r> {
     type Error = ();
 
     async fn from_websocket(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        info_!("{}", request.uri());
         Outcome::Forward(())
     }
 }
