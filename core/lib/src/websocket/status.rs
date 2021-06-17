@@ -46,6 +46,8 @@ pub enum StatusError {
     BadFrame,
     /// A close frame with a reason that isn't valid UTF-8
     Utf8Error(FromUtf8Error),
+    /// An empty close frame
+    NoStatus,
 }
 
 impl From<FromUtf8Error> for StatusError {
@@ -72,7 +74,7 @@ impl<'a> WebSocketStatus<'a> {
         Ok => 1000,
         GoingAway => 1001,
         ProtocolError => 1002,
-        UnknownMessageQueue => 1003,
+        UnknownMessageType => 1003,
         Reserved => 1004,
         NoStatusCode => 1005,
         AbnormalClose => 1006,
@@ -172,7 +174,9 @@ impl From<Status> for WebSocketStatus<'static> {
 // Maybe remove leading zeros?
 impl WebSocketStatus<'static> {
     pub(crate) fn decode(mut bytes: Bytes) -> Result<Self, StatusError> {
-        if bytes.len() < 2 {
+        if bytes.len() == 0 {
+            Err(StatusError::NoStatus)
+        } else if bytes.len() < 2 {
             Err(StatusError::BadFrame)
         } else {
             let code =  u16::from_be_bytes([bytes[0], bytes[1]]);

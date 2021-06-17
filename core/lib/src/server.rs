@@ -16,6 +16,9 @@ use crate::websocket::WebSocketEvent;
 use crate::websocket::WebsocketUpgrade;
 use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
+use crate::websocket::message::WebSocketMessage;
+use crate::websocket::status::StatusError;
+use crate::websocket::status::WebSocketStatus;
 use crate::{Rocket, Orbit, Request, Response, Data, route};
 use crate::form::Form;
 use crate::outcome::Outcome;
@@ -463,12 +466,18 @@ impl Rocket<Orbit> {
             let event_loop = async move {
                 // Explicit moves
                 let mut ch = ch;
+                let mut close_status = Err(StatusError::NoStatus);
                 // TODO Join event
                 while let Some(message) = ch.next().await {
                     let data = match message.opcode() {
                         websocket_codec::Opcode::Text => Data::from_ws(message, Some(false)),
                         websocket_codec::Opcode::Binary => Data::from_ws(message, Some(true)),
-                        websocket_codec::Opcode::Close => break,
+                        websocket_codec::Opcode::Close => {
+                            if let Some(status) = message.inner().recv().await {
+                                close_status = WebSocketStatus::decode(status);
+                            }
+                            break;
+                        },
                         _ => panic!("An unexpected error occured while processing websocket messages. {:?} has an invalid opcode", message),
                     };
                     // TODO Message event
@@ -480,6 +489,9 @@ impl Rocket<Orbit> {
                     }
                 }
                 // TODO Leave event
+                info_!("Websocket closed with status: {:?}", close_status);
+                // Note: If a close has already been sent, the writer task will just drop this
+                let _e = ch.subscribe_handle().send(WebSocketMessage::default_response(close_status)).await;
             };
             // This will poll each future, on the same thread. This should actually be more
             // preformant than spawning tasks for each.

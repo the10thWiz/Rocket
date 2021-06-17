@@ -10,6 +10,7 @@ use websocket_codec::protocol::FrameHeader;
 
 use crate::Data;
 
+use super::status::StatusError;
 use super::{MAX_BUFFER_SIZE, status::WebSocketStatus};
 
 /// A trait for types that can be sent on a webSocket.
@@ -222,6 +223,26 @@ impl WebSocketMessage {
     /// Gets the inner data channel
     pub(crate) fn inner(self) -> mpsc::Receiver<Bytes> {
         self.data
+    }
+
+    pub(crate) fn default_response(status: Result<WebSocketStatus<'_>, StatusError>) -> Self {
+        match status {
+            // Specific matches
+            Ok(s) if s == WebSocketStatus::Ok => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::GoingAway => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::ExtensionRequired => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::UnknownMessageType => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::InvalidDataType => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::PolicyViolation => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::MessageTooLarge => Self::close(Some(WebSocketStatus::Ok)),
+            Ok(s) if s == WebSocketStatus::InternalServerError => Self::close(Some(WebSocketStatus::Ok)),
+            // 3000..=3999 is defined by the IANA, 4000..=4999 is private use
+            Ok(s) if (3000..=4999).contains(&s.code()) => Self::close(Some(WebSocketStatus::Ok)),
+            // If the frame was empty (not malformed), we response with Ok
+            Err(StatusError::NoStatus) => Self::close(Some(WebSocketStatus::Ok)),
+            // Default to protocol error
+            _ => Self::close(Some(WebSocketStatus::ProtocolError)),
+        }
     }
 }
 
