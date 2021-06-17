@@ -29,40 +29,20 @@ fn index() -> Html<&'static str> {
             const ws = new WebSocket('ws://' + location.host + '/echo');
             ws.onopen = function(e) {
                 status.innerText = 'Connected :)';
-                console.log(e);
             };
             ws.onclose = function(e) {
                 status.innerText = 'Disconnected :(';
                 lines.innerHTML = '';
-                console.log(e);
             };
             ws.onmessage = function(msg, e) {
                 const line = document.createElement('p');
                 line.innerText = msg.data;
                 lines.prepend(line);
-                console.log(e);
             };
             send.onclick = function(e) {
                 ws.send(text.value);
                 text.value = '';
-                console.log(e);
             };
-            // JS code to trigger race condition in webscoket implementation
-            var arr = [];
-            for(let i = 0; i < 100; i++) {
-                arr.push(i);
-            }
-            function trigger_race() {
-                for(let i = 0; i < 10; i++) {
-                    window.setTimeout(() => {
-                        ws.send(JSON.stringify(arr));
-                    }, i * 10);
-                }
-            }
-            let tmp = JSON.stringify(arr) + '\n';
-            for(let i = 0; i < 5; i++) {
-                tmp+= tmp;
-            }
         </script>
     </body>
 </html>"#)
