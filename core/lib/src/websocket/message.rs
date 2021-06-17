@@ -29,6 +29,7 @@ use super::{MAX_BUFFER_SIZE, status::WebSocketStatus};
 ///
 /// # Notes for implementing `IntoMessage`
 // TODO: implement `IntoMessage` on `Json` and other convience types
+#[crate::async_trait]
 pub trait IntoMessage {
     /// Returns whether this message is binary, as opposed to text.
     ///
@@ -37,38 +38,34 @@ pub trait IntoMessage {
 
     /// Consumes the object, and returns a `mpsc::Receiver<Bytes>` that sends chunks of the
     /// message
-    fn into_message(self) -> mpsc::Receiver<Bytes>;
+    async fn into_message(self, sender: mpsc::Sender<Bytes>);
 }
 
-impl IntoMessage for Data<'static> {
+#[crate::async_trait]
+impl<'r> IntoMessage for Data<'r> {
     fn is_binary(&self) -> bool {
-        //self.was_ws_binary().unwrap_or(true)
-        true
+        self.was_ws_binary().unwrap_or(true)
     }
 
-    fn into_message(self) -> mpsc::Receiver<Bytes> {
-        into_message(self.open(ByteUnit::max_value()))
+    async fn into_message(self, sender: mpsc::Sender<Bytes>) {
+        into_message(self.open(ByteUnit::max_value()), sender).await;
     }
 }
 
 /// Helper function for implementing `IntoMessage`. Converts a type that implements AsyncRead into
 /// `mpsc::Receiver<Bytes>`, the type `IntoMessage` requires.
-pub fn into_message<T: AsyncRead + Send + Unpin + 'static>(mut t: T) -> mpsc::Receiver<Bytes> {
-    let (tx, rx) = mpsc::channel(1);
-    tokio::spawn(async move {
-        let mut buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
-        while let Ok(n) = t.read_buf(&mut buf).await {
-            if n == 0 {
-                break;
-            }
-            let tmp = buf.split();
-            let _e = tx.send(tmp.into()).await;
-            if buf.capacity() <= 0 {
-                buf.reserve(MAX_BUFFER_SIZE);
-            }
+pub async fn into_message<T: AsyncRead + Unpin>(mut t: T, tx: mpsc::Sender<Bytes>) {
+    let mut buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+    while let Ok(n) = t.read_buf(&mut buf).await {
+        if n == 0 {
+            break;
         }
-    });
-    rx
+        let tmp = buf.split();
+        let _e = tx.send(tmp.into()).await;
+        if buf.capacity() <= 0 {
+            buf.reserve(MAX_BUFFER_SIZE);
+        }
+    }
 }
 
 //impl<T: AsyncRead + Send + Unpin + 'static> IntoMessage for T {
@@ -100,49 +97,52 @@ pub fn into_message<T: AsyncRead + Send + Unpin + 'static>(mut t: T) -> mpsc::Re
 // Alternative is implementing on every type manally (or macro), but this makes writing custom
 // IntoMessage types harder.
 
-impl IntoMessage for String {
-    fn is_binary(&self) -> bool {
-        false
-    }
+//impl IntoMessage for String {
+    //fn is_binary(&self) -> bool {
+        //false
+    //}
 
-    fn into_message(self) -> mpsc::Receiver<Bytes> {
-        into_message(Cursor::new(self))
-    }
-}
+    //fn into_message(self) -> mpsc::Receiver<Bytes> {
+        //into_message(Cursor::new(self))
+    //}
+//}
 
-impl IntoMessage for &str {
-    fn is_binary(&self) -> bool {
-        false
-    }
+//impl IntoMessage for &str {
+    //fn is_binary(&self) -> bool {
+        //false
+    //}
 
-    fn into_message(self) -> mpsc::Receiver<Bytes> {
-        into_message(Cursor::new(self.to_string()))
-    }
-}
+    //fn into_message(self) -> mpsc::Receiver<Bytes> {
+        //into_message(Cursor::new(self.to_string()))
+    //}
+//}
 
-impl IntoMessage for Vec<u8> {
-    fn is_binary(&self) -> bool {
-        true
-    }
+//impl IntoMessage for Vec<u8> {
+    //fn is_binary(&self) -> bool {
+        //true
+    //}
 
-    fn into_message(self) -> mpsc::Receiver<Bytes> {
-        into_message(Cursor::new(self))
-    }
-}
+    //fn into_message(self) -> mpsc::Receiver<Bytes> {
+        //into_message(Cursor::new(self))
+    //}
+//}
 
-impl IntoMessage for &[u8] {
-    fn is_binary(&self) -> bool {
-        true
-    }
+//impl IntoMessage for &[u8] {
+    //fn is_binary(&self) -> bool {
+        //true
+    //}
 
-    fn into_message(self) -> mpsc::Receiver<Bytes> {
-        into_message(Cursor::new(self.to_vec()))
-    }
-}
+    //fn into_message(self) -> mpsc::Receiver<Bytes> {
+        //into_message(Cursor::new(self.to_vec()))
+    //}
+//}
 
 /// Convience function to convert an `impl IntoMessage` into a `Message`
-pub(crate) fn to_message(message: impl IntoMessage) -> WebSocketMessage {
-    WebSocketMessage::new(message.is_binary(), message.into_message())
+pub(crate) async fn to_message(message: impl IntoMessage, message_tx: &mpsc::Sender<WebSocketMessage>) {
+    let (tx, rx) = mpsc::channel(1);
+    if let Ok(()) = message_tx.send(WebSocketMessage::new(message.is_binary(), rx)).await {
+        message.into_message(tx).await;
+    }
 }
 
 /// Semi-internal representation of a webSocket message
@@ -218,19 +218,24 @@ impl WebSocketMessage {
         self.topic = Some(topic);
         self
     }
-}
 
-// Trivial conversion
-impl IntoMessage for WebSocketMessage {
-    fn is_binary(&self) -> bool {
-        match Opcode::try_from(self.header.opcode()) {
-            Some(Opcode::Text) => false,
-            _ => true,
-        }
-    }
-
-    fn into_message(self) -> mpsc::Receiver<Bytes> {
+    /// Gets the inner data channel
+    pub(crate) fn inner(self) -> mpsc::Receiver<Bytes> {
         self.data
     }
 }
+
+// Trivial conversion
+//impl IntoMessage for WebSocketMessage {
+    //fn is_binary(&self) -> bool {
+        //match Opcode::try_from(self.header.opcode()) {
+            //Some(Opcode::Text) => false,
+            //_ => true,
+        //}
+    //}
+
+    //fn into_message(self) -> mpsc::Receiver<Bytes> {
+        //self.data
+    //}
+//}
 

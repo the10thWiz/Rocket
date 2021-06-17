@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr};
 
+use crate::websocket::WebSocket;
 use crate::websocket::status::WebSocketStatus;
 use crate::{Request, Route};
 use crate::outcome::{self, IntoOutcome};
@@ -508,5 +509,21 @@ pub trait FromWebSocket<'r>: Sized {
     /// the derivation fails in an unrecoverable fashion, `Failure` is returned.
     /// `Forward` is returned to indicate that the request should be forwarded
     /// to other matching routes, if any.
-    async fn from_websocket(request: &'r Request<'_>) -> Outcome<Self, Self::Error>;
+    async fn from_websocket(request: &'r WebSocket<'_>) -> Outcome<Self, Self::Error>;
+}
+
+#[crate::async_trait]
+impl<'r, T: FromRequest<'r>> FromWebSocket<'r> for T {
+    /// The associated error to be returned if derivation fails.
+    type Error = <T as FromRequest<'r>>::Error;
+
+    /// Derives an instance of `Self` from the incoming request metadata.
+    ///
+    /// If the derivation is successful, an outcome of `Success` is returned. If
+    /// the derivation fails in an unrecoverable fashion, `Failure` is returned.
+    /// `Forward` is returned to indicate that the request should be forwarded
+    /// to other matching routes, if any.
+    async fn from_websocket(request: &'r WebSocket<'_>) -> Outcome<Self, Self::Error> {
+        <T as FromRequest<'r>>::from_request(request.request()).await
+    }
 }

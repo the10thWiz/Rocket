@@ -30,9 +30,10 @@ use state::Container;
 //use crate::log::*;
 
 use crate::Request;
+use crate::form::ValueField;
 use crate::request::{FromWebSocket, Outcome};
 
-use super::message::WebSocketMessage;
+use super::message::{IntoMessage, WebSocketMessage, to_message};
 //use super::FromWebSocket;
 //use super::IntoMessage;
 //use super::Protocol;
@@ -135,7 +136,6 @@ impl WebSocketChannel {
         message_tx: mpsc::Sender<WebSocketMessage>,
     ) {
         let mut codec = websocket_codec::protocol::FrameHeaderCodec;
-        //let mut read = read;
         let mut read_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
         let (mut data_tx, data_rx) = mpsc::channel(3);
         let mut data_rx = Some(data_rx);
@@ -301,10 +301,6 @@ impl WebSocketChannel {
         mut ping_rx: mpsc::Receiver<Bytes>,
         close_sent: Arc<AtomicBool>,
     ) {
-        // Explicit moves - probably not needed
-        //let recv_close = recv_close2;
-        //let mut write = write;
-        //let mut ping_rx = ping_rx;
         let mut codec = websocket_codec::protocol::FrameHeaderCodec;
         let mut write_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
         while let Some(message) = Self::await_or_ping(
@@ -580,21 +576,63 @@ mod validation {
     }
 }
 
+/// Represents an in-progress WebSocket Connection
+pub struct WebSocket<'r> {
+    request: Request<'r>,
+    sender: mpsc::Sender<WebSocketMessage>,
+}
+
+impl<'r> WebSocket<'r> {
+    pub(crate) fn new(request: Request<'r>, sender: mpsc::Sender<WebSocketMessage>) -> Self {
+        Self { request, sender }
+    }
+
+    /// Gets the inner request object
+    pub fn request(&self) -> &Request<'r> {
+        &self.request
+    }
+
+    /// Gets the topic URI associated with this channel
+    pub fn topic(&self) -> &Origin<'r> {
+        self.request.uri()
+    }
+
+    /// Sets the topic URI for this WebSocket
+    pub(crate) fn set_topic(&mut self, topic: Origin<'r>) {
+        self.request.set_uri(topic);
+    }
+}
+
+#[doc(hidden)]
+impl<'r> WebSocket<'r> {
+    // Retrieves the pre-parsed query items. Used by matching and codegen.
+    #[inline]
+    pub fn query_fields(&self) -> impl Iterator<Item = ValueField<'_>> {
+        self.request.query_fields()
+    }
+}
+
+/// An open Channel connected to a client
 pub struct Channel<'r> {
-    topic: Origin<'r>,
+    sender: mpsc::Sender<WebSocketMessage>,
+    _topic: &'r Origin<'r>,
 }
 
 impl<'r> Channel<'r> {
-    pub async fn send<M>(&self, message: M) {
+    /// Sends a message to the client
+    pub async fn send(&self, message: impl IntoMessage) {
+        to_message(message, &self.sender).await;
     }
 }
 
 #[crate::async_trait]
 impl<'r> FromWebSocket<'r> for Channel<'r> {
-    type Error = ();
+    type Error = std::convert::Infallible;
 
-    async fn from_websocket(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        info_!("{}", request.uri());
-        Outcome::Forward(())
+    async fn from_websocket(request: &'r WebSocket<'_>) -> Outcome<Self, Self::Error> {
+        Outcome::Success(Self {
+            sender: request.sender.clone(),
+            _topic: request.request.uri(),
+        })
     }
 }

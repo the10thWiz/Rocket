@@ -3,6 +3,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
+use channel::WebSocket;
 use rocket_http::hyper::upgrade::OnUpgrade;
 use yansi::Paint;
 use tokio::sync::oneshot;
@@ -111,7 +112,7 @@ async fn hyper_service_fn(
             let (accept, upgrade) = upgrade.split();
             let r = rocket.dispatch_ws(token, &mut req, data, accept).await;
             rocket.send_response(r, tx).await;
-            rocket.ws_event_loop(&mut req_copy, upgrade).await;
+            rocket.ws_event_loop(req_copy, upgrade).await;
         } else {
             let r = rocket.dispatch(token, &mut req, data).await;
             rocket.send_response(r, tx).await;
@@ -427,17 +428,19 @@ impl Rocket<Orbit> {
     /// Routes a websocket event. This is different from an HTTP route in that the event is passed
     /// seperately, but the reqest still holds all the nessecary information
     // TODO: Simplify the lifetime bounds
-    async fn route_event<'s, 'r, 'ri, 'd>(&'s self, req: &'r Request<'ri>, event: WebSocketEvent, mut data: Data<'r>)
-    -> route::Outcome<'r>
-        where 's: 'ri
-    {
+    async fn route_event<'s: 'ri, 'r, 'ri>(
+        &'s self,
+        req: &'r WebSocket<'ri>,
+        event: WebSocketEvent,
+        mut data: Data<'r>
+    ) -> route::Outcome<'r> {
         for route in self.router.route_event(event) {
-            if route.matches(req) {
+            if route.matches(req.request()) {
                 info_!("Matched: {}", route);
-                req.set_route(route);
+                req.request().set_route(route);
 
                 let name = route.name.as_deref();
-                let outcome = handle(name, || route.handler.handle(req, data)).await
+                let outcome = handle(name, || route.websocket_handler.unwrap_ref().handle(req, data)).await
                     .unwrap_or_else(|| Outcome::Failure(Status::InternalServerError));
 
                 // Check if the request processing completed (Some) or if the
@@ -453,13 +456,13 @@ impl Rocket<Orbit> {
         route::Outcome::Forward(data)
     }
 
-    async fn ws_event_loop<'r>(&'r self, req: &'r mut Request<'r>, upgrade: OnUpgrade) {
+    async fn ws_event_loop<'r>(&'r self, req: Request<'r>, upgrade: OnUpgrade) {
         if let Ok(upgrade) = upgrade.await {
             let (ch, a, b) = WebSocketChannel::new(upgrade);
+            let mut req = WebSocket::new(req, ch.subscribe_handle());
             let event_loop = async move {
                 // Explicit moves
                 let mut ch = ch;
-                //let req = unsafe { req.as_mut() };
                 // TODO Join event
                 while let Some(message) = ch.next().await {
                     let data = match message.opcode() {
@@ -469,11 +472,12 @@ impl Rocket<Orbit> {
                         _ => panic!("An unexpected error occured while processing websocket messages. {:?} has an invalid opcode", message),
                     };
                     // TODO Message event
-                    //unsafe { req.as_mut() }
-                    //req.set_uri(Origin::parse("/echo/we").unwrap());
-                    //let _o = self.route(req, data).await;
-                    let _o = self.route_event(req, WebSocketEvent::Message, data).await;
-                    //drop(iter);
+                    //req.set_topic(Origin::parse("/echo/we").unwrap());
+                    let _o = self.route_event(&req, WebSocketEvent::Message, data).await;
+                    match _o {
+                        Outcome::Failure(s) => error_!("{}", s),
+                        _ => (),
+                    }
                 }
                 // TODO Leave event
             };

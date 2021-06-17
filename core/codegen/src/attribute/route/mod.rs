@@ -137,7 +137,7 @@ fn request_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
     }
 }
 
-fn param_guard_decl(guard: &Guard) -> TokenStream {
+fn param_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
     let (i, name, ty) = (guard.index, &guard.name, &guard.ty);
     define_spanned_export!(ty.span() =>
         __req, __data, _log, _None, _Some, _Ok, _Err,
@@ -181,12 +181,18 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
     quote!(let #ident: #ty = #expr;)
 }
 
-fn data_guard_decl(guard: &Guard) -> TokenStream {
+fn data_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome);
 
+    let request = if websocket {
+        quote!(#__req.request())
+    } else {
+        quote!(#__req)
+    };
+
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
+        let #ident: #ty = match <#ty as #FromData>::from_data(#request, #__data).await {
             #Outcome::Success(__d) => __d,
             #Outcome::Forward(__d) => {
                 #_log::warn_!("Data guard `{}` is forwarding.", stringify!(#ty));
@@ -232,7 +238,7 @@ fn internal_uri_macro_decl(route: &Route) -> TokenStream {
     }
 }
 
-fn responder_outcome_expr(route: &Route) -> TokenStream {
+fn responder_outcome_expr(route: &Route, websocket: bool) -> TokenStream {
     let ret_span = match route.handler.sig.output {
         syn::ReturnType::Default => route.handler.sig.ident.span(),
         syn::ReturnType::Type(_, ref ty) => ty.span().into()
@@ -246,9 +252,16 @@ fn responder_outcome_expr(route: &Route) -> TokenStream {
         .map(|a| quote_spanned!(a.span().into() => .await));
 
     define_spanned_export!(ret_span => __req, _route);
+
+    let request = if websocket {
+        quote!(#__req.request())
+    } else {
+        quote!(#__req)
+    };
+
     quote_spanned! { ret_span =>
         let ___responder = #user_handler_fn_name(#(#parameter_names),*) #_await;
-        #_route::Outcome::from(#__req, ___responder)
+        #_route::Outcome::from(#request, ___responder)
     }
 }
 
@@ -308,15 +321,21 @@ fn monomorphized_function(route: &Route) -> TokenStream {
 
     // Generate the declarations for all of the guards.
     let request_guards = route.request_guards.iter().map(|r| request_guard_decl(r, route.attr.method.is_websocket()));
-    let param_guards = route.param_guards().map(param_guard_decl);
+    let param_guards = route.param_guards().map(|r| param_guard_decl(r, route.attr.method.is_websocket()));
     let query_guards = query_decls(&route);
-    let data_guard = route.data_guard.as_ref().map(data_guard_decl);
+    let data_guard = route.data_guard.as_ref().map(|r| data_guard_decl(r, route.attr.method.is_websocket()));
     
-    let responder_outcome = responder_outcome_expr(&route);
+    let responder_outcome = responder_outcome_expr(&route, route.attr.method.is_websocket());
+
+    let request = if route.attr.method.is_websocket() {
+        WebSocket
+    } else {
+        Request
+    };
 
     quote! {
         fn monomorphized_function<'__r>(
-            #__req: &'__r #Request<'_>,
+            #__req: &'__r #request<'_>,
             #__data: #Data<'__r>,
         ) -> #_route::BoxFuture<'__r> {
             #_Box::pin(async move {

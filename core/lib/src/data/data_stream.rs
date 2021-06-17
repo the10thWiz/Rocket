@@ -250,7 +250,7 @@ impl<'r> From<multer::Field<'r>> for StreamReader<'r> {
 
 impl<'r> From<WebSocketMessage> for StreamReader<'r> {
     fn from(message: WebSocketMessage) -> Self {
-        Self { inner: StreamKind::WebSocket(message.into_message()), state: State::Pending }
+        Self { inner: StreamKind::WebSocket(message.inner()), state: State::Pending }
     }
 }
 

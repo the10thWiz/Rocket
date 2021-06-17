@@ -9,7 +9,7 @@ pub(crate) mod channel;
 pub(crate) mod message;
 pub(crate) mod status;
 
-pub use channel::Channel;
+pub use channel::{WebSocket, Channel};
 
 /// Soft maximum for chunks reasons
 pub const MAX_BUFFER_SIZE: usize = 1024;

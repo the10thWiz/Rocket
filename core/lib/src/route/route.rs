@@ -8,6 +8,8 @@ use crate::http::{uri, Method, MediaType};
 use crate::route::{Handler, RouteUri, BoxFuture};
 use crate::sentinel::Sentry;
 
+use super::WebSocketHandler;
+
 /// A request handling route.
 ///
 /// A route consists of exactly the information in its fields. While a `Route`
@@ -183,7 +185,7 @@ pub struct Route {
     /// The function that should be called when the route matches.
     pub handler: Box<dyn Handler>,
     /// The function that should be called when a websocket event matches
-    pub websocket_handler: WebSocketEvent<()>,
+    pub websocket_handler: WebSocketEvent<Box<dyn WebSocketHandler>>,
     /// The route URI.
     pub uri: RouteUri<'static>,
     /// The rank of this route. Lower ranks have higher priorities.
@@ -294,6 +296,7 @@ impl Route {
 
     /// Gets the HTTP rank of this route. This is the same as `self.rank`, unless this is
     /// a WebSocket event handler. In that case, this is `isize::max_value()`
+    #[inline]
     pub fn http_rank(&self) -> isize {
         if self.websocket_handler.is_none() {
             self.rank
@@ -304,6 +307,7 @@ impl Route {
 
     /// Gets the WebSocket rank of this route. This is the same as `self.rank`, unless this
     /// is an HTTP route. In that case, this is `isize::max_value()`
+    #[inline]
     pub fn websocket_rank(&self) -> isize {
         if self.websocket_handler.is_some() {
             self.rank
@@ -365,7 +369,7 @@ pub struct StaticInfo {
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data<'r>) -> BoxFuture<'r>,
     /// The route's websocket handler, i.e, the annotated function.
     pub websocket_handler: 
-        WebSocketEvent<for<'r> fn(&'r crate::Request<'_>, crate::Data<'r>) -> BoxFuture<'r>>,
+        WebSocketEvent<for<'r> fn(&'r crate::websocket::WebSocket<'_>, crate::Data<'r>) -> BoxFuture<'r>>,
     /// The route's rank, if any.
     pub rank: Option<isize>,
     /// Route-derived sentinels, if any.
@@ -383,7 +387,7 @@ impl From<StaticInfo> for Route {
             name: Some(info.name.into()),
             method: info.method,
             handler: Box::new(info.handler),
-            websocket_handler: info.websocket_handler.map(|h| {Box::new(h); ()}),// TODO
+            websocket_handler: info.websocket_handler.map(|h| Box::new(h) as Box<_>),
             rank: info.rank.unwrap_or_else(|| uri.default_rank()),
             format: info.format,
             sentinels: info.sentinels.into_iter().collect(),
@@ -427,6 +431,13 @@ impl<T> WebSocketEvent<T> {
             (Self::Message(_), Self::Message(_)) => true,
             (Self::Leave(_), Self::Leave(_)) => true,
             _ => false,
+        }
+    }
+
+    pub(crate) fn unwrap_ref(&self) -> &T {
+        match self {
+            Self::None => panic!("WebSocketEvent::None is not a valid websocket event"),
+            Self::Join(t) | Self::Message(t) | Self::Leave(t) => t,
         }
     }
 }
