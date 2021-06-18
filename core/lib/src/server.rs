@@ -484,10 +484,20 @@ impl Rocket<Orbit> {
                         let o = self.route_event(&req, WebSocketEvent::Join, data).await;
                         let o = match o {
                             // If the join handlers forwarded, we retry as a message
-                            Outcome::Forward(data) => self.route_event(&req, WebSocketEvent::Message, data).await,
-                            o => o,
+                            Outcome::Forward(data) => {
+                                broker.subscribe(req.topic(), &ch, extensions.protocol()).await;
+                                self.route_event(&req, WebSocketEvent::Message, data).await
+                            },
+                            // If a join handler succeeds, we subscribe the client
+                            o@Outcome::Success(_) => {
+                                broker.subscribe(req.topic(), &ch, extensions.protocol()).await;
+                                o
+                            },
+                            // If a join handler fails, we do nothing
+                            o@Outcome::Failure(_) => {
+                                o
+                            },
                         };
-                        broker.subscribe(req.topic(), &ch, extensions.protocol()).await;
                         joined = true;
                         o
                     } else {

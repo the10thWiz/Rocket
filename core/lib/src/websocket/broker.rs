@@ -61,13 +61,14 @@ impl Broker {
     }
 
     /// Sends a message to all clients subscribed to the channel using descriptor `id`
-    pub async fn send(&self, id: &Origin<'_>, message: impl IntoMessage) {
+    pub async fn broadcast_to(&self, id: &Origin<'_>, message: impl IntoMessage) {
         let (tx, rx) = mpsc::channel(1);
-        let _ = self.channels.send(BrokerMessage::Forward(
+        if let Ok(()) = self.channels.send(BrokerMessage::Forward(
             id.clone().into_owned(),
             WebSocketMessage::new(message.is_binary(), rx)
-        ));
-        message.into_message(tx).await;
+        )) {
+            message.into_message(tx).await;
+        }
     }
 
     /// Subscribes the client to this channel using the descriptor `id`

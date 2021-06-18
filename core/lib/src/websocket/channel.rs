@@ -23,6 +23,7 @@ use crate::Request;
 use crate::form::ValueField;
 use crate::request::{FromWebSocket, WsOutcome};
 
+use super::broker::Broker;
 use super::message::{IntoMessage, WebSocketMessage, to_message};
 use super::status::WebSocketStatus;
 use validation::Utf8Validator;
@@ -586,6 +587,10 @@ impl<'r> WebSocket<'r> {
     pub(crate) fn set_topic(&mut self, topic: Origin<'r>) {
         self.request.set_uri(topic);
     }
+
+    pub(crate) fn broker(&self) -> &Broker {
+        &self.request.state.rocket.broker
+    }
 }
 
 #[doc(hidden)]
@@ -600,13 +605,25 @@ impl<'r> WebSocket<'r> {
 /// An open Channel connected to a client
 pub struct Channel<'r> {
     sender: mpsc::Sender<WebSocketMessage>,
-    _topic: &'r Origin<'r>,
+    broker: &'r Broker,
+    topic: &'r Origin<'r>,
 }
 
 impl<'r> Channel<'r> {
     /// Sends a message to the client
     pub async fn send(&self, message: impl IntoMessage) {
         to_message(message, &self.sender).await;
+    }
+
+    /// Sends a message to the client
+    pub async fn broadcast(&self, message: impl IntoMessage) {
+        eprintln!("Broadcasting to {}", self.topic);
+        self.broker.broadcast_to(self.topic, message).await;
+    }
+
+    /// Sends a message to the client
+    pub async fn broadcast_to(&self, topic: &Origin<'_>, message: impl IntoMessage) {
+        self.broker.broadcast_to(topic, message).await;
     }
 }
 
@@ -617,7 +634,8 @@ impl<'r> FromWebSocket<'r> for Channel<'r> {
     async fn from_websocket(request: &'r WebSocket<'_>) -> WsOutcome<Self, Self::Error> {
         WsOutcome::Success(Self {
             sender: request.sender.clone(),
-            _topic: request.request.uri(),
+            broker: request.broker(),
+            topic: request.request.uri(),
         })
     }
 }

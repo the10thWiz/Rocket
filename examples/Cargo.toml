@@ -21,4 +21,5 @@ members = [
   "chat",
 
   "websocket-echo",
+  "websocket-channels",
 ]
