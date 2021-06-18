@@ -158,7 +158,6 @@ impl Rocket<Build> {
 
         let rocket: Rocket<Build> = Rocket(Building {
             figment: Figment::from(provider),
-            broker: Broker::new(),
             ..Default::default()
         });
 
@@ -517,7 +516,7 @@ impl Rocket<Build> {
             figment: self.0.figment,
             fairings: self.0.fairings,
             state: self.0.state,
-            broker: self.0.broker,
+            broker: Broker::new(),
         });
 
         // Query the sentinels, abort if requested.

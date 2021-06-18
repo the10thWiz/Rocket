@@ -84,7 +84,7 @@ phases! {
         pub(crate) catchers: Vec<Catcher>,
         pub(crate) fairings: Fairings,
         pub(crate) figment: Figment,
-        pub(crate) broker: Broker,
+        //pub(crate) broker: Broker,
         pub(crate) state: Container![Send + Sync],
     }
 

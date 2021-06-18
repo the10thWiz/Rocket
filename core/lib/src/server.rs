@@ -2,10 +2,8 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::BytesMut;
 use channel::WebSocket;
 use rocket_http::hyper::upgrade::OnUpgrade;
-use tokio::sync::mpsc;
 use yansi::Paint;
 use tokio::sync::oneshot;
 use futures::stream::StreamExt;
@@ -15,7 +13,6 @@ use crate::websocket::Extensions;
 use crate::websocket::WebSocketEvent;
 use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
-use crate::websocket::message::WebSocketMessage;
 use crate::websocket::status::StatusError;
 use crate::websocket::status::WebSocketStatus;
 use crate::{Rocket, Orbit, Request, Response, Data, route};
@@ -511,7 +508,7 @@ impl Rocket<Orbit> {
                         },
                     }
                 }
-                broker.unsubscribe(req.topic(), &ch).await;
+                broker.unsubscribe_all(&ch).await;
                 info_!("Websocket closed with status: {:?}", close_status);
                 // TODO provide close message
                 match self.route_event(&req, WebSocketEvent::Message, Data::local(vec![])).await {

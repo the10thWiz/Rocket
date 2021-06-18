@@ -60,8 +60,8 @@ impl Broker {
         }
     }
 
-    /// Sends a message to all clients subscribed to this channel using descriptor `id`
-    pub(crate) async fn send(&self, id: &Origin<'_>, message: impl IntoMessage) {
+    /// Sends a message to all clients subscribed to the channel using descriptor `id`
+    pub async fn send(&self, id: &Origin<'_>, message: impl IntoMessage) {
         let (tx, rx) = mpsc::channel(1);
         let _ = self.channels.send(BrokerMessage::Forward(
             id.clone().into_owned(),
@@ -88,6 +88,7 @@ impl Broker {
     ///
     /// # Note
     /// This will unsubscribe this client from EVERY descriptor that matches `id`
+    #[allow(unused)]
     pub(crate) async fn unsubscribe(&self, id: &Origin<'_>, channel: &WebSocketChannel) {
         let _ = self.channels.send(
             BrokerMessage::Unregister(id.clone().into_owned(), channel.subscribe_handle())
@@ -115,12 +116,6 @@ impl Broker {
             // TODO make this happen less often
             subs.cleanup();
         }
-    }
-}
-
-impl Default for Broker {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
