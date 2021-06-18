@@ -2,8 +2,10 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::BytesMut;
 use channel::WebSocket;
 use rocket_http::hyper::upgrade::OnUpgrade;
+use tokio::sync::mpsc;
 use yansi::Paint;
 use tokio::sync::oneshot;
 use futures::stream::StreamExt;
@@ -110,9 +112,9 @@ async fn hyper_service_fn(
             // connection.
             let req_copy = req.clone();
             let (accept, upgrade) = upgrade.split();
-            let r = rocket.dispatch_ws(token, &mut req, data, accept).await;
+            let (r, ext) = rocket.dispatch_ws(token, &mut req, data, accept).await;
             rocket.send_response(r, tx).await;
-            rocket.ws_event_loop(req_copy, upgrade).await;
+            rocket.ws_event_loop(req_copy, upgrade, ext).await;
         } else {
             let r = rocket.dispatch(token, &mut req, data).await;
             rocket.send_response(r, tx).await;
@@ -389,7 +391,7 @@ impl Rocket<Orbit> {
         request: &'r Request<'s>,
         _data: Data<'r>,
         accept: String,
-    ) -> Response<'r> {
+    ) -> (Response<'r>, Extensions) {
         info!("{}:", request);
 
         // remeber the protocol for later
@@ -406,7 +408,7 @@ impl Rocket<Orbit> {
             response.header(Header::new(UPGRADE.as_str(), "websocket"));
             response.header(Header::new("Sec-WebSocket-Accept", accept));
 
-            extensions.headers().for_each(|h| {response.header(h);});
+            extensions.headers(&mut response);
 
             response.finalize()
         };
@@ -422,7 +424,7 @@ impl Rocket<Orbit> {
         // Run the response fairings.
         self.fairings.handle_response(request, &mut response).await;
 
-        response
+        (response, extensions)
     }
 
     /// Routes a websocket event. This is different from an HTTP route in that the event is passed
@@ -433,7 +435,7 @@ impl Rocket<Orbit> {
         req: &'r WebSocket<'ri>,
         event: WebSocketEvent,
         mut data: Data<'r>
-    ) -> route::Outcome<'r> {
+    ) -> route::WsOutcome<'r> {
         for route in self.router.route_event(event) {
             if route.matches(req.request()) {
                 info_!("Matched: {}", route);
@@ -442,7 +444,7 @@ impl Rocket<Orbit> {
                 let name = route.name.as_deref();
                 let handler = route.websocket_handler.unwrap_ref();
                 let outcome = handle(name, || handler.handle(req, data)).await
-                    .unwrap_or_else(|| Outcome::Failure(Status::InternalServerError));
+                    .unwrap_or_else(|| Outcome::Failure(WebSocketStatus::InternalServerError));
 
                 // Check if the request processing completed (Some) or if the
                 // request needs to be forwarded. If it does, continue the loop
@@ -454,10 +456,10 @@ impl Rocket<Orbit> {
                 }
             }
         }
-        route::Outcome::Forward(data)
+        route::WsOutcome::Forward(data)
     }
 
-    async fn ws_event_loop<'r>(&'r self, req: Request<'r>, upgrade: OnUpgrade) {
+    async fn ws_event_loop<'r>(&'r self, req: Request<'r>, upgrade: OnUpgrade, extensions: Extensions) {
         if let Ok(upgrade) = upgrade.await {
             let (ch, a, b) = WebSocketChannel::new(upgrade);
             let req = WebSocket::new(req, ch.subscribe_handle());
@@ -465,7 +467,8 @@ impl Rocket<Orbit> {
                 // Explicit moves
                 let mut ch = ch;
                 let mut close_status = Err(StatusError::NoStatus);
-                // TODO Join event
+                let mut joined = false;
+                let broker = self.broker();
                 while let Some(message) = ch.next().await {
                     let data = match message.opcode() {
                         websocket_codec::Opcode::Text => Data::from_ws(message, Some(false)),
@@ -480,19 +483,50 @@ impl Rocket<Orbit> {
                                     processing websocket messages. {:?}\
                                     has an invalid opcode", message),
                     };
-                    // TODO Message event
-                    //req.set_topic(Origin::parse("/echo/we").unwrap());
-                    let _o = self.route_event(&req, WebSocketEvent::Message, data).await;
-                    match _o {
-                        Outcome::Failure(s) => error_!("{}", s),
-                        _ => (),
+                    let o = if !joined {
+                        let o = self.route_event(&req, WebSocketEvent::Join, data).await;
+                        let o = match o {
+                            // If the join handlers forwarded, we retry as a message
+                            Outcome::Forward(data) => self.route_event(&req, WebSocketEvent::Message, data).await,
+                            o => o,
+                        };
+                        broker.subscribe(req.topic(), &ch, extensions.protocol()).await;
+                        joined = true;
+                        o
+                    } else {
+                        //req.set_topic(Origin::parse("/echo/we").unwrap());
+                        self.route_event(&req, WebSocketEvent::Message, data).await
+                    };
+                    match o {
+                        Outcome::Forward(_data) => {
+                            break;
+                        },
+                        Outcome::Failure(status) => {
+                            error_!("{}", status);
+                            ch.close(status).await;
+                            break;
+                        },
+                        Outcome::Success(_response) => {
+                            // We ignore this, since the response should be empty
+                        },
                     }
                 }
-                // TODO Leave event
+                broker.unsubscribe(req.topic(), &ch).await;
                 info_!("Websocket closed with status: {:?}", close_status);
+                // TODO provide close message
+                match self.route_event(&req, WebSocketEvent::Message, Data::local(vec![])).await {
+                    Outcome::Forward(_data) => {
+                    },
+                    Outcome::Failure(status) => {
+                        error_!("{}", status);
+                        ch.close(status).await;
+                    }
+                    Outcome::Success(_response) => {
+                        // We ignore this, since the response should be empty
+                    }
+                }
                 // Note: If a close has already been sent, the writer task will just drop this
-                let _e = ch.subscribe_handle()
-                    .send(WebSocketMessage::default_response(close_status)).await;
+                ch.close(WebSocketStatus::default_response(close_status)).await;
             };
             // This will poll each future, on the same thread. This should actually be more
             // preformant than spawning tasks for each.

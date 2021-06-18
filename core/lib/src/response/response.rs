@@ -1,10 +1,15 @@
+use std::pin::Pin;
 use std::{fmt, str};
 use std::borrow::Cow;
 
-use tokio::io::{AsyncRead, AsyncSeek};
+use bytes::{Bytes, BytesMut};
+use futures::Future;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeek};
+use tokio::sync::mpsc;
 
 use crate::http::{Header, HeaderMap, Status, ContentType, Cookie};
 use crate::response::Body;
+use crate::websocket::message::{IntoMessage, into_message};
 
 /// Builder for the [`Response`] type.
 ///
@@ -939,3 +944,27 @@ impl fmt::Debug for Response<'_> {
         self.body.fmt(f)
     }
 }
+
+// Theoretical implementation of IntoMessage for Response, but Body doesn't implement Sync
+//#[crate::async_trait]
+//impl<'r> IntoMessage for Response<'r> {
+    //fn is_binary(&self) -> bool {
+        //// This makes an educated guess as to whether the stream is binary, defaulting to binary
+        //self.content_type().map(|c| c.media_type().top() != "text").unwrap_or(true)
+    //}
+
+    //async fn into_message(mut self, tx: mpsc::Sender<Bytes>) {
+        //let body = self.body_mut();
+        //let mut buf = BytesMut::with_capacity(1024);
+        //while let Ok(n) = body.read_buf(&mut buf).await {
+            //if n == 0 {
+                //break;
+            //}
+            //let tmp = buf.split();
+            //let _e = tx.send(tmp.into()).await;
+            //if buf.capacity() <= 0 {
+                //buf.reserve(1024);
+            //}
+        //}
+    //}
+//}

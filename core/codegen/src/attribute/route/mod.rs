@@ -199,7 +199,7 @@ fn data_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
             }
             #Outcome::Failure((__c, __e)) => {
                 #_log::warn_!("Data guard `{}` failed: {:?}.", stringify!(#ty), __e);
-                return #Outcome::Failure(__c);
+                return #Outcome::Failure(__c.into());
             }
         };
     }
@@ -260,7 +260,7 @@ fn responder_outcome_expr(route: &Route, websocket: bool) -> TokenStream {
 
     quote_spanned! { ret_span =>
         let ___responder = #user_handler_fn_name(#(#parameter_names),*) #_await;
-        #_route::Outcome::from(#request, ___responder)
+        #_route::Outcome::from(#request, ___responder).into()
     }
 }
 
@@ -329,17 +329,17 @@ fn monomorphized_function(route: &Route) -> TokenStream {
 
     let responder_outcome = responder_outcome_expr(&route, route.attr.method.is_websocket());
 
-    let request = if route.attr.method.is_websocket() {
-        WebSocket
+    let (request, box_future) = if route.attr.method.is_websocket() {
+        (WebSocket, quote!(BoxWsFuture))
     } else {
-        Request
+        (Request, quote!(BoxFuture))
     };
 
     quote! {
         fn monomorphized_function<'__r>(
             #__req: &'__r #request<'_>,
             #__data: #Data<'__r>,
-        ) -> #_route::BoxFuture<'__r> {
+        ) -> #_route::#box_future<'__r> {
             #_Box::pin(async move {
                 #(#request_guards)*
                 #(#param_guards)*
@@ -354,6 +354,17 @@ fn monomorphized_function(route: &Route) -> TokenStream {
 
 fn codegen_route(route: Route) -> Result<TokenStream> {
     use crate::exports::*;
+
+    // Check for various websocket specific differences
+    if route.attr.method.is_websocket() {
+        if syn::ReturnType::Default != route.handler.sig.output {
+            return Err(Diagnostic::spanned(
+                route.handler.sig.output.span(),
+                devise::Level::Error,
+                "WebSocket Event handlers are not permitted to return values"
+            ));
+        }
+    }
 
     // Extract the sentinels from the route.
     let sentinels = sentinels_expr(&route);

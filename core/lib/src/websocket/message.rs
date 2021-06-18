@@ -50,7 +50,7 @@ impl<'r> IntoMessage for Data<'r> {
 
 /// Helper function for implementing `IntoMessage`. Converts a type that implements AsyncRead into
 /// `mpsc::Receiver<Bytes>`, the type `IntoMessage` requires.
-pub async fn into_message<T: AsyncRead + Unpin>(mut t: T, tx: mpsc::Sender<Bytes>) {
+pub async fn into_message<T: AsyncRead + Send + Sync + Unpin>(mut t: T, tx: mpsc::Sender<Bytes>) {
     let mut buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
     while let Ok(n) = t.read_buf(&mut buf).await {
         if n == 0 {
@@ -144,9 +144,9 @@ impl WebSocketMessage {
     /// Creates a Close frame, with an optional status
     ///
     /// TODO: create seperate status struct
-    pub(crate) fn close(status: Option<WebSocketStatus<'_>>) -> Self {
+    pub(crate) fn close<'a>(status: impl Into<Option<WebSocketStatus<'a>>>) -> Self {
         let (tx, data) = mpsc::channel(3);
-        if let Some(status) = status {
+        if let Some(status) = status.into() {
             let _e = tx.try_send(status.encode());
         }
         Self {
@@ -195,33 +195,30 @@ impl WebSocketMessage {
     pub(crate) fn inner(self) -> mpsc::Receiver<Bytes> {
         self.data
     }
-
-    pub(crate) fn default_response(status: Result<WebSocketStatus<'_>, StatusError>) -> Self {
-        match status {
-            // Specific matches
-            Ok(s) if s == WebSocketStatus::Ok
-                => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::GoingAway
-                => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::ExtensionRequired
-                => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::UnknownMessageType
-                => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::InvalidDataType
-                => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::PolicyViolation
-                => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::MessageTooLarge
-                => Self::close(Some(WebSocketStatus::Ok)),
-            Ok(s) if s == WebSocketStatus::InternalServerError
-                => Self::close(Some(WebSocketStatus::Ok)),
-            // 3000..=3999 is defined by the IANA, 4000..=4999 is private use
-            Ok(s) if (3000..=4999).contains(&s.code())
-                => Self::close(Some(WebSocketStatus::Ok)),
-            // If the frame was empty (not malformed), we response with Ok
-            Err(StatusError::NoStatus) => Self::close(Some(WebSocketStatus::Ok)),
-            // Default to protocol error
-            _ => Self::close(Some(WebSocketStatus::ProtocolError)),
-        }
-    }
 }
+
+pub struct Text<T>(pub T);
+
+#[crate::async_trait]
+impl<T: AsyncRead + Send + Sync + Unpin> IntoMessage for Text<T> {
+    fn is_binary(&self) -> bool {
+        false
+    }
+
+    async fn into_message(self, sender: mpsc::Sender<Bytes>) {
+        into_message(self.0, sender).await;
+    }
+} 
+
+pub struct Binary<T>(pub T);
+
+#[crate::async_trait]
+impl<T: AsyncRead + Send + Sync + Unpin> IntoMessage for Binary<T> {
+    fn is_binary(&self) -> bool {
+        true
+    }
+
+    async fn into_message(self, sender: mpsc::Sender<Bytes>) {
+        into_message(self.0, sender).await;
+    }
+} 

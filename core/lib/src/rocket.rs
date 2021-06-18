@@ -6,6 +6,7 @@ use yansi::Paint;
 use either::Either;
 use figment::{Figment, Provider};
 
+use crate::websocket::broker::Broker;
 use crate::{Catcher, Config, Route, Shutdown, sentinel, shield::Shield};
 use crate::router::Router;
 use crate::trip_wire::TripWire;
@@ -157,6 +158,7 @@ impl Rocket<Build> {
 
         let rocket: Rocket<Build> = Rocket(Building {
             figment: Figment::from(provider),
+            broker: Broker::new(),
             ..Default::default()
         });
 
@@ -515,6 +517,7 @@ impl Rocket<Build> {
             figment: self.0.figment,
             fairings: self.0.fairings,
             state: self.0.state,
+            broker: self.0.broker,
         });
 
         // Query the sentinels, abort if requested.
@@ -595,6 +598,12 @@ impl Rocket<Ignite> {
         self.shutdown.clone()
     }
 
+    /// Returns a handle to this instance's Broker. The broker is used to broadcast websocket
+    /// messages to multiple clients.
+    pub fn broker(&self) -> Broker {
+        self.broker.clone()
+    }
+
     fn into_orbit(self) -> Rocket<Orbit> {
         Rocket(Orbiting {
             router: self.0.router,
@@ -603,6 +612,7 @@ impl Rocket<Ignite> {
             config: self.0.config,
             state: self.0.state,
             shutdown: self.0.shutdown,
+            broker: self.0.broker,
         })
     }
 
@@ -681,6 +691,12 @@ impl Rocket<Orbit> {
     /// ```
     pub fn shutdown(&self) -> Shutdown {
         self.shutdown.clone()
+    }
+
+    /// Returns a handle to this instance's Broker. The broker is used to broadcast websocket
+    /// messages to multiple clients.
+    pub fn broker(&self) -> Broker {
+        self.broker.clone()
     }
 }
 

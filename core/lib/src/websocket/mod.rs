@@ -9,17 +9,20 @@
 use rocket_http::Header;
 use rocket_http::Status;
 use rocket_http::hyper::upgrade::OnUpgrade;
+use rocket_http::uri::Origin;
 use websocket_codec::ClientRequest;
 
 pub(crate) mod channel;
 pub(crate) mod message;
 pub(crate) mod status;
+pub(crate) mod broker;
 
 pub use channel::{WebSocket, Channel};
 pub use status::WebSocketStatus;
 
 use crate::Request;
 use crate::http::hyper;
+use crate::response::Builder;
 
 /// Soft maximum for chunks reasons
 pub const MAX_BUFFER_SIZE: usize = 1024;
@@ -60,6 +63,7 @@ pub(crate) fn upgrade(req: &mut hyper::Request<hyper::Body>) -> Option<Websocket
 }
 
 /// The extensions and protocol for a websocket connection
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Extensions {
     protocol: Protocol,
     extensions: Vec<Extension>,
@@ -75,35 +79,45 @@ impl Extensions {
     }
 
     /// Gets the list of headers to describe the extensions and protocol
-    pub fn headers(self) -> impl Iterator<Item = Header<'static>> {
-        self.protocol.get_name().into_iter().map(|s| Header::new("Sec-WebSocket-Protocol", s))
-            .chain(self.extensions.into_iter().map(|e| e.header()))
+    pub fn headers(&self, response: &mut Builder<'_>) {
+        for header in self.extensions.iter().flat_map(|e| e.header().into_iter()) {
+            response.header(header);
+        }
+        for header in self.protocol.header().into_iter() {
+            response.header(header);
+        }
     }
 
     /// Failed to parse extensions or protocol
     pub fn is_err(&self) -> Option<Status> {
         self.protocol.is_err()
     }
+
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
 }
 
 /// An individual WebSocket Extension
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Extension {
 }
 
 impl Extension {
     /// Gets the header valus to enable this extension
-    fn header(self) -> Header<'static> {
+    fn header(&self) -> Option<Header<'static>> {
         match self {
+            _ => None,
         }
     }
 }
 
 /// A WebSocket Protocol. This lists every websocket protocol known to Rocket
 #[allow(unused)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Protocol {
     Multiplex,
     Naked,
-    Invalid,
 }
 
 impl Protocol {
@@ -123,6 +137,18 @@ impl Protocol {
     pub fn get_name(&self) -> Option<&'static str> {
         match self {
             _ => None,
+        }
+    }
+
+    /// Gets the header to identify this protocol
+    pub fn header(&self) -> Option<Header<'static>> {
+        self.get_name().map(|n| Header::new("Sec-WebSocket-Protocol", n))
+    }
+
+    pub fn with_topic<'r>(&self, origin: &Origin<'r>) -> Option<Origin<'r>> {
+        match self {
+            Self::Naked => None,
+            Self::Multiplex => Some(origin.clone()),
         }
     }
 }

@@ -21,7 +21,7 @@ use websocket_codec::protocol::FrameHeaderCodec;
 
 use crate::Request;
 use crate::form::ValueField;
-use crate::request::{FromWebSocket, Outcome};
+use crate::request::{FromWebSocket, WsOutcome};
 
 use super::message::{IntoMessage, WebSocketMessage, to_message};
 use super::status::WebSocketStatus;
@@ -61,6 +61,16 @@ impl WebSocketChannel {
         self.sender.clone()
     }
 
+    /// Sends a close event
+    pub async fn close(&self, status: WebSocketStatus<'_>) {
+        let _e = self.sender.send(WebSocketMessage::close(status)).await;
+    }
+
+    /// Sends a message
+    pub async fn send(&self, message: impl IntoMessage) {
+        to_message(message, &self.sender).await;
+    }
+
     /// Get the next message from this client.
     ///
     /// This method also forwards messages sent from any channels the client is subscribed to
@@ -86,7 +96,7 @@ impl WebSocketChannel {
         }
     }
 
-    pub async fn close(
+    async fn send_close(
         broker_tx: &mpsc::Sender<WebSocketMessage>,
         status: WebSocketStatus<'_>
     ) {
@@ -133,7 +143,7 @@ impl WebSocketChannel {
                 },
                 Err(e) => {
                     error_!("WebSocket client broke protocol: {:?}", e);
-                    Self::close(&broker_tx, WebSocketStatus::ProtocolError).await;
+                    Self::send_close(&broker_tx, WebSocketStatus::ProtocolError).await;
                     break;
                 },
             };
@@ -148,13 +158,13 @@ impl WebSocketChannel {
                 r
             }else {
                 // Send a protocol error if the datalength isn't valid
-                Self::close(&broker_tx, WebSocketStatus::ProtocolError).await;
+                Self::send_close(&broker_tx, WebSocketStatus::ProtocolError).await;
                 break;
             };
             // Checks for some other protocol errors
             if Self::protocol_error(&h, remaining) {
                 warn_!("Remote Protocol Error");
-                Self::close(&broker_tx, WebSocketStatus::ProtocolError).await;
+                Self::send_close(&broker_tx, WebSocketStatus::ProtocolError).await;
                 break;
             }
             if h.opcode() == u8::from(Opcode::Ping) {
@@ -192,7 +202,7 @@ impl WebSocketChannel {
             if let Some(data_rx) = data_rx.take() {
                 if h.opcode() == 0x0 {
                     error_!("Unexpected continue frame");
-                    Self::close(&broker_tx, WebSocketStatus::ProtocolError).await;
+                    Self::send_close(&broker_tx, WebSocketStatus::ProtocolError).await;
                     break;
                 } else {
                     utf8 = h.opcode() == u8::from(Opcode::Text);
@@ -209,7 +219,7 @@ impl WebSocketChannel {
                 utf8 = false;
             } else if h.opcode() != 0x0 {
                 error_!("Expected continue frame");
-                Self::close(&broker_tx, WebSocketStatus::ProtocolError).await;
+                Self::send_close(&broker_tx, WebSocketStatus::ProtocolError).await;
                 break;
             }
             // Read and forward data - note that this will read (and discard) any data that
@@ -224,7 +234,7 @@ impl WebSocketChannel {
                 }
                 if utf8 && !validator.validate(&chunk) {
                     error_!("WebSocket client sent Invalid UTF-8");
-                    Self::close(&broker_tx, WebSocketStatus::InvalidDataType).await;
+                    Self::send_close(&broker_tx, WebSocketStatus::InvalidDataType).await;
                     break;
                 }
                 remaining -= chunk.len();
@@ -241,7 +251,7 @@ impl WebSocketChannel {
             if fin {
                 if utf8 && !validator.fin() {
                     error_!("WebSocket client sent Incomplete UTF-8");
-                    Self::close(&broker_tx, WebSocketStatus::InvalidDataType).await;
+                    Self::send_close(&broker_tx, WebSocketStatus::InvalidDataType).await;
                     // Note that combining any two valid UTF-8 sequences must still be a
                     // valid UTF-8 sequence. Therefore, the validator doesn't need to be
                     // recreated. This is easy to see when looking at the implementation,
@@ -603,8 +613,8 @@ impl<'r> Channel<'r> {
 impl<'r> FromWebSocket<'r> for Channel<'r> {
     type Error = std::convert::Infallible;
 
-    async fn from_websocket(request: &'r WebSocket<'_>) -> Outcome<Self, Self::Error> {
-        Outcome::Success(Self {
+    async fn from_websocket(request: &'r WebSocket<'_>) -> WsOutcome<Self, Self::Error> {
+        WsOutcome::Success(Self {
             sender: request.sender.clone(),
             _topic: request.request.uri(),
         })
