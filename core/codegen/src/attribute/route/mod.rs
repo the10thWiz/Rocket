@@ -355,13 +355,21 @@ fn monomorphized_function(route: &Route) -> TokenStream {
 fn codegen_route(route: Route) -> Result<TokenStream> {
     use crate::exports::*;
 
-    // Check for various websocket specific differences
+    // Check for various websocket specific errors. Although this could be implemented via a
+    // seperate attr type, this method allows the errors to be customized.
     if route.attr.method.is_websocket() {
-        if syn::ReturnType::Default != route.handler.sig.output {
+        if let syn::ReturnType::Type(arrow, _) = &route.handler.sig.output {
             return Err(Diagnostic::spanned(
-                route.handler.sig.output.span(),
+                arrow.span(),
                 devise::Level::Error,
                 "WebSocket Event handlers are not permitted to return values"
+            ));
+        }
+        if let Some(media_type) = &route.attr.format {
+            return Err(Diagnostic::spanned(
+                media_type.span(),
+                devise::Level::Error,
+                "WebSocket Event handlers do not support formats"
             ));
         }
     }

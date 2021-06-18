@@ -67,6 +67,7 @@ impl WebSocketChannel {
     }
 
     /// Sends a message
+    #[allow(unused)]
     pub async fn send(&self, message: impl IntoMessage) {
         to_message(message, &self.sender).await;
     }

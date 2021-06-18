@@ -45,7 +45,7 @@ pub struct Attribute {
     pub method: SpanWrapped<WebSocketEvent>,
     pub uri: RouteUri,
     pub data: Option<SpanWrapped<Dynamic>>,
-    pub format: Option<MediaType>,
+    pub format: Option<SpanWrapped<MediaType>>,
     pub rank: Option<isize>,
 }
 
@@ -55,7 +55,7 @@ pub struct MethodAttribute {
     #[meta(naked)]
     pub uri: RouteUri,
     pub data: Option<SpanWrapped<Dynamic>>,
-    pub format: Option<MediaType>,
+    pub format: Option<SpanWrapped<MediaType>>,
     pub rank: Option<isize>,
 }
 
