@@ -76,12 +76,11 @@ impl Broker {
         &self,
         id: &Origin<'_>,
         channel: &WebSocketChannel,
-        protocol: Protocol,
     ) {
         let _ = self.channels.send(BrokerMessage::Register(
             id.clone().into_owned(),
             channel.subscribe_handle(),
-            protocol
+            channel.extensions().protocol()
         ));
     }
 

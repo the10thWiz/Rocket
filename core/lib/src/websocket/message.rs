@@ -8,7 +8,7 @@ use websocket_codec::protocol::FrameHeader;
 
 use crate::Data;
 
-use super::{MAX_BUFFER_SIZE, status::WebSocketStatus};
+use super::status::WebSocketStatus;
 
 /// A trait for types that can be sent on a webSocket.
 ///
@@ -46,6 +46,8 @@ impl<'r> IntoMessage for Data<'r> {
         into_message(self.open(ByteUnit::max_value()), sender).await;
     }
 }
+
+const MAX_BUFFER_SIZE: usize = 1024 * 4;
 
 /// Helper function for implementing `IntoMessage`. Converts a type that implements AsyncRead into
 /// `mpsc::Receiver<Bytes>`, the type `IntoMessage` requires.

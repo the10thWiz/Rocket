@@ -30,7 +30,8 @@ fn index() -> Html<&'static str> {
             const ws = new WebSocket('ws://' + location.host + '/listen');
             ws.onopen = function(e) {
                 status.innerText = 'Connected :)';
-                //ws.send("listen:global");
+                // Send a message to make sure we recieve broadcasts
+                ws.send("Hello World!");
             };
             ws.onclose = function(e) {
                 status.innerText = 'Disconnected :(';

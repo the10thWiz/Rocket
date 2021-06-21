@@ -394,9 +394,9 @@ impl Rocket<Orbit> {
         // remeber the protocol for later
         let extensions = Extensions::new(request);
 
-        // Handle the case where the protocol is invalid
-        let mut response = if let Some(status) = extensions.is_err() {
-            self.handle_error(status, request).await
+        let mut response = if !self.router.route_event(WebSocketEvent::Message).any(|r| r.matches(request)) {
+            // If there is no Message handler for the route
+            self.handle_error(Status::NotFound, request).await
         } else {
             use rocket_http::hyper::header::{CONNECTION, UPGRADE};
             let mut response = Response::build();
@@ -404,19 +404,14 @@ impl Rocket<Orbit> {
             response.header(Header::new(CONNECTION.as_str(), "upgrade"));
             response.header(Header::new(UPGRADE.as_str(), "websocket"));
             response.header(Header::new("Sec-WebSocket-Accept", accept));
+            if let Some(ident) = request.rocket().config.ident.as_str() {
+                response.header(Header::new("Server", ident));
+            }
 
             extensions.headers(&mut response);
 
             response.finalize()
         };
-
-        // Add a default 'Server' header if it isn't already there.
-        // TODO: If removing Hyper, write out `Date` header too.
-        if let Some(ident) = request.rocket().config.ident.as_str() {
-            if !response.headers().contains("Server") {
-                response.set_header(Header::new("Server", ident));
-            }
-        }
 
         // Run the response fairings.
         self.fairings.handle_response(request, &mut response).await;
@@ -433,24 +428,22 @@ impl Rocket<Orbit> {
         event: WebSocketEvent,
         mut data: Data<'r>
     ) -> route::WsOutcome<'r> {
-        for route in self.router.route_event(event) {
-            if route.matches(req.request()) {
-                info_!("Matched: {}", route);
-                req.request().set_route(route);
+        for route in self.router.route_event(event).filter(|r| r.matches(req.request())) {
+            info_!("Matched: {:#}", route);
+            req.request().set_route(route);
 
-                let name = route.name.as_deref();
-                let handler = route.websocket_handler.unwrap_ref();
-                let outcome = handle(name, || handler.handle(req, data)).await
-                    .unwrap_or_else(|| Outcome::Failure(WebSocketStatus::InternalServerError));
+            let name = route.name.as_deref();
+            let handler = route.websocket_handler.unwrap_ref();
+            let outcome = handle(name, || handler.handle(req, data)).await
+                .unwrap_or_else(|| Outcome::Failure(WebSocketStatus::InternalServerError));
 
-                // Check if the request processing completed (Some) or if the
-                // request needs to be forwarded. If it does, continue the loop
-                // (None) to try again.
-                info_!("{} {}", Paint::default("Outcome:").bold(), outcome);
-                match outcome {
-                    o@Outcome::Success(_) | o@Outcome::Failure(_) => return o,
-                    Outcome::Forward(unused_data) => data = unused_data,
-                }
+            // Check if the request processing completed (Some) or if the
+            // request needs to be forwarded. If it does, continue the loop
+            // (None) to try again.
+            info_!("{} {}", Paint::default("Outcome:").bold(), outcome);
+            match outcome {
+                o@Outcome::Success(_) | o@Outcome::Failure(_) => return o,
+                Outcome::Forward(unused_data) => data = unused_data,
             }
         }
         route::WsOutcome::Forward(data)
@@ -458,7 +451,7 @@ impl Rocket<Orbit> {
 
     async fn ws_event_loop<'r>(&'r self, req: Request<'r>, upgrade: OnUpgrade, extensions: Extensions) {
         if let Ok(upgrade) = upgrade.await {
-            let (ch, a, b) = WebSocketChannel::new(upgrade);
+            let (ch, a, b) = WebSocketChannel::new(upgrade, extensions);
             let req = WebSocket::new(req, ch.subscribe_handle());
             let event_loop = async move {
                 // Explicit moves
@@ -485,12 +478,12 @@ impl Rocket<Orbit> {
                         let o = match o {
                             // If the join handlers forwarded, we retry as a message
                             Outcome::Forward(data) => {
-                                broker.subscribe(req.topic(), &ch, extensions.protocol()).await;
+                                broker.subscribe(req.topic(), &ch).await;
                                 self.route_event(&req, WebSocketEvent::Message, data).await
                             },
                             // If a join handler succeeds, we subscribe the client
                             o@Outcome::Success(_) => {
-                                broker.subscribe(req.topic(), &ch, extensions.protocol()).await;
+                                broker.subscribe(req.topic(), &ch).await;
                                 o
                             },
                             // If a join handler fails, we do nothing
@@ -521,7 +514,7 @@ impl Rocket<Orbit> {
                 broker.unsubscribe_all(&ch).await;
                 info_!("Websocket closed with status: {:?}", close_status);
                 // TODO provide close message
-                match self.route_event(&req, WebSocketEvent::Message, Data::local(vec![])).await {
+                match self.route_event(&req, WebSocketEvent::Leave, Data::local(vec![])).await {
                     Outcome::Forward(_data) => {
                     },
                     Outcome::Failure(status) => {

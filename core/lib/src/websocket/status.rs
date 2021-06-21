@@ -165,7 +165,6 @@ impl WebSocketStatus<'static> {
         } else {
             let code =  u16::from_be_bytes([bytes[0], bytes[1]]);
             match code {
-                0000..=0999 => Err(StatusError::OutOfRange),
                 1005 | 1006 => Err(StatusError::IllegalStatus),
                 1000 | 1001 | 1002 | 1003 | 1004 | 1007 | 1008 | 1009 | 1010 | 1011 | 1015 =>
                 Ok(Self {
@@ -176,11 +175,12 @@ impl WebSocketStatus<'static> {
                     code,
                     reason: Cow::Owned(String::from_utf8(bytes.split_off(2).to_vec())?),
                 }),
-                0000..=2999 => Err(StatusError::OutOfRange),
-                _ => Ok(Self {
-                    code,
-                    reason: Cow::Owned(String::from_utf8(bytes.split_off(2).to_vec())?),
-                }),
+                // All valid ranges already checked
+                _ => Err(StatusError::OutOfRange),
+                //_ => Ok(Self {
+                    //code,
+                    //reason: Cow::Owned(String::from_utf8(bytes.split_off(2).to_vec())?),
+                //}),
             }
         }
     }

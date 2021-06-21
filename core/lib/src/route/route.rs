@@ -325,7 +325,12 @@ impl fmt::Display for Route {
             write!(f, "{}{}{} ", Paint::cyan("("), Paint::white(n), Paint::cyan(")"))?;
         }
 
-        write!(f, "{} ", Paint::green(&self.method))?;
+        if f.alternate() {
+            write!(f, "{} ", Paint::green(&self.websocket_handler))?;
+        } else {
+            write!(f, "{} ", Paint::green(&self.method))?;
+        }
+
         if self.uri.base() != "/" {
             write!(f, "{}", Paint::blue(self.uri.base()).underline())?;
         }
@@ -453,6 +458,17 @@ impl<T> WebSocketEvent<T> {
         match self {
             Self::None => panic!("WebSocketEvent::None is not a valid websocket event"),
             Self::Join(t) | Self::Message(t) | Self::Leave(t) => t,
+        }
+    }
+}
+
+impl<T> fmt::Display for WebSocketEvent<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "NONE"),
+            Self::Join(_) => write!(f, "JOIN"),
+            Self::Message(_) => write!(f, "MESSAGE"),
+            Self::Leave(_) => write!(f, "LEAVE"),
         }
     }
 }

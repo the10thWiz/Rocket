@@ -17,23 +17,26 @@ use tokio_util::codec::{Decoder, Encoder};
 use websocket_codec::Opcode;
 use websocket_codec::protocol::FrameHeader;
 use websocket_codec::protocol::FrameHeaderCodec;
-//use state::Container;
 
 use crate::Request;
 use crate::form::ValueField;
 use crate::request::{FromWebSocket, WsOutcome};
 
+use super::Extensions;
 use super::broker::Broker;
 use super::message::{IntoMessage, WebSocketMessage, to_message};
 use super::status::WebSocketStatus;
 use validation::Utf8Validator;
 
-const MAX_BUFFER_SIZE: usize = 1024;
+/// The smallest amount of space to allocate at once This is also used as a soft maximum in some
+/// places, specifically when allocating space for chunks.
+const BUFFER_ALLOCAION_MIN: usize = 1024 * 4;
 
 /// An internal representation of a WebSocket connection
 pub(crate) struct WebSocketChannel {
     inner: mpsc::Receiver<WebSocketMessage>,
     sender: mpsc::Sender<WebSocketMessage>,
+    extensions: Extensions,
 }
 
 impl WebSocketChannel {
@@ -42,7 +45,7 @@ impl WebSocketChannel {
     /// This also returns two futures, for reading and writing. They MUST be polled to advance the
     /// channel. For performance reasons, they shouldn't be sent to seperate tasks, typically they
     /// should just be joined with `tokio::join!`
-    pub fn new(upgrade: Upgraded) -> (Self, impl Future<Output = ()>, impl Future<Output = ()>) {
+    pub fn new(upgrade: Upgraded, extensions: Extensions) -> (Self, impl Future<Output = ()>, impl Future<Output = ()>) {
         let (broker_tx, broker_rx) = mpsc::channel(50);
         let (message_tx, message_rx) = mpsc::channel(1);
         let (a, b) = Self::message_handler(
@@ -50,10 +53,12 @@ impl WebSocketChannel {
             broker_tx.clone(),
             broker_rx,
             message_tx,
+            extensions.clone(),
         );
         (Self {
                 inner: message_rx,
                 sender: broker_tx,
+                extensions,
         }, a, b)
     }
 
@@ -80,16 +85,19 @@ impl WebSocketChannel {
         self.inner.recv().await
     }
 
+    pub fn extensions(&self) -> &Extensions {
+        &self.extensions
+    }
+
     // TODO maybe avoid repeated if blocks?
-    fn protocol_error(header: &FrameHeader, remaining: usize) -> bool {
+    fn protocol_error(header: &FrameHeader, remaining: usize, extensions: &Extensions) -> bool {
         if (header.opcode() == u8::from(Opcode::Close) ||
             header.opcode() == u8::from(Opcode::Ping) ||
             header.opcode() == u8::from(Opcode::Pong)) &&
             (remaining > 125 || !header.fin())
         {
             true
-        } else if header.rsv() != 0x0 {
-            //eprintln!("{:b}", header.rsv());
+        } else if header.rsv() & !extensions.allowed_rsv_bits() != 0u8 {
             true
         } else if Opcode::try_from(header.opcode()).is_none() && header.opcode() != 0x0 {
             true
@@ -120,9 +128,10 @@ impl WebSocketChannel {
         broker_tx: mpsc::Sender<WebSocketMessage>,
         ping_tx: mpsc::Sender<Bytes>,
         message_tx: mpsc::Sender<WebSocketMessage>,
+        extensions: Extensions,
     ) {
         let mut codec = websocket_codec::protocol::FrameHeaderCodec;
-        let mut read_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+        let mut read_buf = BytesMut::with_capacity(BUFFER_ALLOCAION_MIN);
         let (mut data_tx, data_rx) = mpsc::channel(3);
         let mut data_rx = Some(data_rx);
         let mut validator = Utf8Validator::new();
@@ -131,7 +140,7 @@ impl WebSocketChannel {
             let h = match codec.decode(&mut read_buf) {
                 Ok(Some(h)) => h,
                 Ok(None) => {
-                    read_buf.reserve(1);
+                    read_buf.reserve(BUFFER_ALLOCAION_MIN);
                     match read.read_buf(&mut read_buf).await {
                         Ok(0) => break,//warn_!("Potential EOF from client"),
                         Ok(_n) => (),
@@ -164,7 +173,7 @@ impl WebSocketChannel {
                 break;
             };
             // Checks for some other protocol errors
-            if Self::protocol_error(&h, remaining) {
+            if Self::protocol_error(&h, remaining, &extensions) {
                 warn_!("Remote Protocol Error");
                 Self::send_close(&broker_tx, WebSocketStatus::ProtocolError).await;
                 break;
@@ -175,7 +184,7 @@ impl WebSocketChannel {
                 // error - checked by Self::protocol_error
                 // Avoid overflow
                 if read_buf.capacity() < remaining {
-                    read_buf.reserve(remaining - read_buf.capacity());
+                    read_buf.reserve(BUFFER_ALLOCAION_MIN.max(remaining - read_buf.capacity()));
                 }
                 while remaining > read_buf.len() {
                     let _e = read.read_buf(&mut read_buf).await;
@@ -191,7 +200,7 @@ impl WebSocketChannel {
                 continue;
             } else if h.opcode() == u8::from(Opcode::Pong) {
                 if remaining > read_buf.capacity() {
-                    read_buf.reserve(remaining - read_buf.capacity());
+                    read_buf.reserve(BUFFER_ALLOCAION_MIN.max(remaining - read_buf.capacity()));
                 }
                 while remaining > read_buf.len() {
                     let _e = read.read_buf(&mut read_buf).await;
@@ -242,8 +251,21 @@ impl WebSocketChannel {
                 remaining -= chunk.len();
                 let _e = data_tx.send(chunk.into()).await;
                 if read_buf.len() < remaining {
-                    read_buf.reserve(MAX_BUFFER_SIZE.min(remaining));
-                    let _e = read.read_buf(&mut read_buf).await;
+                    if read_buf.capacity() < BUFFER_ALLOCAION_MIN {
+                        read_buf.reserve(BUFFER_ALLOCAION_MIN);
+                    }
+                    // this will execute multiple reads until the buffer has enough data in it.
+                    // the target length is the smallest of the capacity (how much the buffer can
+                    // hold), remaining (how much more the client has to write), and
+                    // BUFFER_ALLOCAION_MIN (provides a static upper bound). Note that there is no
+                    // guarentee that the buffer contains exactly target_len bytes, but rather it
+                    // contains at least target_len bytes.
+                    let target_len = read_buf.capacity().min(remaining).min(BUFFER_ALLOCAION_MIN);
+                    while read_buf.len() < target_len {
+                        // read_buf typically only executes a single read syscall, so we put in a
+                        // loop to make sure we aren't reading really small chunks.
+                        let _e = read.read_buf(&mut read_buf).await;
+                    }
                 }
             }
             if validator.error() {
@@ -285,9 +307,10 @@ impl WebSocketChannel {
         mut write: WriteHalf<Upgraded>,
         mut broker_rx: mpsc::Receiver<WebSocketMessage>,
         mut ping_rx: mpsc::Receiver<Bytes>,
+        _extensions: Extensions,
     ) {
         let mut codec = websocket_codec::protocol::FrameHeaderCodec;
-        let mut write_buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+        let mut write_buf = BytesMut::with_capacity(BUFFER_ALLOCAION_MIN);
         let mut close_sent = false;
         while let Some(message) = Self::await_or_ping(
             &mut broker_rx,
@@ -419,6 +442,7 @@ impl WebSocketChannel {
         broker_tx: mpsc::Sender<WebSocketMessage>,
         broker_rx: mpsc::Receiver<WebSocketMessage>,
         message_tx: mpsc::Sender<WebSocketMessage>,
+        extensions: Extensions,
     ) -> (impl Future<Output = ()>, impl Future<Output = ()>) {
         // Split creates a mutex to syncronize access to the underlying io stream
         // This should be okay, since the lock shouldn't be in high contention, although it
@@ -433,8 +457,8 @@ impl WebSocketChannel {
         let recv_close = Arc::new(AtomicBool::new(false));
         let (ping_tx, ping_rx) = mpsc::channel(1);
 
-        let reader = Self::reader(recv_close.clone(), read, broker_tx, ping_tx, message_tx);
-        let writer = Self::writer(recv_close, write, broker_rx, ping_rx);
+        let reader = Self::reader(recv_close.clone(), read, broker_tx, ping_tx, message_tx, extensions.clone());
+        let writer = Self::writer(recv_close, write, broker_rx, ping_rx, extensions);
         (reader, writer)
     }
 
@@ -602,7 +626,15 @@ impl<'r> WebSocket<'r> {
     }
 }
 
-/// An open Channel connected to a client
+/// A WebSocket Channel. This can be used to message the client that sent a message (namely, the
+/// one you are responding to), as well as broadcast messages to other clients. Note that every
+/// client will recieve a broadcast, including the client that triggered the broadcast.
+///
+/// The lifetime parameter should typically be <'_>. This is nessecary since the object contains
+/// references (which it might be possible to remove in later versions), and recent versions of
+/// Rust recommend not allowing implicit elided lifetimes.
+///
+/// This is only valid as a Guard on WebSocket handlers (`message`, `join`, and `leave`).
 pub struct Channel<'r> {
     sender: mpsc::Sender<WebSocketMessage>,
     broker: &'r Broker,
@@ -615,13 +647,25 @@ impl<'r> Channel<'r> {
         to_message(message, &self.sender).await;
     }
 
-    /// Sends a message to the client
+    /// Broadcasts a message to every client connected to the same topic
+    ///
+    /// This is equavelent to `channel.broadcast_to(channel.topic(), message)`
     pub async fn broadcast(&self, message: impl IntoMessage) {
-        eprintln!("Broadcasting to {}", self.topic);
         self.broker.broadcast_to(self.topic, message).await;
     }
 
-    /// Sends a message to the client
+    /// Gets the topic URI associated with this channel.
+    ///
+    /// If you would like to send the topic to
+    /// another task, you will need to make it owned, which will allocate a clone of it.
+    pub fn topic(&self) -> &Origin<'r> {
+        self.topic
+    }
+
+    /// Broadcasts a message to every client connected to `topic`
+    ///
+    /// When constructing topics, it is recommended to use the `uri!` macro, since it does type
+    /// checking and verification of the url.
     pub async fn broadcast_to(&self, topic: &Origin<'_>, message: impl IntoMessage) {
         self.broker.broadcast_to(topic, message).await;
     }
