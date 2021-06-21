@@ -203,4 +203,11 @@ impl<'r> Data<'r> {
     pub(crate) fn was_ws_binary(&self) -> Option<bool> {
         self.ws_binary
     }
+
+    /// Removes the first `len` items from this data
+    pub(crate) async fn take_start(&mut self, len: usize) {
+        let len = self.peek(len).await.len();
+        // This just drops the elements
+        self.buffer.drain(..len);
+    }
 }

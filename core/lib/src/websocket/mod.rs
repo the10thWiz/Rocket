@@ -316,3 +316,297 @@ impl WebsocketUpgrade {
         (self.accept, self.on_upgrade)
     }
 }
+
+pub mod rocket_multiplex {
+    //! # Full rocket-multiplex protocol description:
+    //!
+    //! Rocket uses the Origin URL of a WebSocket request as a topic identifier. The rocket-multiplex
+    //! proprotocol allows sending messages to multiple topics using a single WebSocket connection.
+    //!
+    //! # Design considerations
+    //!
+    //! - [ ] Simple
+    //! - [ ] RFC compliant
+    //! - [ ] Transparent
+    //!
+    //! One major goal is to make this protocol transparent: on Rocket's side, user code cannot
+    //! tell whether the connection is multiplexed or not. There may be some differences, such as
+    //! a multiplexed connection only counting towards a connection limit as a single connection.
+    //! It should also be possible to design client libraries that are transparent, where user code
+    //! can't tell whether the connections are being multiplexed or not.
+    //!
+    //! # Handshake
+    //!
+    //! rocket-multiplex acts as a subprotocol for WebSocket connections, like json or xml might
+    //! be. Most WebSocket libraries should provide functionality to request a subprotocol, and
+    //! should therefore be able to complete the handshake. Use `'rocket-multiplex'`, case
+    //! insesitively.
+    //!
+    //! ## Subprotocols
+    //!
+    //! As currently defined, there is no way to specify another subprotocol in addition to
+    //! rocket-multiplex.
+    //!
+    //! One option is to specify `rocket-multiplex-*`, where `*` is a subprotocol, and perhaps add
+    //! it to the subscribe action. This would require updating and improving the error responses,
+    //! which should probably be done anyway.
+    //!
+    //! # Messages: Data & Control
+    //!
+    //! Notes:
+    //!
+    //! This protocol doesn't specify how the messages should be transimitted, and Rocket allows
+    //! anything the RFC considers legal. For example, there is no requirement that the control
+    //! portions of the message are sent as a single frame.
+    //!
+    //! ### Seperator character: `'\u{00B7}'`
+    //!
+    //! This character was chosen because it is not a valid character in a URL (according to the
+    //! spec, if MUST be percent encoded), and it is valid UTF-8, i.e. it can be included in a Text
+    //! message.
+    //!
+    //! ## Data
+    //!
+    //! Data messages start with the topic URL they should be sent to, followed by `'\u{00B7}'`.
+    //! This is followed by the contents of the message. The length of the message is not limited by
+    //! this protocol, and the URL is not counted towards the length limit of the message.
+    //!
+    //! Data messages sent to a topic the client is not subscribed to result in an error being sent to
+    //! the client.
+    //!
+    //! Topic URLS are limited to `MAX_TOPIC_LENGTH = 100` (in bytes), to prevent potential DoS attacks.
+    //!
+    //! # Control
+    //!
+    //! Control messages are limited to 512 bytes total, although there should never be a reason to
+    //! create a longer message. Control messages must be marked as text and take the form:
+    //!
+    //! `S ACTION S (PARAM S)*`
+    //!
+    //! Where `S` = `\u{00B7}`, `ACTION` is one of the following actions, and `PARAM` is one of the
+    //! positional paramaters associated with the aciton.
+    //!
+    //! # Actions
+    //!
+    //! - Subscribe: `SUBSCRIBE`, [Topic]; subscribed the client to a specific topic URL, as if the
+    //! client had opened a second WebSocket connection to the topic URL
+    //! - Unsubscribe: `UNSUBSCRIBE`, [TOPIC, CODE?, REASON?]; unsubscribes the client from a specific
+    //! topic URL, as if the client has closed the second WebSocket connection to the topic URL
+    //! - Unsubscribe all: There is no specific unsubscribe all action, although closing the WebSocket
+    //! connection is treated as an unsubscribe all
+    //!
+    //! - Ok: `OK`, [ACTION, PARAMS*]; Sent as a response to an action, this indicates that the action
+    //! succeeded.
+    //! - Err: `ERR`, [REASON, ACTION, PARAMS*]; Sent as a response to an action, this indicates that
+    //! the action failed. REASON is case-insesitive.
+    //! - Invalid message: `INVALID`, [REASON]; Sent as a response to an message the client is not
+    //! allowed to send. Currently, this is only sent in response to a message to a topic the client is
+    //! not subscribed to.
+    //!
+    //! ## Defined errors
+    //!
+    //! The following errors are defined as part of this protocol. The server implementation can
+    //! return errors not on this list, but should prefer to return one of the errors on this list
+    //! if applicable.
+    //!
+    //! ### Subscribe errors
+    //!
+    //! - Too many topics: indicates that the client has subscribed to too many topics on this
+    //! connection. The limit is not defined by this spec, and no guarentees are made about the
+    //! server's behaviour when returning this error. For example, the server is allowed to change
+    //! the limit on the fly, or anything else. The server isn't allowed to drop existing
+    //! subscriptions, except by termintating the connection as a whole.
+    //!
+    //! - Not found: Inicates that the requested topic doesn't exist. This is equavalent to the
+    //! server returning a 404 during the opening handshake.
+    //!
+    //! ### Unsubscribe errors
+    //!
+    //! - Not subscribed: Inicates that the client was not subscribed to this topic, and therefore
+    //! cannot be unsubscribed.
+    //!
+    //! ### WebSocket errors
+    //!
+    //! When a WebSocket connection encounters an error defined by the RFC, the server is permitted
+    //! to close the connection with the error
+    //!
+    //! # Limits
+    //!
+    //! As noted above, this protocol does not specify many limits. Implementations are free to
+    //! add limits as needed, and should try to return inforative errors when possible.
+    //!
+    //! # Stability & Recovery
+    //!
+    //! This spec makes no guarentees about the stability of the connection. There is also no
+    //! specific mechanism to resubscribe clients to topics they were subscribed to before they
+    //! were disconnected. Rather, clients are responsible for resubscribing to topics they wish to
+    //! resubscribe to.
+    //!
+    //! There is also no builtin mechanism for message persistance, this should be implemented
+    //! seperatly. This can take the form of a HTTP route to get previous messages.
+
+    use std::{str::Utf8Error, string::FromUtf8Error, sync::Arc};
+
+    use bytes::Bytes;
+    use rocket_http::{ext::IntoOwned, uri::{Origin, Error}};
+    use state::Container;
+    use ubyte::ByteUnit;
+
+    use crate::Data;
+
+    /// Maximum length of topic URLs, with the possible exception of the original URL used to connect.
+    ///
+    /// TODO: investigate the exception, and potentially handle it
+    pub const MAX_TOPIC_LENGTH: usize = 100;
+
+    /// Control character for seperating information in 'rocket-mutltiplex'
+    ///
+    /// U+00B7 (MIDDLE DOT) is a printable, valid UTF8 character, but it is never valid within a URL.
+    /// To include it, or any other invalid character in a URL, it must be percent-encoded. This means
+    /// there is no ambiguity between a URL containing this character, and a URL terminated by this
+    /// character
+    pub const MULTIPLEX_CONTROL_STR: &'static str = "\u{B7}";
+    /// `MULTIPLEX_CONTROL_STR`, but as a `char`
+    pub const MULTIPLEX_CONTROL_CHAR: char = '\u{B7}';
+    /// `MULTIPLEX_CONTROL_STR`, but as a `&'static [u8]`
+    pub const MULTIPLEX_CONTROL_BYTES: &'static [u8] = MULTIPLEX_CONTROL_STR.as_bytes();
+
+    /// Errors associated with decoding and encoding multiplex messages
+    pub(crate) enum MultriplexError {
+        NotSubscribed,
+        AlreadySubscribed,
+        TooManyTopics,
+        NotFound,
+        NoControlChar,
+        InvalidUtf8,
+        InvalidTopic,
+        ControlMessageToLong,
+        InvalidControlMessage,
+        IoError,
+    }
+
+    impl MultriplexError {
+        pub fn to_bytes(self) -> Bytes {
+            match self {
+                Self::NoControlChar => Bytes::from_static("\u{B7}INVALID\u{B7}No Control Character".as_bytes()),
+                Self::InvalidUtf8 => Bytes::from_static("\u{B7}INVALID\u{B7}Invalid Utf-8".as_bytes()),
+                Self::InvalidTopic => Bytes::from_static("\u{B7}INVALID\u{B7}Invalid Topic".as_bytes()),
+                Self::ControlMessageToLong => Bytes::from_static("\u{B7}INVALID\u{B7}Control message exceeds 512 byte limit".as_bytes()),
+                Self::InvalidControlMessage => Bytes::from_static("\u{B7}INVALID\u{B7}Control Message Invalid".as_bytes()),
+                Self::IoError => Bytes::from_static("\u{B7}INVALID\u{B7}Io Error".as_bytes()),
+                Self::NotSubscribed => Bytes::from_static("\u{B7}ERR\u{B7}Not Subscribed".as_bytes()),
+                Self::AlreadySubscribed => Bytes::from_static("\u{B7}ERR\u{B7}Already Subscribed".as_bytes()),
+                Self::TooManyTopics => Bytes::from_static("\u{B7}ERR\u{B7}Too Many Topics".as_bytes()),
+                Self::NotFound => Bytes::from_static("\u{B7}ERR\u{B7}Not Found".as_bytes()),
+            }
+        }
+    }
+
+    impl From<Utf8Error> for MultriplexError {
+        fn from(_: Utf8Error) -> Self {
+            Self::InvalidUtf8
+        }
+    }
+
+    impl From<FromUtf8Error> for MultriplexError {
+        fn from(_: FromUtf8Error) -> Self {
+            Self::InvalidUtf8
+        }
+    }
+
+    impl<'a> From<Error<'a>> for MultriplexError {
+        fn from(_: Error<'a>) -> Self {
+            Self::InvalidTopic
+        }
+    }
+
+    impl From<std::io::Error> for MultriplexError {
+        fn from(_: std::io::Error) -> Self {
+            Self::IoError
+        }
+    }
+
+    pub(crate) enum Action<'s, 'r> {
+        Subscribed(&'s Origin<'static>),
+        Unsubscribed(Origin<'static>),
+        Join(&'s Origin<'static>, &'s Arc<Container![Send + Sync]>, Data<'r>),
+        Message(&'s Origin<'static>, &'s Arc<Container![Send + Sync]>, Data<'r>),
+        Leave(&'s Origin<'static>, &'s Arc<Container![Send + Sync]>, Data<'r>),
+    }
+
+    /// Holds the data associated with a Multiplexed connection. Right now, thats an Origin & Cache
+    /// for each topic.
+    pub(crate) struct MultiplexTopics(Vec<(Origin<'static>, Arc<Container![Send + Sync]>, bool)>);
+
+    impl MultiplexTopics {
+        /// Create a MultiplexTopics with the initial topic
+        pub fn new(initial: &Origin<'_>) -> Self {
+            Self(vec![(initial.clone().into_owned(), Self::new_cache(), false)])
+        }
+
+        pub async fn handle_message<'s, 'r>(&'s mut self, mut data: Data<'r>) -> Result<Action<'s, 'r>, MultriplexError> {
+            let tmp = data.peek(MAX_TOPIC_LENGTH + MULTIPLEX_CONTROL_BYTES.len()).await;
+            if let Some(i) = unsafe { std::str::from_utf8_unchecked(tmp).find(MULTIPLEX_CONTROL_STR) } {
+                if i != 0 {
+                    let topic = Origin::parse(std::str::from_utf8(&tmp[..i])?)?;
+                    if let Some((topic, cache, joined)) = self.0.iter_mut().find(|(t, _, _)| t == &topic) {
+                        data.take_start(i + MULTIPLEX_CONTROL_BYTES.len()).await;
+                        if *joined {
+                            Ok(Action::Message(topic, cache, data))
+                        } else {
+                            *joined = true;
+                            Ok(Action::Join(topic, cache, data))
+                        }
+                    } else {
+                        Err(MultriplexError::NotSubscribed)
+                    }
+                } else {
+                    self.handle_control(data).await
+                }
+            } else {
+                Err(MultriplexError::NoControlChar)
+            }
+        }
+
+        async fn handle_control<'s, 'r>(&'s mut self, data: Data<'r>) -> Result<Action<'s, 'r>, MultriplexError> {
+            let capped = data.open(ByteUnit::Byte(512)).into_bytes().await?;
+            if !capped.is_complete() {
+                return Err(MultriplexError::ControlMessageToLong)
+            }
+            let raw = String::from_utf8(capped.into_inner())?;
+            let mut parts = raw.split(MULTIPLEX_CONTROL_STR);
+            match parts.next() {
+                Some("SUBSCRIBE") => match parts.next() {
+                    Some(s) => {
+                        let new_topic = Origin::parse(s)?.into_owned();
+                        if !self.0.iter().any(|(t, _, _)| t == &new_topic) {
+                            self.0.push((new_topic, Self::new_cache(), false));
+                            Ok(Action::Subscribed(&self.0[self.0.len() - 1].0))
+                        } else {
+                            Err(MultriplexError::AlreadySubscribed)
+                        }
+                    }
+                    None => Err(MultriplexError::InvalidControlMessage),
+                },
+                Some("UNSUBSCRIBE") => match parts.next() {
+                    Some(s) => {
+                        let old_topic = Origin::parse(s)?.into_owned();
+                        match self.0.iter().position(|(t, _, _)| t == &old_topic) {
+                            Some(i) => {
+                                self.0.remove(i);
+                                Ok(Action::Unsubscribed(old_topic))
+                            }
+                            None => Err(MultriplexError::NotSubscribed)
+                        }
+                    }
+                    None => Err(MultriplexError::InvalidControlMessage),
+                },
+                _ => Err(MultriplexError::InvalidControlMessage),
+            }
+        }
+
+        fn new_cache() -> Arc<Container![Send + Sync]> {
+            Arc::new(<Container![Send + Sync]>::new())
+        }
+    }
+}
