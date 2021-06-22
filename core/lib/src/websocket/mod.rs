@@ -52,8 +52,8 @@
 //! Run after the client disconnects, regaurdless of which endpoint initiated the close. Forwards
 //! and Failures are ignored, since the connection is already disconnected.
 //!
-//! This event doesn't have any data associated with it right now. This is also implemented as an
-//! empty data. TODO: make this make sense.
+//! This event doesn't have any data associated with it right now. This is implemented as an empty
+//! data. TODO: make this make sense.
 //!
 //! ## WebSocket Guards
 //!
@@ -131,7 +131,7 @@
 //!   - [ ] Subprotocol Support
 //!   - [ ] Fairings
 //!   - [ ] Limits
-//! - [ ] Autobahn CI
+//! - [x] Autobahn CI
 //! - [ ] Broadcast topic checking
 //!     In theory, it should be possible to add sentinels that check the broadcast URIs, and verify
 //!     that they match at least one mounted route. This would likely require the addition of a
