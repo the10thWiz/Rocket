@@ -115,9 +115,9 @@ fn request_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
     );
 
     let conversion = if websocket {
-        quote!(<#ty as #FromWebSocket>::from_websocket(#__req))
+        quote_spanned!(ty.span() => <#ty as #FromWebSocket>::from_websocket(#__req))
     } else {
-        quote!(<#ty as #FromRequest>::from_request(#__req))
+        quote_spanned!(ty.span() => <#ty as #FromRequest>::from_request(#__req))
     };
 
     quote_spanned! { ty.span() =>
