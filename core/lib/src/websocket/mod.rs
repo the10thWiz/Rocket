@@ -317,6 +317,7 @@ impl WebsocketUpgrade {
     }
 }
 
+#[allow(unused)]
 pub mod rocket_multiplex {
     //! # Full rocket-multiplex protocol description:
     //!
@@ -485,20 +486,33 @@ pub mod rocket_multiplex {
         IoError,
     }
 
+    const INVALID: &'static str = "\u{B7}INVALID\u{B7}";
+    const ERR: &'static str = "\u{B7}ERR\u{B7}";
+
     impl MultriplexError {
         pub fn to_bytes(self) -> Bytes {
-            match self {
-                Self::NoControlChar => Bytes::from_static("\u{B7}INVALID\u{B7}No Control Character".as_bytes()),
-                Self::InvalidUtf8 => Bytes::from_static("\u{B7}INVALID\u{B7}Invalid Utf-8".as_bytes()),
-                Self::InvalidTopic => Bytes::from_static("\u{B7}INVALID\u{B7}Invalid Topic".as_bytes()),
-                Self::ControlMessageToLong => Bytes::from_static("\u{B7}INVALID\u{B7}Control message exceeds 512 byte limit".as_bytes()),
-                Self::InvalidControlMessage => Bytes::from_static("\u{B7}INVALID\u{B7}Control Message Invalid".as_bytes()),
-                Self::IoError => Bytes::from_static("\u{B7}INVALID\u{B7}Io Error".as_bytes()),
-                Self::NotSubscribed => Bytes::from_static("\u{B7}ERR\u{B7}Not Subscribed".as_bytes()),
-                Self::AlreadySubscribed => Bytes::from_static("\u{B7}ERR\u{B7}Already Subscribed".as_bytes()),
-                Self::TooManyTopics => Bytes::from_static("\u{B7}ERR\u{B7}Too Many Topics".as_bytes()),
-                Self::NotFound => Bytes::from_static("\u{B7}ERR\u{B7}Not Found".as_bytes()),
-            }
+            Bytes::from(match self {
+                Self::NoControlChar =>
+                    format!("{}{}", INVALID, "No Control Character"),
+                Self::InvalidUtf8 =>
+                    format!("{}{}", INVALID, "Invalid Utf-8"),
+                Self::InvalidTopic =>
+                    format!("{}{}", INVALID, "Invalid Topic"),
+                Self::ControlMessageToLong =>
+                    format!("{}{}", INVALID, "Control message exceeds 512 byte limit"),
+                Self::InvalidControlMessage =>
+                    format!("{}{}", INVALID, "Control Message Invalid"),
+                Self::IoError =>
+                    format!("{}{}", INVALID, "Io Error"),
+                Self::NotSubscribed =>
+                    format!("{}{}", ERR, "Not Subscribed"),
+                Self::AlreadySubscribed =>
+                    format!("{}{}", ERR, "Already Subscribed"),
+                Self::TooManyTopics =>
+                    format!("{}{}", ERR, "Too Many Topics"),
+                Self::NotFound =>
+                    format!("{}{}", ERR, "Not Found"),
+            })
         }
     }
 
@@ -544,12 +558,19 @@ pub mod rocket_multiplex {
             Self(vec![(initial.clone().into_owned(), Self::new_cache(), false)])
         }
 
-        pub async fn handle_message<'s, 'r>(&'s mut self, mut data: Data<'r>) -> Result<Action<'s, 'r>, MultriplexError> {
+        pub async fn handle_message<'s, 'r>(
+            &'s mut self,
+            mut data: Data<'r>
+        ) -> Result<Action<'s, 'r>, MultriplexError> {
             let tmp = data.peek(MAX_TOPIC_LENGTH + MULTIPLEX_CONTROL_BYTES.len()).await;
-            if let Some(i) = unsafe { std::str::from_utf8_unchecked(tmp).find(MULTIPLEX_CONTROL_STR) } {
+            if let Some(i) = unsafe {
+                std::str::from_utf8_unchecked(tmp).find(MULTIPLEX_CONTROL_STR)
+            } {
                 if i != 0 {
                     let topic = Origin::parse(std::str::from_utf8(&tmp[..i])?)?;
-                    if let Some((topic, cache, joined)) = self.0.iter_mut().find(|(t, _, _)| t == &topic) {
+                    if let Some((topic, cache, joined)) =
+                        self.0.iter_mut().find(|(t, _, _)| t == &topic)
+                    {
                         data.take_start(i + MULTIPLEX_CONTROL_BYTES.len()).await;
                         if *joined {
                             Ok(Action::Message(topic, cache, data))
@@ -568,7 +589,10 @@ pub mod rocket_multiplex {
             }
         }
 
-        async fn handle_control<'s, 'r>(&'s mut self, data: Data<'r>) -> Result<Action<'s, 'r>, MultriplexError> {
+        async fn handle_control<'s, 'r>(
+            &'s mut self,
+            data: Data<'r>
+        ) -> Result<Action<'s, 'r>, MultriplexError> {
             let capped = data.open(ByteUnit::Byte(512)).into_bytes().await?;
             if !capped.is_complete() {
                 return Err(MultriplexError::ControlMessageToLong)

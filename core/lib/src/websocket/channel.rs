@@ -45,7 +45,10 @@ impl WebSocketChannel {
     /// This also returns two futures, for reading and writing. They MUST be polled to advance the
     /// channel. For performance reasons, they shouldn't be sent to seperate tasks, typically they
     /// should just be joined with `tokio::join!`
-    pub fn new(upgrade: Upgraded, extensions: Extensions) -> (Self, impl Future<Output = ()>, impl Future<Output = ()>) {
+    pub fn new(
+        upgrade: Upgraded,
+        extensions: Extensions
+    ) -> (Self, impl Future<Output = ()>, impl Future<Output = ()>) {
         let (broker_tx, broker_rx) = mpsc::channel(50);
         let (message_tx, message_rx) = mpsc::channel(1);
         let (a, b) = Self::message_handler(
@@ -457,8 +460,21 @@ impl WebSocketChannel {
         let recv_close = Arc::new(AtomicBool::new(false));
         let (ping_tx, ping_rx) = mpsc::channel(1);
 
-        let reader = Self::reader(recv_close.clone(), read, broker_tx, ping_tx, message_tx, extensions.clone());
-        let writer = Self::writer(recv_close, write, broker_rx, ping_rx, extensions);
+        let reader = Self::reader(
+            recv_close.clone(),
+            read,
+            broker_tx,
+            ping_tx,
+            message_tx,
+            extensions.clone()
+        );
+        let writer = Self::writer(
+            recv_close,
+            write,
+            broker_rx,
+            ping_rx,
+            extensions
+        );
         (reader, writer)
     }
 

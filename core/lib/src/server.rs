@@ -394,7 +394,9 @@ impl Rocket<Orbit> {
         // remeber the protocol for later
         let extensions = Extensions::new(request);
 
-        let mut response = if !self.router.route_event(WebSocketEvent::Message).any(|r| r.matches(request)) {
+        let mut response = if !self.router.route_event(WebSocketEvent::Message)
+            .any(|r| r.matches(request))
+        {
             // If there is no Message handler for the route
             self.handle_error(Status::NotFound, request).await
         } else {
@@ -449,7 +451,12 @@ impl Rocket<Orbit> {
         route::WsOutcome::Forward(data)
     }
 
-    async fn ws_event_loop<'r>(&'r self, req: Request<'r>, upgrade: OnUpgrade, extensions: Extensions) {
+    async fn ws_event_loop<'r>(
+        &'r self,
+        req: Request<'r>,
+        upgrade: OnUpgrade,
+        extensions: Extensions
+    ) {
         if let Ok(upgrade) = upgrade.await {
             let (ch, a, b) = WebSocketChannel::new(upgrade, extensions);
             let req = WebSocket::new(req, ch.subscribe_handle());

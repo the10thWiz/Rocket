@@ -501,4 +501,3 @@ impl<'r, 'o: 'r> WsOutcome<'o> {
         Outcome::Forward(data)
     }
 }
-

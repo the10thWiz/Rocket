@@ -209,7 +209,7 @@ impl<T: AsyncRead + Send + Sync + Unpin> IntoMessage for Text<T> {
     async fn into_message(self, sender: mpsc::Sender<Bytes>) {
         into_message(self.0, sender).await;
     }
-} 
+}
 
 pub struct Binary<T>(pub T);
 
@@ -222,4 +222,4 @@ impl<T: AsyncRead + Send + Sync + Unpin> IntoMessage for Binary<T> {
     async fn into_message(self, sender: mpsc::Sender<Bytes>) {
         into_message(self.0, sender).await;
     }
-} 
+}
