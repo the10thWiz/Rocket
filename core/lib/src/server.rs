@@ -13,6 +13,8 @@ use crate::websocket::Extensions;
 use crate::websocket::WebSocketEvent;
 use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
+use crate::websocket::rocket_multiplex::Action;
+use crate::websocket::rocket_multiplex::MultriplexError;
 use crate::websocket::status::StatusError;
 use crate::websocket::status::WebSocketStatus;
 use crate::{Rocket, Orbit, Request, Response, Data, route};
@@ -455,17 +457,19 @@ impl Rocket<Orbit> {
         &'r self,
         req: Request<'r>,
         upgrade: OnUpgrade,
-        extensions: Extensions
+        extensions: Extensions,
     ) {
         if let Ok(upgrade) = upgrade.await {
+            let protocol = extensions.protocol();
             let (ch, a, b) = WebSocketChannel::new(upgrade, extensions);
-            let req = WebSocket::new(req, ch.subscribe_handle());
+            let mut req = WebSocket::new(req, ch.subscribe_handle());
             let event_loop = async move {
                 // Explicit moves
                 let mut ch = ch;
                 let mut close_status = Err(StatusError::NoStatus);
                 let mut joined = false;
                 let broker = self.broker();
+                let mut multiplexing = protocol.multiplex_topics();
                 while let Some(message) = ch.next().await {
                     let data = match message.opcode() {
                         websocket_codec::Opcode::Text => Data::from_ws(message, Some(false)),
@@ -480,7 +484,48 @@ impl Rocket<Orbit> {
                                     processing websocket messages. {:?}\
                                     has an invalid opcode", message),
                     };
-                    let o = if !joined {
+                    let o = if let Some(multiplexing) = &mut multiplexing {
+                        match multiplexing.handle_message(data).await {
+                            Ok(Action::Join(uri, _cache, data)) => {
+                                req.set_topic(uri.clone());
+                                if !self.router.route_event(WebSocketEvent::Message)
+                                    .any(|r| r.matches(req.request()))
+                                {
+                                    ch.send(MultriplexError::NotFound.into_string()).await;
+                                    continue;
+                                }
+
+                                match self.route_event(&req, WebSocketEvent::Join, data).await {
+                                    Outcome::Forward(data) => {
+                                        broker.subscribe(&uri, &ch).await;
+                                        multiplexing.joined(uri, _cache).await;
+                                        self.route_event(&req, WebSocketEvent::Message, data).await
+                                    }
+                                    o@Outcome::Success(_) => {
+                                        broker.subscribe(&uri, &ch).await;
+                                        multiplexing.joined(uri, _cache).await;
+                                        o
+                                    }
+                                    o@Outcome::Failure(_) => {
+                                        o
+                                    },
+                                }
+                            },
+                            Ok(Action::Message(uri, _cache, data)) => {
+                                req.set_topic(uri.clone());
+                                self.route_event(&req, WebSocketEvent::Message, data).await
+                            },
+                            Ok(Action::Leave(uri, _cache, data)) => {
+                                broker.unsubscribe(&uri, &ch).await;
+                                req.set_topic(uri);
+                                self.route_event(&req, WebSocketEvent::Leave, data).await
+                            },
+                            Err(e) => {
+                                ch.send(e.into_string()).await;
+                                continue;
+                            },
+                        }
+                    } else if !joined {
                         let o = self.route_event(&req, WebSocketEvent::Join, data).await;
                         let o = match o {
                             // If the join handlers forwarded, we retry as a message
@@ -501,7 +546,6 @@ impl Rocket<Orbit> {
                         joined = true;
                         o
                     } else {
-                        //req.set_topic(Origin::parse("/echo/we").unwrap());
                         self.route_event(&req, WebSocketEvent::Message, data).await
                     };
                     match o {

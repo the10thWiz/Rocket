@@ -241,6 +241,8 @@ use crate::Request;
 use crate::http::hyper;
 use crate::response::Builder;
 
+use self::rocket_multiplex::MultiplexTopics;
+
 /// Identifier of WebSocketEvent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WebSocketEvent {
@@ -342,13 +344,27 @@ pub(crate) enum Protocol {
 }
 
 impl Protocol {
-    pub fn new(_req: &Request<'_>) -> Self {
-        Self::Naked
+    pub fn new(req: &Request<'_>) -> Self {
+        req.headers()
+            .get("Sec-WebSocket-Protocol")
+            .flat_map(|s| s.split(","))
+            .find_map(|s| Self::from_name(s.trim()))
+            .unwrap_or(Self::Naked)
     }
 
     /// Gets the name to set for the WebSocket Protocol header
     pub fn get_name(&self) -> Option<&'static str> {
         match self {
+            Self::Naked => None,
+            Self::Multiplex => Some("rocket-multiplex"),
+            _ => None,
+        }
+    }
+
+    /// Gets the name to set for the WebSocket Protocol header
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "rocket-multiplex" => Some(Self::Multiplex),
             _ => None,
         }
     }
@@ -362,6 +378,15 @@ impl Protocol {
         match self {
             Self::Naked => None,
             Self::Multiplex => Some(origin.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn multiplex_topics(&self) -> Option<MultiplexTopics> {
+        match self {
+            Self::Naked => None,
+            Self::Multiplex => Some(MultiplexTopics::new()),
+            _ => None,
         }
     }
 }
@@ -421,7 +446,8 @@ pub mod rocket_multiplex {
     //!
     //! This protocol doesn't specify how the messages should be transimitted, and Rocket allows
     //! anything the RFC considers legal. For example, there is no requirement that the control
-    //! portions of the message are sent as a single frame.
+    //! portions of the message are sent as a single frame. This should typically still be the
+    //! case, since the entire topic should be available to be sent all at once.
     //!
     //! ### Seperator character: `'\u{00B7}'`
     //!
@@ -440,6 +466,17 @@ pub mod rocket_multiplex {
     //!
     //! Topic URLS are limited to `MAX_TOPIC_LENGTH = 100` (in bytes), to prevent potential DoS attacks.
     //!
+    //! ## Join
+    //!
+    //! Join messages are exactly the same as a Data message. Rocket considers the first message to
+    //! a given route the join message, so simply sending a message to route the client is not
+    //! subscribed to triggers the Join handler.
+    //!
+    //! ## Leave
+    //!
+    //! Leave messages are almost identical to Data messages, except they must be marked as Binary,
+    //! and the Seperator char must be pre-pended to the messge
+    //!
     //! # Control
     //!
     //! Control messages are limited to 512 bytes total, although there should never be a reason to
@@ -449,15 +486,6 @@ pub mod rocket_multiplex {
     //!
     //! Where `S` = `\u{00B7}`, `ACTION` is one of the following actions, and `PARAM` is one of the
     //! positional paramaters associated with the aciton.
-    //!
-    //! # Actions
-    //!
-    //! - Subscribe: `SUBSCRIBE`, [Topic]; subscribed the client to a specific topic URL, as if the
-    //! client had opened a second WebSocket connection to the topic URL
-    //! - Unsubscribe: `UNSUBSCRIBE`, [TOPIC, CODE?, REASON?]; unsubscribes the client from a specific
-    //! topic URL, as if the client has closed the second WebSocket connection to the topic URL
-    //! - Unsubscribe all: There is no specific unsubscribe all action, although closing the WebSocket
-    //! connection is treated as an unsubscribe all
     //!
     //! - Ok: `OK`, [ACTION, PARAMS*]; Sent as a response to an action, this indicates that the action
     //! succeeded.
@@ -553,8 +581,8 @@ pub mod rocket_multiplex {
     const ERR: &'static str = "\u{B7}ERR\u{B7}";
 
     impl MultriplexError {
-        pub fn to_bytes(self) -> Bytes {
-            Bytes::from(match self {
+        pub fn into_string(self) -> String {
+            match self {
                 Self::NoControlChar =>
                     format!("{}{}", INVALID, "No Control Character"),
                 Self::InvalidUtf8 =>
@@ -575,7 +603,7 @@ pub mod rocket_multiplex {
                     format!("{}{}", ERR, "Too Many Topics"),
                 Self::NotFound =>
                     format!("{}{}", ERR, "Not Found"),
-            })
+            }
         }
     }
 
@@ -604,92 +632,66 @@ pub mod rocket_multiplex {
     }
 
     pub(crate) enum Action<'s, 'r> {
-        Subscribed(&'s Origin<'static>),
-        Unsubscribed(Origin<'static>),
-        Join(&'s Origin<'static>, &'s Arc<Container![Send + Sync]>, Data<'r>),
+        //Subscribed(&'s Origin<'static>),
+        //Unsubscribed(Origin<'static>),
+        Join(Origin<'static>, Arc<Container![Send + Sync]>, Data<'r>),
         Message(&'s Origin<'static>, &'s Arc<Container![Send + Sync]>, Data<'r>),
-        Leave(&'s Origin<'static>, &'s Arc<Container![Send + Sync]>, Data<'r>),
+        Leave(Origin<'static>, Arc<Container![Send + Sync]>, Data<'r>),
     }
 
     /// Holds the data associated with a Multiplexed connection. Right now, thats an Origin & Cache
     /// for each topic.
-    pub(crate) struct MultiplexTopics(Vec<(Origin<'static>, Arc<Container![Send + Sync]>, bool)>);
+    pub(crate) struct MultiplexTopics(Vec<(Origin<'static>, Arc<Container![Send + Sync]>)>);
 
     impl MultiplexTopics {
         /// Create a MultiplexTopics with the initial topic
-        pub fn new(initial: &Origin<'_>) -> Self {
-            Self(vec![(initial.clone().into_owned(), Self::new_cache(), false)])
+        pub fn new() -> Self {
+            Self(vec![])
         }
 
         pub async fn handle_message<'s, 'r>(
             &'s mut self,
-            mut data: Data<'r>
+            mut data: Data<'r>,
         ) -> Result<Action<'s, 'r>, MultriplexError> {
-            let tmp = data.peek(MAX_TOPIC_LENGTH + MULTIPLEX_CONTROL_BYTES.len()).await;
+            let tmp = data.peek(MAX_TOPIC_LENGTH + MULTIPLEX_CONTROL_BYTES.len() * 2).await;
             if let Some(i) = unsafe {
                 std::str::from_utf8_unchecked(tmp).find(MULTIPLEX_CONTROL_STR)
             } {
-                if i != 0 {
+                if i > MAX_TOPIC_LENGTH + MULTIPLEX_CONTROL_BYTES.len() {
+                    Err(MultriplexError::NoControlChar)
+                } else if i != 0 {
                     let topic = Origin::parse(std::str::from_utf8(&tmp[..i])?)?;
-                    if let Some((topic, cache, joined)) =
-                        self.0.iter_mut().find(|(t, _, _)| t == &topic)
-                    {
+                    if let Some((topic, cache)) = self.0.iter_mut().find(|(t, _)| t == &topic) {
                         data.take_start(i + MULTIPLEX_CONTROL_BYTES.len()).await;
-                        if *joined {
-                            Ok(Action::Message(topic, cache, data))
-                        } else {
-                            *joined = true;
-                            Ok(Action::Join(topic, cache, data))
-                        }
+                        Ok(Action::Message(topic, cache, data))
                     } else {
-                        Err(MultriplexError::NotSubscribed)
+                        let topic = topic.into_owned();
+                        data.take_start(i + MULTIPLEX_CONTROL_BYTES.len()).await;
+                        Ok(Action::Join(topic, Self::new_cache(), data))
                     }
                 } else {
-                    self.handle_control(data).await
+                    if let Some(i) = unsafe {
+                        std::str::from_utf8_unchecked(&tmp[2..]).find(MULTIPLEX_CONTROL_STR)
+                    } {
+                        let topic = Origin::parse(std::str::from_utf8(&tmp[2..i])?)?;
+                        if let Some(pos) = self.0.iter_mut().position(|(t, _)| t == &topic) {
+                            let (topic, cache) = self.0.remove(pos);
+                            data.take_start(i + MULTIPLEX_CONTROL_BYTES.len() * 2).await;
+                            Ok(Action::Leave(topic, cache, data))
+                        } else {
+                            Err(MultriplexError::NotSubscribed)
+                        }
+                    } else {
+                        Err(MultriplexError::NoControlChar)
+                    }
                 }
             } else {
                 Err(MultriplexError::NoControlChar)
             }
         }
 
-        async fn handle_control<'s, 'r>(
-            &'s mut self,
-            data: Data<'r>
-        ) -> Result<Action<'s, 'r>, MultriplexError> {
-            let capped = data.open(ByteUnit::Byte(512)).into_bytes().await?;
-            if !capped.is_complete() {
-                return Err(MultriplexError::ControlMessageToLong)
-            }
-            let raw = String::from_utf8(capped.into_inner())?;
-            let mut parts = raw.split(MULTIPLEX_CONTROL_STR);
-            match parts.next() {
-                Some("SUBSCRIBE") => match parts.next() {
-                    Some(s) => {
-                        let new_topic = Origin::parse(s)?.into_owned();
-                        if !self.0.iter().any(|(t, _, _)| t == &new_topic) {
-                            self.0.push((new_topic, Self::new_cache(), false));
-                            Ok(Action::Subscribed(&self.0[self.0.len() - 1].0))
-                        } else {
-                            Err(MultriplexError::AlreadySubscribed)
-                        }
-                    }
-                    None => Err(MultriplexError::InvalidControlMessage),
-                },
-                Some("UNSUBSCRIBE") => match parts.next() {
-                    Some(s) => {
-                        let old_topic = Origin::parse(s)?.into_owned();
-                        match self.0.iter().position(|(t, _, _)| t == &old_topic) {
-                            Some(i) => {
-                                self.0.remove(i);
-                                Ok(Action::Unsubscribed(old_topic))
-                            }
-                            None => Err(MultriplexError::NotSubscribed)
-                        }
-                    }
-                    None => Err(MultriplexError::InvalidControlMessage),
-                },
-                _ => Err(MultriplexError::InvalidControlMessage),
-            }
+        pub async fn joined(&mut self, topic: Origin<'static>, cache: Arc<Container![Send + Sync]>) {
+            self.0.push((topic, cache));
         }
 
         fn new_cache() -> Arc<Container![Send + Sync]> {
