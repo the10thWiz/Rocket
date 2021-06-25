@@ -1,7 +1,8 @@
-use devise::{Spanned, SpanWrapped, Result, FromMeta};
+use devise::{Diagnostic, FromMeta, Result, SpanWrapped, Spanned};
 use devise::ext::{SpanDiagnosticExt, TypeExt};
 use indexmap::{IndexSet, IndexMap};
 use proc_macro2::Span;
+use quote::ToTokens;
 
 use crate::proc_macro_ext::Diagnostics;
 use crate::http_codegen::{MediaType, WebSocketEvent};
@@ -38,6 +39,31 @@ pub struct Arguments {
     pub map: ArgumentMap
 }
 
+/// Convience struct to represent an isize that cannot be `isize::max_value()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NonMax(isize);
+
+impl FromMeta for NonMax {
+    fn from_meta(meta: &devise::MetaItem) -> Result<Self> {
+        let tmp = isize::from_meta(meta)?;
+        if tmp < isize::max_value() {
+            Ok(Self(tmp))
+        } else {
+            Err(Diagnostic::spanned(
+                meta.span(),
+                devise::Level::Error,
+                "isize::max_value() is not a permitted value"
+            ))
+        }
+    }
+}
+
+impl ToTokens for NonMax {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        self.0.to_tokens(tokens);
+    }
+}
+
 /// The parsed `#[route(..)]` attribute.
 #[derive(Debug, FromMeta)]
 pub struct Attribute {
@@ -46,7 +72,7 @@ pub struct Attribute {
     pub uri: RouteUri,
     pub data: Option<SpanWrapped<Dynamic>>,
     pub format: Option<SpanWrapped<MediaType>>,
-    pub rank: Option<isize>,
+    pub rank: Option<NonMax>,
 }
 
 /// The parsed `#[method(..)]` (e.g, `get`, `put`, etc.) attribute.
@@ -56,7 +82,7 @@ pub struct MethodAttribute {
     pub uri: RouteUri,
     pub data: Option<SpanWrapped<Dynamic>>,
     pub format: Option<SpanWrapped<MediaType>>,
-    pub rank: Option<isize>,
+    pub rank: Option<NonMax>,
 }
 
 #[derive(Debug)]
