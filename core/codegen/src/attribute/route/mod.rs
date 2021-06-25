@@ -368,7 +368,7 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
             return Err(Diagnostic::spanned(
                 media_type.span(),
                 devise::Level::Error,
-                "WebSocket Event handlers do not support formats"
+                "WebSocket Event handlers do not support formats (yet)"
             ));
         }
     }

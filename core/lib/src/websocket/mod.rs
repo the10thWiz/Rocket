@@ -74,8 +74,8 @@
 //! having a collision; WebSocket routes also generate an HTTP route (which just returns an
 //! UpgradeRequired status code), which has the lowest possible priority.
 //!
-//! Collisions will be reported if an HTTP Get route has a rank of `isize::max_value()`, and it has the
-//! same paths and querys as a WebSocket event handler.
+//! Collisions will be reported if an HTTP Get route has a rank of `isize::max_value()`, and it has
+//! the same paths and querys as a WebSocket event handler.
 //!
 //! Technically, this allows for collisions between the HTTP handlers for two WebSocket routes. The
 //! order in which they are tried is unspecified, however this is acceptable since they should have
@@ -99,26 +99,89 @@
 //!
 //! ## Multiplexing
 //!
-//! Unimplemented(TODO)
+//! Unimplemented
 //!
-//! Topics, as described in the previous section, have one major drawback: a client needs to create
-//! a seperate WebSocket Connection (and the underlying TCP Connection) for every topic they wish
-//! to subscribe to. To reduce the overhead, Rocket implements a Multiplexing protocol, which
-//! allows a client to connect to multiple topics using a single WebSocket Connection.
-//!
-//! The Multiplexing protocol does enforce some limitations, and those are discussed in the full
-//! protocol description.
-//!
+// Topics, as described in the previous section, have one major drawback: a client needs to create
+// a seperate WebSocket Connection (and the underlying TCP Connection) for every topic they wish
+// to subscribe to. To reduce the overhead, Rocket implements a Multiplexing protocol, which
+// allows a client to connect to multiple topics using a single WebSocket Connection.
+//
+// The Multiplexing protocol does enforce some limitations, and those are discussed in the full
+// protocol description.
+//
+// There are a number of issues with topic multiplexing. First, handling the request object is
+// complicated. My first solution used Arc<Request>, and created a vector of them to hold each of
+// the multiplexed connections. This eliminates the security enforced via the Request lifetime, and
+// was not a sustainable solution. The current code would allow me to change the URI between
+// messages, avoiding many of the above issues. However, this isn't simply a free solution.
+//
+// Second, using the URI as the topic come's with it's own problems. There is no real way to avoid
+// cloning the URI, although it may be possible to avoid some of the clones. If we decide not to use
+// the URI as the topic, multiplexing may not require a protocol at all.
+//
+// Other options:
+//
+// Using Strings, or a user-defined type. This has advantages and disadvantages. First, the user
+// would need to decide what topics the client should be subscribed to. However, this frees Rocket
+// from having to figure that out.
+//
+// Another option is to use some type of matcher to allow the user to select a subset of clients
+// based on some arbitraty criteria. This could be a function to match the client via their
+// Request, and we would likely create a macro to generate one based on the URI and Request Guards.
+//
+// I imagine this might look something like
+//
+// ```rust,no-run
+// // Simple URI
+// channel!(broker, "/room/lobby")
+//
+// // handler based -> more or less the same as the URI, but an underscore allows a wildcard for
+// // that slot
+// channel!(broker, echo(...))
+//
+// // Total control
+// channel!(broker, "/room/{age}", |age: u8| age < 5)
+// ```
+// The `|` would be optional, if the only requirement is that the FromParam, FromPath and
+// FromRequest implementations succeed. In that case, there can be no additional code run.
+//
+// Syntax: BROKER, MATCHER => where BROKER is a variable refering to the broker
+//
+// MATCHER: (STRING-LIT, ARGS?) | HANDLER_FN => where STRING-LIT is a literal URIs
+//
+// HANDLER_FN: HANDLER '(' ARGS,* ')' => where HANDLER is the name of a route, and ARGS is a set of
+// args. See the URI! macro for more information
+//
+// ARGS: ( '|' PARAM,* '|' CODE? ) | PARAM,* => where CODE is a valid Rust expression that
+// evalueates to a bool or bool-like object (i.e. Result, Option, or Outcome)
+//
+// PARAM: NAME ':' TYPE => where NAME is an identifier and TYPE is a Rust type
+//
+// This would be expanded to something like:
+// ```rust,no-run
+// {
+//    function inner<'r>(request: &'r Request<'_>) -> bool {
+//       #path_guards
+//       #param_guards
+//       #request_guards
+//       #user_code|true
+//    }
+//    InnerChannel(&broker, inner)
+// }
+// ```
+//
 //! ## ChannelLocal
+//!
+//! This is trivially Request's local_cache until multiplexing is added into the mix.
 //!
 //! Unimplemented
 //!
-//! Rocket already has a mechanism for associating data with a Request, specifically, the Request's
-//! local cache. Without Multiplexing, Channel local is trivially the same as Request local,
-//! however they are technically still two seperate caches. With Multiplexing, there is a
-//! difference: Request local is local to the request, but shared across all of the topics the
-//! client has subscribed to. Channel local, on the other hand, is local to a specific topic.
-//!
+// Rocket already has a mechanism for associating data with a Request, specifically, the Request's
+// local cache. Without Multiplexing, Channel local is trivially the same as Request local,
+// however they are technically still two seperate caches. With Multiplexing, there is a
+// difference: Request local is local to the request, but shared across all of the topics the
+// client has subscribed to. Channel local, on the other hand, is local to a specific topic.
+//
 //! ## TODO
 //!
 //! - [ ] Write more documentation
