@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -602,6 +603,13 @@ mod validation {
 }
 
 /// Represents an in-progress WebSocket Connection
+//
+// In theory, this could be combined with [`Channel`], but there are several issues. First, the
+// simplest solution would be to make the request like a `Cow`, but it can't be `Cow` since Request
+// doesn't implement Clone. Even then, there are many issues with this.
+// 
+// At a more fundamental level, this is undesirable, since it exposes the internal Request
+// object inside the handler. Request doesn't implement `FromRequest` for this exact reason.
 pub struct WebSocket<'r> {
     request: Request<'r>,
     sender: mpsc::Sender<WebSocketMessage>,
@@ -624,7 +632,7 @@ impl<'r> WebSocket<'r> {
 
     /// Sets the topic URI for this WebSocket
     #[allow(unused)]
-    pub(crate) fn set_topic(&mut self, topic: Origin<'r>) {
+    pub fn set_topic<'a>(&'r mut self, topic: Origin<'r>) {
         self.request.set_uri(topic);
     }
 
@@ -695,7 +703,7 @@ impl<'r> FromWebSocket<'r> for Channel<'r> {
         WsOutcome::Success(Self {
             sender: request.sender.clone(),
             broker: request.broker(),
-            topic: request.request.uri(),
+            topic: request.topic(),
         })
     }
 }
