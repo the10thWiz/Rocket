@@ -91,6 +91,20 @@
 //! There are a few other limitations: Rocket cannot start processing another message from a client
 //! until the current event handler completes (this is related to the Request lifetimes).
 //!
+//! ## Terminology
+//!
+//! This is subject to change
+//!
+//! - Message: individual messages
+//! - Channel: sends messages
+//! - WebSocket: the connection
+//! - Broker: broadcasts messages
+//! - Multiplex: Related to the multiplexing protocol
+//! - Extension, Protocol, Status: Same as the RFC
+//!
+//! Therefore, `WebSocketChannel` refers to an object that manages the underlying connection, and
+//! can send messages.
+//!
 //! ## Topics
 //!
 //! Rocket provides a [`Broker`] implementation to facilitate broadcasting to multiple clients. The
