@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;

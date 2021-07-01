@@ -103,7 +103,8 @@
 //! - Extension, Protocol, Status: Same as the RFC
 //!
 //! Therefore, `WebSocketChannel` refers to an object that manages the underlying connection, and
-//! can send messages.
+//! can send messages. (It also happens to be pub(crate) since it doesn't get exposed to code
+//! outside Rocket).
 //!
 //! ## Topics
 //!
@@ -183,6 +184,13 @@
 //    InnerChannel(&broker, inner)
 // }
 // ```
+//
+// ## Latency & Performance
+//
+// On my laptop, this isn't a major issue. It seems that the largest performance impact is actually
+// client side, and it's not a major concern. This means that Multiplexing is likely unnessecary.
+// If we choose this path, and drop connection multiplexing, a greater emphasis should be placed on
+// HTTP/2 support.
 //
 //! ## ChannelLocal
 //!
