@@ -347,7 +347,7 @@ impl Protocol {
     pub fn new(req: &Request<'_>) -> Self {
         req.headers()
             .get("Sec-WebSocket-Protocol")
-            .flat_map(|s| s.split(","))
+            .flat_map(|s| s.split(','))
             .find_map(|s| Self::from_name(s.trim()))
             .unwrap_or(Self::Naked)
     }
