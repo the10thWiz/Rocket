@@ -361,13 +361,11 @@ impl WebSocketEvent {
 }
 
 /// Create the upgrade object associated with this request IF the request should be upgraded
-pub(crate) fn upgrade(req: &mut hyper::Request<hyper::Body>) -> Option<WebsocketUpgrade> {
+pub(crate) fn upgrade(req: &mut hyper::Request<hyper::Body>) -> Option<(String, OnUpgrade)> {
     if req.method() == hyper::Method::GET {
         ClientRequest::parse(|n|
             req.headers().get(n).map(|s| s.to_str().unwrap_or(""))
-        ).ok().map(|accept| WebsocketUpgrade {
-            accept: accept.ws_accept(), on_upgrade: hyper::upgrade::on(req)
-        })
+        ).ok().map(|accept| (accept.ws_accept(), hyper::upgrade::on(req)))
     } else {
         None
     }
@@ -469,20 +467,6 @@ impl Protocol {
             Self::Naked => None,
             Self::Multiplex => Some(origin.clone()),
         }
-    }
-}
-
-/// Everything needed to desribe a websocket Upgrade
-/// TODO: Maybe don't use this? I think the only thing I do is split it up right away
-pub(crate) struct WebsocketUpgrade {
-    accept: String,
-    on_upgrade: OnUpgrade,
-}
-
-impl WebsocketUpgrade {
-    /// ?
-    pub fn split(self) -> (String, OnUpgrade) {
-        (self.accept, self.on_upgrade)
     }
 }
 

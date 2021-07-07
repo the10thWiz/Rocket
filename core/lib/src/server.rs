@@ -103,12 +103,11 @@ async fn hyper_service_fn(
 
         // Dispatch the request to get a response, then write that response out.
         let token = rocket.preprocess_request(&mut req, &mut data).await;
-        if let Some(upgrade) = upgrade {
+        if let Some((accept, upgrade)) = upgrade {
             // req.clone() is nessecary since the request is borrowed to hande the response. This
             // copy can (and will) outlive the actual request, but will not outlive the websocket
             // connection.
             let req_copy = req.clone();
-            let (accept, upgrade) = upgrade.split();
             let (r, ext) = rocket.dispatch_ws(token, &mut req, data, accept).await;
             rocket.send_response(r, tx).await;
             rocket.ws_event_loop(req_copy, upgrade, ext).await;
