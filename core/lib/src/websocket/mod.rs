@@ -192,6 +192,66 @@
 // If we choose this path, and drop connection multiplexing, a greater emphasis should be placed on
 // HTTP/2 support.
 //
+// To make this decision, benchmarking Rocket against other WebSocket servers is a must. There are
+// several performance implications to deciding against a multiplexing protocol.
+//
+// 1. With a protocol, client will establish ~one connection to the server. It should
+//    be assumed that the number will be much larger than one without.
+// 2. Joining K topics could cause performance issues. As noted above, it appears the largest load
+//    is actually placed on the client.
+// 3. N clients joining K topics each. This could become a problem. Since Rocket maintains nothing
+//    across connections; if a disconnection occurs, it is up to the client to reconnect. The
+//    performance impact of this is likely to be similar regaurdless of multiplexing, assuming N
+//    >> K. This situation is likely when a server crashes or restarts, since every client will
+//    attempt to reconnect at the same time.
+//
+// ## Massconnect
+//
+// This benchmark attempts a large number of connections concurrently, and notes the latency.
+//
+// When benchmarking Rocket agaisnt uWebSockets (a minimal C++ websocket library), a few
+// interesting points came to light. First, uWebSockets is marginally faster than Rocket. I suspect
+// uWebSockets has an advantage since it doesn't need to handle routing non-websocket traffic.
+// Second, uWebSockets seems to have an internal limit to the number of concurrent connections,
+// unlike Rocket (Limits can be added if desired). In my testing, Rocket was only limited by the OS
+// limits.
+//
+// ## Rocket vs Phoenix
+//
+// Rocket has some advantages and disadvantages compared to Phoenix. The Channel concept is based
+// on Phoenix's Channels, but has diverged quite a bit since then. Phoenix implements a full
+// multiplexing protocol, which uses JSON and a client library. Rocket's proposed multiplexing
+// protocol would not require JSON, and it should be simple enough to write a client library if one
+// doesn't already exist in the target language. There are a few specific downsides to Phoenix's
+// channels: the use of JSON, and the channel descriptors (a string, optionally with a colon
+// sperated namespace). Rocket doesn't require JSON, and therefore incures no overhead, and Rocket
+// uses the connection's URI as the topic, providing both more flexibility and better type
+// checking.
+//
+// Phoenix also provides a convient broadcast functionality, which is far ahead of Rocket's in terms
+// of performance. The current implementation in Rocket has not been optimized in any way yet.
+// Phoenix does also provide the ability for a client to directly broadcast a message to a topic,
+// but Rocket requires broadcasts originate on the server side. This is a minor disadvantage of
+// either the simple multiplexing protocol, or lack of any specific protocl. However, I think this
+// is overall actually an advantage, since it requires the user to write a route (with request
+// guards) to broadcast a message.
+//
+// Maximum connection number is another issue. Rocket provides no builtin sharding capabilities,
+// unlike Phoenix, so Rocket is unlikely to be able to support millions of concurrent connections.
+// Such capabilities could be created, but it would require significatant work, and likely complex
+// setup. I suspect the most we will do is provide the ability for an external library to implement
+// message sharing. (Likely by allowing direct access to broadcasts from an on_liftoff fairing. It
+// would then be responsible for mananging the connections to other servers, and forwarding
+// messages).
+//
+// ### Comparitive performance
+//
+// To measure latency, I will be using N clients joining K topics. Without multiplexing, this
+// creates N*K connections, but with multiplexing it only creates N connections (assuming that the
+// server doesn't limit the number of topics a client can subscribe to). For testing, I will be
+// using broadcast servers, which provide a room functionality. For Rocket, I will be using the
+// websocket-channel example, for Phoenix I will be using a server with similar functionality.
+//
 //! ## ChannelLocal
 //!
 //! This is trivially Request's local_cache until multiplexing is added into the mix.
@@ -204,14 +264,29 @@
 // difference: Request local is local to the request, but shared across all of the topics the
 // client has subscribed to. Channel local, on the other hand, is local to a specific topic.
 //
+// ## Virtualizing Requests
+//
+// To handle multiplexing, requests MUST be virtualized in some way. We can either clone a new
+// request for each topic (and potentially run fairings on each), or only swap the URI (and maybe
+// cache) for each topic. At the moment, fairings are only run on the initial connection, and the
+// request should (and almost certainly must) be cloned if we intend to run fairings on each topic.
+// 
+// The only other issue is Cookies, since only the initial request has any chance to actually store
+// cookies. It may be best to find some way to just disable cookies for WebSocket requests. This
+// could be handled by adding a Result return value from the add and remove methods, which will
+// fail in WebSocket contexts. This won't cause existing applications to stop compiling, but it
+// will add warnings for the unused result. Maybe they should still effect the cookie jar? They
+// shouldn't be applied (since they never are client side), but they could still be added to the
+// pending log.
+//
 //! ## TODO
 //!
 //! - [ ] Write more documentation
 //!   - [ ] Guide
-//! - [ ] Finalize Data type
+//! - [x] Finalize Data type
 //! - [ ] Organize websocket types
 //! - [ ] More efficient broker
-//! - [ ] Event handler panics
+//! - [x] Event handler panics
 //! - [ ] Topic multiplexing
 //!   - [ ] Subprotocol Support
 //!   - [ ] Fairings
@@ -365,11 +440,20 @@ pub(crate) enum Protocol {
 
 impl Protocol {
     pub fn new(_req: &Request<'_>) -> Self {
-        Self::Naked
+        _req.headers()
+            .get("Sec-WebSocket-Protocol")
+            .flat_map(|s| s.split(','))
+            .find_map(|s| match s.trim() {
+                _ => None,
+            })
+            .unwrap_or(Self::Naked)
     }
 
     /// Gets the name to set for the WebSocket Protocol header
-    pub fn get_name(&self) -> Option<&'static str> {
+    ///
+    /// Note that this MUST return exactly the same as one of the protocol headers sent by the
+    /// client.
+    pub fn get_name(&self) -> Option<String> {
         match self {
             _ => None,
         }
