@@ -331,6 +331,8 @@ pub(crate) mod message;
 pub(crate) mod status;
 pub(crate) mod broker;
 
+pub mod token;
+
 pub use channel::{WebSocket, Channel};
 pub use status::WebSocketStatus;
 
