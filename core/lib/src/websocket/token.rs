@@ -44,7 +44,7 @@
 //! This is actually handled via the request's local cache, and any values stored in the
 //! authentication request's local cache will also be in the websocket event's local cache.
 
-use std::{any::Any, net::SocketAddr, sync::Arc, time::{Duration, Instant}};
+use std::{any::Any, fmt::Debug, net::SocketAddr, sync::Arc, time::{Duration, Instant}};
 
 use dashmap::DashMap;
 use rand::Rng;
@@ -91,7 +91,8 @@ impl<T: Send + Sync> WebSocketToken<T> {
 
 impl<'r, 'o: 'r, T: Send + Sync + 'static> Responder<'r, 'o> for WebSocketToken<T> {
     fn respond_to(self, request: &'r crate::Request<'_>) -> crate::response::Result<'o> {
-        request.local_cache(|| InnerTokenData(self.data));
+        let data = self.data;
+        request.local_cache(move || InnerTokenData(data));
         let token = if let Some(uri) = self.uri {
             request.rocket().websocket_tokens.create(Arc::clone(&request.state.cache), uri)
         } else {
@@ -154,9 +155,14 @@ impl TokenRef {
 /// TokenTable is a wrapper around DashMap, a concurrent HashMap. It does do some locking
 /// internally, however this wrapper never returns a reference into the map itself, so deadlocks
 /// should not be possible.
-#[derive(Debug)]
 pub(crate) struct TokenTable {
-    map: DashMap<String, TokenRef>,
+    map: scc::HashMap<String, TokenRef>,
+}
+
+impl Debug for TokenTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TokenTable {{ map: .. }}")
+    }
 }
 
 /// Length of tokens to generate
@@ -166,7 +172,7 @@ impl TokenTable {
     /// Create a new empty TokenTable
     pub fn new() -> Self {
         Self {
-            map: DashMap::new(),
+            map: scc::HashMap::default(),
         }
     }
 
@@ -178,18 +184,23 @@ impl TokenTable {
 
         // thread_rng is lazily initialized, so this should be really cheap if the rng has already
         // been initialized on this thread.
-        let token: String = rand::thread_rng()
-            .sample_iter(rand::distributions::Alphanumeric)
-            .take(TOKEN_LEN)
-            .map(char::from)
-            .collect();
-        self.map.insert(token.clone(), TokenRef {
+        let mut token_ref = TokenRef {
             cache,
             uri,
             start: Instant::now(),
             expired: false,
-        });
-        token
+        };
+        loop {
+            let token: String = rand::thread_rng()
+                .sample_iter(rand::distributions::Alphanumeric)
+                .take(TOKEN_LEN)
+                .map(char::from)
+                .collect();
+            match self.map.insert(token.clone(), token_ref) {
+                Ok(_) => break token,
+                Err((_e, _k, v)) => token_ref = v,
+            }
+        }
     }
 
     /// Attempts the get a value from a given URI.
@@ -208,31 +219,19 @@ impl TokenTable {
         None
     }
 
-    /// Gets the value of a given token. Returns None if the token is expired
+    /// Gets the value of a given token.
+    ///
+    /// The token may be expired, this must be handled explicitly
     pub fn get(&self, token: &str) -> Option<TokenRef> {
-        self.map.remove_if(token, |_k, v| !v.expired() && !v.expired).map(|(_k, v)| v)
+        //self.map.remove_if(token, |_k, v| !v.expired() && !v.expired).map(|(_k, v)| v)
+        self.map.remove(token)
     }
 
     /// Gets a list of TokenRefs that have expired. TokenRefs will only be returned exactly once by
     /// this function, even on repeated calls.
-    // TODO: Schedule a periodic Removal procedure
-    pub fn get_expired(&self) -> Vec<TokenRef> {
-        let mut ret = vec![];
-        self.map.alter_all(|_k, v| {
-            if v.expired() && !v.expired {
-                let start = v.start;
-                ret.push(v);
-                TokenRef {
-                    cache: Arc::new(<Container![Send + Sync]>::new()),
-                    uri: Origin::const_new("/", None),
-                    start,
-                    expired: true,
-                }
-            } else {
-                v
-            }
-        });
-        self.map.retain(|_k, v| !v.expired);
-        ret
+    pub fn get_expired(&self) -> Vec<String> {
+        self.map.iter()
+            .filter_map(|(k, v)| if v.expired() { Some(k.to_owned()) } else { None })
+            .collect()
     }
 }

@@ -542,22 +542,23 @@ impl Rocket<Orbit> {
     }
 
     async fn cleanup_tokens(&self) {
-        for token_ref in self.websocket_tokens.get_expired() {
-            let req = Request::new(self, Method::Get, token_ref.uri);
-            let data = token_ref.data;
-            req.local_cache(|| data);
+        for token in self.websocket_tokens.get_expired() {
+            if let Some(token_ref) = self.websocket_tokens.get(&token) {
+                let mut req = Request::new(self, Method::Get, token_ref.uri);
+                req.state.cache = token_ref.cache;
 
-            let (sender, _rx) = tokio::sync::mpsc::channel(1);
-            drop(_rx);
-            let req = WebSocket::new(req, sender);
-            match self.route_event(&req, WebSocketEvent::Leave, Data::local(vec![])).await {
-                Outcome::Forward(_data) => {
-                },
-                Outcome::Failure(_status) => {
-                }
-                Outcome::Success(_response) => {
-                }
-            };
+                let (sender, _rx) = tokio::sync::mpsc::channel(1);
+                drop(_rx);
+                let req = WebSocket::new(req, sender);
+                match self.route_event(&req, WebSocketEvent::Leave, Data::local(vec![])).await {
+                    Outcome::Forward(_data) => {
+                    },
+                    Outcome::Failure(_status) => {
+                    }
+                    Outcome::Success(_response) => {
+                    }
+                };
+            }
         }
     }
 
