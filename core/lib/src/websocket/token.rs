@@ -3,14 +3,55 @@
 //! These types implement a mechanism for using standard HTTP authentication for WebSockets. The
 //! primary mechanism is the use of a token: a client must first obtain a token by authenticating
 //! against an HTTP route, then use the token to connect to a WebSocket endpoint.
+//!
+//! The primary type this module exports is `WebSocketToken`, which is likely the only type
+//! you will need to interact with.
+//!
+//! WebSocket authentication is somewhat difficult, since the WebSocket protocol defines no
+//! standard authentication methods, and most client libraries don't have the flexibility
+//! required to actually implement authentication. The most common solution is the use a of a
+//! token, obtained from a separate HTTP route. This allows the use of any Authentication protocol
+//! your server already implements, and makes the code fairly simple.
+//!
+//! The Rocket code for creating a Token, and providing it to the user looks like this:
+//!
+//! ```rust,no_run
+//! #[get("/listen")]
+//! fn auth() -> WebSocketToken<()> {
+//!     WebSocketToken::new(())
+//! }
+//! ```
+//!
+//! `WebSocketToken` implements responder, and simply provides the token to the user to connect.
+//! The generic parameter on `WebSocketToken` is an associated data type. The data type here is
+//! `()`, but a more practical use case might use a `User` struct or something similiar.
+//!
+//! On the client side, when the client makes a GET request to '/listen', the response will look
+//! something like `/websocket/token/asdkasdidjdown7d`. The client should then open a websocket
+//! connection to that url, e.g. with `new WebSocket('ws://' + document.location.host + url)` in
+//! JS. On Rocket's side, this connection will be routed to event handlers as `/listen`, since that
+//! was the uri used to connect to the authentication route.
+//!
+//! In order to ensure the client has authenticated, WebSocketToken is also a Request guard,
+//! although it does need to be marked as a reference:
+//!
+//! ```rust,no_run
+//! #[message("/listen", data = "<data>")]
+//! fn message(data: Data<'_>, _token: WebSocketToken<&()>) {
+//! }
+//! ```
+//!
+//! This is actually handled via the request's local cache, and any values stored in the
+//! authentication request's local cache will also be in the websocket event's local cache.
 
-use std::{any::Any, time::{Duration, Instant}};
+use std::{any::Any, net::SocketAddr, sync::Arc, time::{Duration, Instant}};
 
 use dashmap::DashMap;
-use rand::{Rng, SeedableRng, prelude::ThreadRng};
-use rocket_http::{ext::IntoOwned, uri::Origin};
+use rand::Rng;
+use rocket_http::{Accept, ContentType, HeaderMap, ext::IntoOwned, uri::Origin};
+use state::{Container, Storage};
 
-use crate::{request::FromRequest, response::Responder};
+use crate::{Request, request::FromRequest, response::Responder};
 
 /// A WebSocketToken for use in authenticating WebSocket connections
 pub struct WebSocketToken<T: Send + Sync> {
@@ -24,16 +65,21 @@ impl<T: Send + Sync + 'static> WebSocketToken<T> {
         Self { data, uri: None, }
     }
 
-    /// Creates a temporary Connection URI using the provided Request. The URI is returned as a
-    /// String, although that is subject to change
-    pub fn create_connection_uri(self, request: &crate::Request<'_>) -> String {
-        let token = if let Some(uri) = self.uri {
-            request.rocket().websocket_tokens.create(self.data, uri)
-        } else {
-            request.rocket().websocket_tokens.create(self.data, request.uri().clone().into_owned())
-        };
-        format!("/websocket/token/{}", token)
+    /// Create a new token with the provided Data, that will direct the client to the provided URI
+    pub fn with_uri<'a>(uri: impl Into<Origin<'a>>, data: T) -> Self {
+        Self { data, uri: Some(uri.into().into_owned()), }
     }
+
+    // Creates a temporary Connection URI using the provided Request. The URI is returned as a
+    // String, although that is subject to change
+    //pub fn create_connection_uri(self, request: &crate::Request<'_>) -> String {
+        //let token = if let Some(uri) = self.uri {
+            //request.rocket().websocket_tokens.create(self.data, uri)
+        //} else {
+            //request.rocket().websocket_tokens.create(self.data, request.uri().clone().into_owned())
+        //};
+        //format!("/websocket/token/{}", token)
+    //}
 }
 
 impl<T: Send + Sync> WebSocketToken<T> {
@@ -45,18 +91,19 @@ impl<T: Send + Sync> WebSocketToken<T> {
 
 impl<'r, 'o: 'r, T: Send + Sync + 'static> Responder<'r, 'o> for WebSocketToken<T> {
     fn respond_to(self, request: &'r crate::Request<'_>) -> crate::response::Result<'o> {
+        request.local_cache(|| InnerTokenData(self.data));
         let token = if let Some(uri) = self.uri {
-            request.rocket().websocket_tokens.create(self.data, uri)
+            request.rocket().websocket_tokens.create(Arc::clone(&request.state.cache), uri)
         } else {
-            request.rocket().websocket_tokens.create(self.data, request.uri().clone().into_owned())
+            request.rocket().websocket_tokens.create(Arc::clone(&request.state.cache), request.uri().clone().into_owned())
         };
         format!("/websocket/token/{}", token).respond_to(request)
     }
 }
 
-pub(crate) struct InnerTokenData(Box<dyn Any + Send + Sync + 'static>);
+pub(crate) struct InnerTokenData<T>(T);
 
-impl std::fmt::Debug for InnerTokenData {
+impl<T> std::fmt::Debug for InnerTokenData<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "InnerTokenData(?)")
     }
@@ -69,12 +116,11 @@ impl<'r: 'o, 'o, T: Send + Sync + 'static> FromRequest<'r> for WebSocketToken<&'
     async fn from_request(request: &'r crate::Request<'_>)
         -> crate::request::Outcome<Self, Self::Error>
     {
-        if let Some(Some(data)) = request.state.cache
-            .try_get::<InnerTokenData>()
-            .map(|i| i.0.downcast_ref::<T>())
+        if let Some(data) = request.state.cache
+            .try_get::<InnerTokenData<T>>()
         {
             crate::request::Outcome::Success(Self {
-                data,
+                data: &data.0,
                 uri: None,
             })
         } else {
@@ -85,7 +131,7 @@ impl<'r: 'o, 'o, T: Send + Sync + 'static> FromRequest<'r> for WebSocketToken<&'
 
 #[derive(Debug)]
 pub(crate) struct TokenRef {
-    pub data: InnerTokenData,
+    pub cache: Arc<Container![Send + Sync]>,
     pub uri: Origin<'static>,
     start: Instant,
     expired: bool,
@@ -97,6 +143,13 @@ impl TokenRef {
         self.start.elapsed() > Duration::from_secs(30)
     }
 }
+
+// The choice of concurrent hashmap is hard. I don't actually need all of the normal operations,
+// I just need some slightly interesting opterations:
+//
+// try_insert: insert, but fail if the item already exists
+// remove: remove element, returning it as an owned value
+// remove_all: remove every element that matches a condition, returning the removed values as owned
 
 /// TokenTable is a wrapper around DashMap, a concurrent HashMap. It does do some locking
 /// internally, however this wrapper never returns a reference into the map itself, so deadlocks
@@ -118,7 +171,7 @@ impl TokenTable {
     }
 
     /// Creates a token, and saves the associated data into the table
-    pub fn create<T: Send + Sync + 'static>(&self, val: T, uri: Origin<'static>) -> String {
+    pub fn create(&self, cache: Arc<Container![Send + Sync]>, uri: Origin<'static>) -> String {
         // The token is not guaranteed to be unique, but it is likely given the use of rng.
         // Technically, it only needs to be unique for a short period of time (the time between
         // cleanups, hopefully this is enough)
@@ -131,7 +184,7 @@ impl TokenTable {
             .map(char::from)
             .collect();
         self.map.insert(token.clone(), TokenRef {
-            data: InnerTokenData(Box::new(val)),
+            cache,
             uri,
             start: Instant::now(),
             expired: false,
@@ -170,7 +223,7 @@ impl TokenTable {
                 let start = v.start;
                 ret.push(v);
                 TokenRef {
-                    data: InnerTokenData(Box::new(())),
+                    cache: Arc::new(<Container![Send + Sync]>::new()),
                     uri: Origin::const_new("/", None),
                     start,
                     expired: true,
