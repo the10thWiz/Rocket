@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use channel::WebSocket;
+use rocket_http::ext::IntoOwned;
 use rocket_http::hyper::upgrade::OnUpgrade;
 use yansi::Paint;
 use tokio::sync::oneshot;
@@ -101,15 +102,21 @@ async fn hyper_service_fn(
         // Retrieve the data from the hyper body.
         let mut data = Data::from(&mut h_body);
 
-        // Dispatch the request to get a response, then write that response out.
-        let token = rocket.preprocess_request(&mut req, &mut data).await;
-        if let Some((accept, upgrade)) = upgrade {
+        // This needs to be handled BEFORE the request is processed by the fairings, to avoid work
+        // getting erased when the cache is swapped
+        //
+        // This could be refactored by doing this and the fairings inside the upgrade if statement
+        if upgrade.is_some() {
             if let Some(token_ref) = rocket.websocket_tokens.from_uri(req.uri()) {
                 // Handle based on Token
                 req.set_uri(token_ref.uri);
-                let data = token_ref.data;
-                req.local_cache(move || data);
+                req.state.cache = token_ref.cache;
             }
+        }
+
+        // Dispatch the request to get a response, then write that response out.
+        let token = rocket.preprocess_request(&mut req, &mut data).await;
+        if let Some((accept, upgrade)) = upgrade {
 
             // req.clone() is nessecary since the request is borrowed to hande the response. This
             // copy can (and will) outlive the actual request, but will not outlive the websocket
