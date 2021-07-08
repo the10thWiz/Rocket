@@ -104,6 +104,13 @@ async fn hyper_service_fn(
         // Dispatch the request to get a response, then write that response out.
         let token = rocket.preprocess_request(&mut req, &mut data).await;
         if let Some((accept, upgrade)) = upgrade {
+            if let Some(token_ref) = rocket.websocket_tokens.from_uri(req.uri()) {
+                // Handle based on Token
+                req.set_uri(token_ref.uri);
+                let data = token_ref.data;
+                req.local_cache(move || data);
+            }
+
             // req.clone() is nessecary since the request is borrowed to hande the response. This
             // copy can (and will) outlive the actual request, but will not outlive the websocket
             // connection.
@@ -463,8 +470,16 @@ impl Rocket<Orbit> {
                 // Explicit moves
                 let mut ch = ch;
                 let mut close_status = Err(StatusError::NoStatus);
-                let mut joined = false;
                 let broker = self.broker();
+                match self.route_event(&req, WebSocketEvent::Join, Data::local(vec![])).await {
+                    Outcome::Success(_r) => {
+                        broker.subscribe(req.topic(), &ch).await;
+                    },
+                    Outcome::Failure(_r) => (),
+                    Outcome::Forward(_r) => {
+                        todo!("Check message guards than join")
+                    },
+                }
                 while let Some(message) = ch.next().await {
                     let data = match message.opcode() {
                         websocket_codec::Opcode::Text => Data::from_ws(message, Some(false)),
@@ -479,31 +494,8 @@ impl Rocket<Orbit> {
                                     processing websocket messages. {:?}\
                                     has an invalid opcode", message),
                     };
-                    let o = if !joined {
-                        let o = self.route_event(&req, WebSocketEvent::Join, data).await;
-                        let o = match o {
-                            // If the join handlers forwarded, we retry as a message
-                            Outcome::Forward(data) => {
-                                broker.subscribe(req.topic(), &ch).await;
-                                self.route_event(&req, WebSocketEvent::Message, data).await
-                            },
-                            // If a join handler succeeds, we subscribe the client
-                            o@Outcome::Success(_) => {
-                                broker.subscribe(req.topic(), &ch).await;
-                                o
-                            },
-                            // If a join handler fails, we do nothing
-                            o@Outcome::Failure(_) => {
-                                o
-                            },
-                        };
-                        joined = true;
-                        o
-                    } else {
-                        //req.set_topic(Origin::parse("/echo/we").unwrap());
-                        self.route_event(&req, WebSocketEvent::Message, data).await
-                    };
-                    match o {
+                    //req.set_topic(Origin::parse("/echo/we").unwrap());
+                    match self.route_event(&req, WebSocketEvent::Message, data).await {
                         Outcome::Forward(_data) => {
                             break;
                         },
@@ -539,6 +531,26 @@ impl Rocket<Orbit> {
             tokio::join!(a, b, event_loop);
         } else {
             todo!("Handle upgrade error")
+        }
+    }
+
+    async fn cleanup_tokens(&self) {
+        for token_ref in self.websocket_tokens.get_expired() {
+            let req = Request::new(self, Method::Get, token_ref.uri);
+            let data = token_ref.data;
+            req.local_cache(|| data);
+
+            let (sender, _rx) = tokio::sync::mpsc::channel(1);
+            drop(_rx);
+            let req = WebSocket::new(req, sender);
+            match self.route_event(&req, WebSocketEvent::Leave, Data::local(vec![])).await {
+                Outcome::Forward(_data) => {
+                },
+                Outcome::Failure(_status) => {
+                }
+                Outcome::Success(_response) => {
+                }
+            };
         }
     }
 
@@ -596,6 +608,15 @@ impl Rocket<Orbit> {
         let mercy = self.config.shutdown.mercy as u64;
 
         let rocket = Arc::new(self);
+        // Spawn periodic cleanup task
+        let rocket_handle = Arc::clone(&rocket);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                rocket_handle.cleanup_tokens().await;
+            }
+        });
+
         let service_fn = move |conn: &CancellableIo<_, L::Connection>| {
             let rocket = rocket.clone();
             let remote = conn.remote_addr().unwrap_or_else(|| ([0, 0, 0, 0], 0).into());
@@ -605,6 +626,7 @@ impl Rocket<Orbit> {
                 }))
             }
         };
+
 
         // NOTE: `hyper` uses `tokio::spawn()` as the default executor.
         let listener = CancellableListener::new(shutdown.clone(), listener, grace, mercy);

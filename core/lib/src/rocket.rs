@@ -7,6 +7,7 @@ use either::Either;
 use figment::{Figment, Provider};
 
 use crate::websocket::broker::Broker;
+use crate::websocket::token::TokenTable;
 use crate::{Catcher, Config, Route, Shutdown, sentinel, shield::Shield};
 use crate::router::Router;
 use crate::trip_wire::TripWire;
@@ -612,6 +613,7 @@ impl Rocket<Ignite> {
             state: self.0.state,
             shutdown: self.0.shutdown,
             broker: self.0.broker,
+            websocket_tokens: TokenTable::new(),
         })
     }
 

@@ -270,7 +270,7 @@
 // request for each topic (and potentially run fairings on each), or only swap the URI (and maybe
 // cache) for each topic. At the moment, fairings are only run on the initial connection, and the
 // request should (and almost certainly must) be cloned if we intend to run fairings on each topic.
-// 
+//
 // The only other issue is Cookies, since only the initial request has any chance to actually store
 // cookies. It may be best to find some way to just disable cookies for WebSocket requests. This
 // could be handled by adding a Result return value from the add and remove methods, which will
