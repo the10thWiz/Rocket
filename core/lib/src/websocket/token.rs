@@ -91,7 +91,8 @@ impl<T: Send + Sync> WebSocketToken<T> {
 
 impl<'r, 'o: 'r, T: Send + Sync + 'static> Responder<'r, 'o> for WebSocketToken<T> {
     fn respond_to(self, request: &'r crate::Request<'_>) -> crate::response::Result<'o> {
-        request.local_cache(|| InnerTokenData(self.data));
+        let data = self.data;
+        request.local_cache(|| InnerTokenData(data));
         let token = if let Some(uri) = self.uri {
             request.rocket().websocket_tokens.create(Arc::clone(&request.state.cache), uri)
         } else {
