@@ -22,4 +22,5 @@ members = [
 
   "websocket-echo",
   "websocket-channels",
+  "websocket-auth",
 ]
