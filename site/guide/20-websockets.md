@@ -39,7 +39,7 @@ fn rocket() -> _ {
 There are only a couple of differences to point out here. The use of a `message`
 attribute, which isn't an HTTP Method like GET, etc. `message` is a WebSocket event;
 there are two more that will be discussed later. The `message` event is run on each
-incomming message. Unlike HTTP Methods, message cannot return a response.
+incomming message. Unlike HTTP Methods, `message` cannot return a response.
 
 Conceptually, `Channel` is just a Request Guard that provides a handle to send messages
 to the client. There is a slight difference that will be discussed later.
@@ -51,9 +51,9 @@ to the client. There is a slight difference that will be discussed later.
 There are several options to create a client to connect to and test the echo server.
 There are several WebSocket libraries in a variety of languages, such as the
 [tungstenite](https://crates.io/crates/tungstenite) crate for Rust. Below is a simple
-example using the JavaScript WebSocket API, which is provided by the browser. This
-creates an index page which uses JavaScript to open a websocket connection, and send
-messages from the browser.
+example using the JavaScript WebSocket API, which is provided by almost every browser.
+This creates an index page which uses JavaScript to open a websocket connection,
+and send messages from the browser.
 
 ```rust
 #[get("/")]
@@ -96,8 +96,6 @@ fn index() -> Html<&'static str> {
 }
 ```
 
-Don't forget to mount this route as well!
-
 ## Join Events
 
 A Join event (the `join` attribute) is run on the first message the client sends.
@@ -108,6 +106,11 @@ run before a message handler is run.
 
   Any and All authentication should be enforced via Request Guards on ALL of the
   relevant Event handlers.
+
+Also note that the client will not receive any broadcasts until they have sent a
+message, even if there is no join handler for their route. In the `websocket-channels`
+example, each client sends a hello message after connecting to make sure they will
+receive any messages sent.
 
 ### Leave Events
 
