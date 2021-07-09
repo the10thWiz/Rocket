@@ -9,6 +9,8 @@
 //! nessecary since Rocket needs to know what type you would like to use as the `ChannelDescriptor`,
 //! and it also allows mutiple channels, depending on the descriptor type.
 
+use std::hash::Hash;
+
 use rocket_http::{ext::IntoOwned, uri::Origin};
 use tokio::sync::mpsc;
 
@@ -136,6 +138,20 @@ impl<'r> FromRequest<'r> for Broker {
 
 /// Convient struct for holding channel subscribtions
 struct ChannelMap(Vec<(mpsc::Sender<WebSocketMessage>, Vec<Origin<'static>>, Protocol)>);
+
+struct ChannelDesc {
+    id: usize,
+    chan: mpsc::Sender<WebSocketMessage>,
+    protocol: Protocol
+}
+
+impl Hash for ChannelDesc {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self.id);
+    }
+}
+
+//struct ChannelMap(evmap<String [>use origin.to_string() or similar<], Box<ChannelDesc>>);
 
 impl ChannelMap {
     /// Create map with capactity
