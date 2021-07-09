@@ -54,7 +54,7 @@ use state::{Container, Storage};
 use crate::{Request, request::FromRequest, response::Responder};
 
 /// A WebSocketToken for use in authenticating WebSocket connections
-pub struct WebSocketToken<T: Send + Sync> {
+pub struct WebSocketToken<T: Send + Sync + 'static> {
     data: T,
     uri: Option<Origin<'static>>,
 }
@@ -80,14 +80,15 @@ impl<T: Send + Sync + 'static> WebSocketToken<T> {
         //};
         //format!("/websocket/token/{}", token)
     //}
-}
 
-impl<T: Send + Sync> WebSocketToken<T> {
     /// Gets the inner data saved by this token
     pub fn get_data(&self) -> &T {
         &self.data
     }
 }
+
+/// WebSocketToken Newtype wrapper to protect the value held in the Request local cache
+struct WebSocketTokenWrapper<T: Send + Sync + 'static>(WebSocketToken<T>);
 
 impl<'r, 'o: 'r, T: Send + Sync + 'static> Responder<'r, 'o> for WebSocketToken<T> {
     fn respond_to(mut self, request: &'r crate::Request<'_>) -> crate::response::Result<'o> {
@@ -96,18 +97,10 @@ impl<'r, 'o: 'r, T: Send + Sync + 'static> Responder<'r, 'o> for WebSocketToken<
         } else {
             request.rocket().websocket_tokens.create(Arc::clone(&request.state.cache), request.uri().clone().into_owned())
         };
-        request.local_cache(|| self);
+        request.local_cache(|| WebSocketTokenWrapper(self));
         format!("/websocket/token/{}", token).respond_to(request)
     }
 }
-
-//pub(crate) struct InnerTokenData<T>(T);
-
-//impl<T> std::fmt::Debug for InnerTokenData<T> {
-    //fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        //write!(f, "InnerTokenData(?)")
-    //}
-//}
 
 #[crate::async_trait]
 impl<'r: 'o, 'o, T: Send + Sync + 'static> FromRequest<'r> for &'r WebSocketToken<T> {
@@ -117,9 +110,9 @@ impl<'r: 'o, 'o, T: Send + Sync + 'static> FromRequest<'r> for &'r WebSocketToke
         -> crate::request::Outcome<Self, Self::Error>
     {
         if let Some(data) = request.state.cache
-            .try_get::<WebSocketToken<T>>()
+            .try_get::<WebSocketTokenWrapper<T>>()
         {
-            crate::request::Outcome::Success(data)
+            crate::request::Outcome::Success(&data.0)
         } else {
             crate::request::Outcome::Forward(())
         }
@@ -133,7 +126,6 @@ pub(crate) struct TokenRef {
     start: Instant,
     expired: bool,
 }
-
 
 impl TokenRef {
     pub fn expired(&self) -> bool {
