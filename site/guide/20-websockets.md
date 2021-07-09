@@ -46,6 +46,14 @@ to the client. There is a slight difference that will be discussed later.
 
 `Data` is handled exactly the same in WebSocket and HTTP routes.
 
+### Join Events
+
+TODO
+
+### Leave Events
+
+A Leave event is run after the client disconnects.
+
 ### A Client implementation
 
 There are several options to create a client to connect to and test the echo server.
@@ -98,20 +106,45 @@ fn index() -> Html<&'static str> {
 
 Don't forget to mount this route as well!
 
-## Join Events
+## Authentication
 
-A Join event (the `join` attribute) is run on the first message the client sends.
-Since the Join handler is optional, there is no guarentee that a join handler has
-run before a message handler is run.
+According to the WebSocket spec, authentication can be done using any authentication
+method available to HTTP Routes. However, most client libraries don't actually provide
+any authentication methods, or the flexibility to implement them yourself. The most
+common solution to this issue is token based authentication: first the client authenticates
+(typically on a non-websocket route), and gets a token. That token is then used to
+connect to the websocket route, and carries the authentication information from the
+initial authentication.
 
-! WARNING: Authentication
+Outside of Rocket, this token is somethimes placed in a query parameter of the URI,
+but that conflicts with Rocket's use of the URI as a topic identifier. To solve this,
+Rocket makes use of temporary URIs. On the server side, this is almost entirely handled
+by Rocket, through the `WebSocketToken` type. Here is what the authentication route
+should look like.
 
-  Any and All authentication should be enforced via Request Guards on ALL of the
-  relevant Event handlers.
+```rust,no_run
+#[post("/updates/listen", data = "<auth>")]
+fn updates_auth(auth: Json<UserAuth>) -> WebSocketToken<UserAuth> {
+    WebSocketToken::new(auth.into_inner())
+}
+```
 
-### Leave Events
+The generic type of `WebSocketToken` is an associated data type, which carries some
+object from the authentication route to the WebSocket event routes. This can be used
+to carry identifiying information, such as the client's username, user id, etc.
 
-A Leave event is run after the client disconnects.
+Here is a typical event route that requires the use of a websocket token:
+
+```rust,no_run
+#[message("/updates/listen", data = "<data>")]
+fn updates_message(data: Data<'_>, auth: &WebSocketToken<UserAuth>, ws: Channel<'_>) {
+}
+```
+
+! NOTE: The `&` is required
+  
+  Since the `WebSocketToken` is passed to every websocket event handler, it must
+  be passed as a reference.
 
 ## Channel
 
