@@ -36,16 +36,15 @@
 //!
 //! ### Join
 //!
-//! Run on the first message a client sends. If this forwards, the message is then treated as a
-//! normal message.
+//! Run before any messages have been sent. This is not capable of authentication; see [`token`]
+//! for an example of how authentication should be handled in Rocket.
 //!
-//! Note that the Join handler doesn't have to succeed. To protect against this, see ChannelLocal
-//! below.
+//! There is no data associated with join events
 //!
 //! ### Message
 //!
 //! Runs on every message the client sends, after the Join handler. Forwards are treated as
-//! Failures.
+//! Failures. (Are they?)
 //!
 //! ### Leave
 //!
@@ -279,6 +278,11 @@
 // shouldn't be applied (since they never are client side), but they could still be added to the
 // pending log.
 //
+//! ## WebSocketToken
+//!
+//! `WebSocketToken` is my solution to handling WebSocket authentication. See [`token`] for more
+//! info.
+//!
 //! ## TODO
 //!
 //! - [ ] Write more documentation
@@ -313,7 +317,7 @@
 //!
 //! - Non-strict: This implementation passes many of the tests non-strictly. In general, this is
 //! because this implementation fails very fast, and a close frame can (and often does) pre-empt
-//! any other frames.
+//! other frames.
 //! - 5.19 & 5.20: This implementation intermittently fails these two tests. The issue is that
 //! sometimes the second pong is sent after the final frame has been completed. However, looking at
 //! most other implementations I've tested, it appears that they pass partially because they buffer
@@ -425,8 +429,11 @@ impl Extension {
         }
     }
 
+    /// Gets the set of allowed reserved bits for this extension
     fn allowed_rsv_bits(&self) -> u8 {
-        0u8
+        match self {
+            _ => 0u8,
+        }
     }
 }
 
