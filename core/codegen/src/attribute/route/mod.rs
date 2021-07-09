@@ -8,7 +8,7 @@ use proc_macro2::{TokenStream, Span};
 use crate::proc_macro_ext::StringLit;
 use crate::syn_ext::{IdentExt, TypeExt as _};
 use crate::http_codegen::{Optional, WebSocketEvent};
-use crate::attribute::param::Guard;
+use crate::attribute::param::{Guard, Parameter};
 
 use self::parse::{Route, Attribute, MethodAttribute};
 
@@ -370,6 +370,24 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
                 devise::Level::Error,
                 "WebSocket Event handlers do not support formats (yet)"
             ));
+        }
+        let mut iter = route.path_params.iter();
+        match iter.next() {
+            Some(Parameter::Static(name)) if name == "websocket" => match iter.next() {
+                Some(Parameter::Static(name)) if name == "token" => match iter.next() {
+                    Some(Parameter::Dynamic(_)) => match iter.next() {
+                        None => return Err(Diagnostic::spanned(
+                            route.attr.uri.path_span().span(),
+                            devise::Level::Error,
+                            "`/websocket/token/<_>` conflicts with websocket tokens"
+                        )),
+                        _ => (),
+                    }
+                    _ => (),
+                }
+                _ => (),
+            },
+            _ => (),
         }
     }
 

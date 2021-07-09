@@ -92,6 +92,12 @@ pub struct RouteUri {
     query_span: Option<Span>,
 }
 
+impl RouteUri {
+    pub fn path_span(&self) -> &Span {
+        &self.path_span
+    }
+}
+
 impl FromMeta for RouteUri {
     fn from_meta(meta: &devise::MetaItem) -> Result<Self> {
         let string = crate::proc_macro_ext::StringLit::from_meta(meta)?;
