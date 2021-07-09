@@ -90,40 +90,36 @@ impl<T: Send + Sync> WebSocketToken<T> {
 }
 
 impl<'r, 'o: 'r, T: Send + Sync + 'static> Responder<'r, 'o> for WebSocketToken<T> {
-    fn respond_to(self, request: &'r crate::Request<'_>) -> crate::response::Result<'o> {
-        let data = self.data;
-        request.local_cache(|| InnerTokenData(data));
-        let token = if let Some(uri) = self.uri {
+    fn respond_to(mut self, request: &'r crate::Request<'_>) -> crate::response::Result<'o> {
+        let token = if let Some(uri) = self.uri.take() {
             request.rocket().websocket_tokens.create(Arc::clone(&request.state.cache), uri)
         } else {
             request.rocket().websocket_tokens.create(Arc::clone(&request.state.cache), request.uri().clone().into_owned())
         };
+        request.local_cache(|| self);
         format!("/websocket/token/{}", token).respond_to(request)
     }
 }
 
-pub(crate) struct InnerTokenData<T>(T);
+//pub(crate) struct InnerTokenData<T>(T);
 
-impl<T> std::fmt::Debug for InnerTokenData<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "InnerTokenData(?)")
-    }
-}
+//impl<T> std::fmt::Debug for InnerTokenData<T> {
+    //fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        //write!(f, "InnerTokenData(?)")
+    //}
+//}
 
 #[crate::async_trait]
-impl<'r: 'o, 'o, T: Send + Sync + 'static> FromRequest<'r> for WebSocketToken<&'o T> {
+impl<'r: 'o, 'o, T: Send + Sync + 'static> FromRequest<'r> for &'r WebSocketToken<T> {
     type Error = std::convert::Infallible;
 
     async fn from_request(request: &'r crate::Request<'_>)
         -> crate::request::Outcome<Self, Self::Error>
     {
         if let Some(data) = request.state.cache
-            .try_get::<InnerTokenData<T>>()
+            .try_get::<WebSocketToken<T>>()
         {
-            crate::request::Outcome::Success(Self {
-                data: &data.0,
-                uri: None,
-            })
+            crate::request::Outcome::Success(data)
         } else {
             crate::request::Outcome::Forward(())
         }
