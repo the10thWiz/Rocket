@@ -44,7 +44,7 @@
 //! This is actually handled via the request's local cache, and any values stored in the
 //! authentication request's local cache will also be in the websocket event's local cache.
 
-use std::{any::Any, net::SocketAddr, sync::Arc, time::{Duration, Instant}};
+use std::{any::Any, net::SocketAddr, ptr::NonNull, sync::{Arc, atomic::{AtomicPtr, AtomicUsize}}, time::{Duration, Instant}};
 
 use dashmap::DashMap;
 use rand::Rng;
@@ -119,19 +119,8 @@ impl<'r: 'o, 'o, T: Send + Sync + 'static> FromRequest<'r> for &'r WebSocketToke
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct TokenRef {
-    pub cache: Arc<Container![Send + Sync]>,
-    pub uri: Origin<'static>,
-    start: Instant,
-    expired: bool,
-}
-
-impl TokenRef {
-    pub fn expired(&self) -> bool {
-        self.start.elapsed() > Duration::from_secs(30)
-    }
-}
+/// Length of tokens to generate
+const TOKEN_LEN: usize = 16;
 
 // The choice of concurrent hashmap is hard. I don't actually need all of the normal operations,
 // I just need some slightly interesting opterations:
@@ -139,46 +128,78 @@ impl TokenRef {
 // try_insert: insert, but fail if the item already exists
 // remove: remove element, returning it as an owned value
 // remove_all: remove every element that matches a condition, returning the removed values as owned
+//
+// Maybe I can do something dumb with Atomics and Boxes...
 
-/// TokenTable is a wrapper around DashMap, a concurrent HashMap. It does do some locking
-/// internally, however this wrapper never returns a reference into the map itself, so deadlocks
-/// should not be possible.
-#[derive(Debug)]
-pub(crate) struct TokenTable {
-    map: DashMap<String, TokenRef>,
+pub(crate) struct InnerRef {
+    pub cache: Arc<Container![Send + Sync]>,
+    pub uri: Origin<'static>,
 }
 
-/// Length of tokens to generate
-const TOKEN_LEN: usize = 16;
+struct TokenRef {
+    /// MUST be constructed by Box and unique, or Null
+    inner: AtomicPtr<InnerRef>,
+    start: Instant,
+}
 
-impl TokenTable {
-    /// Create a new empty TokenTable
-    pub fn new() -> Self {
+impl TokenRef {
+    pub fn new(cache: Arc<Container![Send + Sync]>, uri: Origin<'static>) -> Self {
         Self {
-            map: DashMap::new(),
+            inner: AtomicPtr::new(Box::into_raw(Box::new(InnerRef {
+                cache,
+                uri,
+            }))),
+            start: Instant::now(),
         }
     }
 
-    /// Creates a token, and saves the associated data into the table
-    pub fn create(&self, cache: Arc<Container![Send + Sync]>, uri: Origin<'static>) -> String {
-        // The token is not guaranteed to be unique, but it is likely given the use of rng.
-        // Technically, it only needs to be unique for a short period of time (the time between
-        // cleanups, hopefully this is enough)
+    pub fn get_inner(&self) -> Option<InnerRef> {
+        let old = self.inner.swap(std::ptr::null_mut(), atomic::Ordering::AcqRel);
+        // Safety:
+        // Since the atomic pointer was swapped with null, any swaps after the first MUST
+        // get null.
+        // Therefore, we are either the only thread with this pointer, or it's null
+        // - we have the pointer: we own it, and can convert it to a box safely.
+        // - We got null: NonNull short circuits and returns None
+        NonNull::new(old).map(|p| *unsafe { Box::from_raw(p.as_ptr()) })
+    }
 
-        // thread_rng is lazily initialized, so this should be really cheap if the rng has already
-        // been initialized on this thread.
-        let token: String = rand::thread_rng()
-            .sample_iter(rand::distributions::Alphanumeric)
-            .take(TOKEN_LEN)
-            .map(char::from)
-            .collect();
-        self.map.insert(token.clone(), TokenRef {
-            cache,
-            uri,
-            start: Instant::now(),
-            expired: false,
-        });
-        token
+    pub fn expired(&self) -> bool {
+        self.start.elapsed() > Duration::from_secs(30)
+    }
+
+    pub fn retired(&self) -> bool {
+        self.inner.load(atomic::Ordering::Acquire).is_null()
+    }
+
+    fn clone(&self) -> Self {
+        Self {
+            inner: AtomicPtr::new(self.inner.load(atomic::Ordering::Acquire)),
+            start: self.start,
+        }
+    }
+}
+
+/// An internal type that represents the current set of unprocessed tokens
+///
+/// Internally, it's a wrapper around
+pub(crate) struct TokenTable {
+    map: flurry::HashMap<String, TokenRef>,
+    count: AtomicUsize,
+}
+
+impl std::fmt::Debug for TokenTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TokenTable {{ map: .., count: .. }}")
+    }
+}
+
+impl TokenTable {
+    pub fn new() -> Self {
+        Self {
+            map: flurry::HashMap::new(),
+            count: AtomicUsize::new(0),
+        }
     }
 
     /// Attempts the get a value from a given URI.
@@ -186,42 +207,67 @@ impl TokenTable {
     /// If the uri does not contain a token, None is returned
     ///
     /// None is also returned if the token is not valid
-    pub fn from_uri(&self, uri: &Origin<'_>) -> Option<TokenRef> {
+    pub fn from_uri(&self, uri: &Origin<'_>) -> Option<InnerRef> {
         let mut segs = uri.path().segments();
         if segs.next() == Some("websocket") && segs.next() == Some("token") {
             let token = segs.next()?;
-            if segs.next() == None {
-                return self.get(token);
+            if segs.next() == None && uri.query() == None {
+                // Check that it actually looks like a token
+                if token.len() == TOKEN_LEN && token.chars().all(char::is_alphanumeric) {
+                    return self.get(token);
+                }
             }
         }
         None
     }
 
-    /// Gets the value of a given token. Returns None if the token is expired
-    pub fn get(&self, token: &str) -> Option<TokenRef> {
-        self.map.remove_if(token, |_k, v| !v.expired() && !v.expired).map(|(_k, v)| v)
+    fn gen_token() -> String {
+        rand::thread_rng()
+            .sample_iter(rand::distributions::Alphanumeric)
+            .take(TOKEN_LEN)
+            .map(char::from)
+            .collect()
     }
 
-    /// Gets a list of TokenRefs that have expired. TokenRefs will only be returned exactly once by
-    /// this function, even on repeated calls.
-    // TODO: Schedule a periodic Removal procedure
-    pub fn get_expired(&self) -> Vec<TokenRef> {
-        let mut ret = vec![];
-        self.map.alter_all(|_k, v| {
-            if v.expired() && !v.expired {
-                let start = v.start;
-                ret.push(v);
-                TokenRef {
-                    cache: Arc::new(<Container![Send + Sync]>::new()),
-                    uri: Origin::const_new("/", None),
-                    start,
-                    expired: true,
-                }
-            } else {
-                v
+    pub fn create(&self, cache: Arc<Container![Send + Sync]>, uri: Origin<'static>) -> String {
+        let mut token_ref = TokenRef::new(cache, uri);
+        loop {
+            let token = Self::gen_token();
+            match self.map.pin().try_insert(token.clone(), token_ref) {
+                Ok(_) => break token,
+                Err(e) => token_ref = e.not_inserted,
             }
-        });
-        self.map.retain(|_k, v| !v.expired);
-        ret
+        }
+    }
+
+    pub fn get(&self, token: &str) -> Option<InnerRef> {
+        self.map.pin().remove(token).map(|v| {
+            if !v.expired() {
+                v.get_inner()
+            } else {
+                // Re-insert value into the map - The key is chosen arbitrarily, but it
+                // specifically doesn't look like a token, so it wil not be fetched again
+                self.map.pin().insert(
+                    format!("#{}", self.count.fetch_add(1, atomic::Ordering::AcqRel)),
+                    v.clone()
+                );
+                None
+            }
+        }).flatten()
+    }
+
+    pub fn get_expired(&self, vec: &mut Vec<InnerRef>) {
+        self.map.pin()
+            .iter()
+            .filter_map(|(_k, v)| {
+                if v.expired() {
+                    v.get_inner()
+                } else {
+                    None
+                }
+            })
+            .for_each(|i| vec.push(i));
+        self.map.pin().retain(|_k, v| !v.retired());
     }
 }
+

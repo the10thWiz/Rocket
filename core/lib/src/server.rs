@@ -542,21 +542,26 @@ impl Rocket<Orbit> {
     }
 
     async fn cleanup_tokens(&self) {
-        for token_ref in self.websocket_tokens.get_expired() {
-            let mut req = Request::new(self, Method::Get, token_ref.uri);
-            req.state.cache = token_ref.cache;
+        let mut vec = vec![];
+        loop {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            self.websocket_tokens.get_expired(&mut vec);
+            for token_ref in vec.drain(..) {
+                let mut req = Request::new(self, Method::Get, token_ref.uri);
+                req.state.cache = token_ref.cache;
 
-            let (sender, _rx) = tokio::sync::mpsc::channel(1);
-            drop(_rx);
-            let req = WebSocket::new(req, sender);
-            match self.route_event(&req, WebSocketEvent::Leave, Data::local(vec![])).await {
-                Outcome::Forward(_data) => {
-                },
-                Outcome::Failure(_status) => {
-                }
-                Outcome::Success(_response) => {
-                }
-            };
+                let (sender, _rx) = tokio::sync::mpsc::channel(1);
+                drop(_rx);
+                let req = WebSocket::new(req, sender);
+                match self.route_event(&req, WebSocketEvent::Leave, Data::local(vec![])).await {
+                    Outcome::Forward(_data) => {
+                    },
+                    Outcome::Failure(_status) => {
+                    }
+                    Outcome::Success(_response) => {
+                    }
+                };
+            }
         }
     }
 
@@ -616,12 +621,7 @@ impl Rocket<Orbit> {
         let rocket = Arc::new(self);
         // Spawn periodic cleanup task
         let rocket_handle = Arc::clone(&rocket);
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-                rocket_handle.cleanup_tokens().await;
-            }
-        });
+        tokio::spawn(rocket_handle.cleanup_tokens());
 
         let service_fn = move |conn: &CancellableIo<_, L::Connection>| {
             let rocket = rocket.clone();
