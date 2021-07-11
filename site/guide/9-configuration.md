@@ -28,8 +28,6 @@ values:
 | `cli_colors`   | `bool`            | Whether to use colors and emoji when logging.   | `true`                  |
 | `secret_key`   | [`SecretKey`]     | Secret key for signing and encrypting values.   | `None`                  |
 | `tls`          | [`TlsConfig`]     | TLS configuration, if any.                      | `None`                  |
-| `tls.key`      | `&[u8]`/`&Path`   | Path/bytes to DER-encoded ASN.1 PKCS#1/#8 key.  |                         |
-| `tls.certs`    | `&[u8]`/`&Path`   | Path/bytes to DER-encoded X.509 TLS cert chain. |                         |
 | `limits`       | [`Limits`]        | Streaming read size limits.                     | [`Limits::default()`]   |
 | `limits.$name` | `&str`/`uint`     | Read limit for `$name`.                         | forms = "32KiB"         |
 | `ctrlc`        | `bool`            | Whether `ctrl-c` initiates a server shutdown.   | `true`                  |
@@ -219,22 +217,115 @@ also choose to have a configure limit via the `limits` parameter. The
 ### TLS
 
 Rocket includes built-in, native support for TLS >= 1.2 (Transport Layer
-Security). In order for TLS support to be enabled, Rocket must be compiled with
-the `"tls"` feature:
+Security). To enable TLS support:
+
+  1. Enable the `tls` crate feature in `Cargo.toml`:
+
+   ```toml,ignore
+   [dependencies]
+   rocket = { version = "0.5.0-rc.1", features = ["tls"] }
+   ```
+
+  2. Configure a TLS certificate chain and private key via the `tls.key` and
+     `tls.certs` configuration parameters. With the default provider, this can
+     be done via `Rocket.toml` as:
+
+   ```toml,ignore
+   [default.tls]
+   key = "path/to/key.pem"     # Path or bytes to DER-encoded ASN.1 PKCS#1/#8 key.
+   certs = "path/to/certs.pem" # Path or bytes to DER-encoded X.509 TLS cert chain.
+   ```
+
+The `tls` parameter is expected to be a dictionary that deserializes into a
+[`TlsConfig`] structure:
+
+| key                          | required  | type                                                  |
+|------------------------------|-----------|-------------------------------------------------------|
+| `key`                        | **_yes_** | Path or bytes to DER-encoded ASN.1 PKCS#1/#8 key.     |
+| `certs`                      | **_yes_** | Path or bytes to DER-encoded X.509 TLS cert chain.    |
+| `ciphers`                    | no        | Array of [`CipherSuite`]s to enable.                  |
+| `prefer_server_cipher_order` | no        | Boolean for whether to [prefer server cipher suites]. |
+| `mutual`                     | no        | A map with [mutual TLS] configuration.                |
+
+[`CipherSuite`]: @api/rocket/config/enum.CipherSuite.html
+[prefer server cipher suites]: @api/rocket/config/struct.TlsConfig.html#method.with_preferred_server_cipher_order
+[mutual TLS]: #mutual-tls
+
+When specified via TOML or other serialized formats, each [`CipherSuite`] is
+written as a string representation of the respective variant. For example,
+`CipherSuite::TLS_AES_256_GCM_SHA384` is `"TLS_AES_256_GCM_SHA384"`. In TOML,
+the defaults (with an arbitrary `certs` and `key`) are written:
 
 ```toml
-[dependencies]
-rocket = { version = "0.5.0-rc.1", features = ["tls"] }
+[default.tls]
+certs = "/ssl/cert.pem"
+key = "/ssl/key.pem"
+prefer_server_cipher_order = false
+ciphers = [
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+]
 ```
 
-TLS is configured through the `tls` configuration parameter. The value of `tls`
-is a dictionary with two keys: `certs` and `key`, described in the table above.
-Each key's value may be either a path to a file or raw bytes corresponding to
-the expected value. When a path is configured in a file source, such as
-`Rocket.toml`, relative paths are interpreted as being relative to the source
-file's directory.
+### Mutual TLS
 
-! warning: Rocket's built-in TLS implements only TLS 1.2 and 1.3. It may not be
+Rocket supports mutual TLS client authentication. Configuration works in concert
+with the [`mtls`] module, which provides a request guard to validate, verify,
+and retrieve client certificates in routes.
+
+By default, mutual TLS is disabled and client certificates are not required,
+validated or verified. To enable mutual TLS, the `mtls` feature must be
+enabled and support configured via the `tls.mutual` config parameter:
+
+  1. Enable the `mtls` crate feature in `Cargo.toml`:
+
+   ```toml,ignore
+   [dependencies]
+   rocket = { version = "0.5.0-rc.1", features = ["mtls"] }
+   ```
+
+   This implicitly enables the `tls` feature.
+
+  2. Configure a CA certificate chain via the `tls.mutual.ca_certs`
+     configuration parameter. With the default provider, this can be done via
+     `Rocket.toml` as:
+
+   ```toml,ignore
+   [default.tls.mutual]
+   ca_certs = "path/to/ca_certs.pem" # Path or bytes to DER-encoded X.509 TLS cert chain.
+   mandatory = true                  # when absent, defaults to false
+   ```
+
+The `tls.mutual` parameter is expected to be a dictionary that deserializes into a
+[`MutualTls`] structure:
+
+| key         | required  | type                                                        |
+|-------------|-----------|-------------------------------------------------------------|
+| `ca_certs`  | **_yes_** | Path or bytes to DER-encoded X.509 TLS cert chain.          |
+| `mandatory` | no        | Boolean controlling whether the client _must_ authenticate. |
+
+[`MutualTls`]: @api/rocket/config/struct.MutualTls.html
+[`mtls`]: @api/rocket/mtls/index.html
+
+Rocket reports if TLS and/or mTLS are enabled at launch time:
+
+```text
+🔧 Configured for debug.
+   ...
+   >> tls: enabled w/mtls
+```
+
+The [TLS example](@example/tls) illustrates a fully configured TLS server with
+mutual TLS.
+
+! warning: Rocket's built-in TLS supports only TLS 1.2 and 1.3. This may not be
   suitable for production use.
 
 ### Workers
@@ -243,10 +334,9 @@ The `workers` parameter sets the number of threads used for parallel task
 execution; there is no limit to the number of concurrent tasks. Due to a
 limitation in upstream async executers, unlike other values, the `workers`
 configuration value cannot be reconfigured or be configured from sources other
-than those provided by [`Config::figment()`], detailed below. In other words,
-only the values set by the `ROCKET_WORKERS` environment variable or in the
-`workers` property of `Rocket.toml` will be considered - all other `workers`
-values are ignored.
+than those provided by [`Config::figment()`]. In other words, only the values
+set by the `ROCKET_WORKERS` environment variable or in the `workers` property of
+`Rocket.toml` will be considered - all other `workers` values are ignored.
 
 ## Extracting Values
 
@@ -392,7 +482,7 @@ fn rocket() -> _ {
 }
 ```
 
-Rocket will extract it's configuration from the configured provider. This means
+Rocket will extract its configuration from the configured provider. This means
 that if values like `port` and `address` are configured in `Config`, `App.toml`
 or `APP_` environment variables, Rocket will make use of them. The application
 can also extract its configuration, done here via the `Adhoc::config()` fairing.

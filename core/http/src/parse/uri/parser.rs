@@ -52,7 +52,7 @@ pub fn asterisk<'a>(input: &mut RawInput<'a>) -> Result<'a, Asterisk> {
 #[parser]
 pub fn origin<'a>(input: &mut RawInput<'a>) -> Result<'a, Origin<'a>> {
     let (_, path, query) = (peek(b'/')?, path()?, query()?);
-    unsafe { Origin::raw(input.start.into(), path.into(), query) }
+    unsafe { Origin::raw(input.start.into(), path, query) }
 }
 
 #[parser]
@@ -81,12 +81,18 @@ pub fn authority<'a>(input: &mut RawInput<'a>) -> Result<'a, Authority<'a>> {
 }
 
 #[parser]
-pub fn absolute<'a>(input: &mut RawInput<'a>) -> Result<'a, Absolute<'a>> {
+pub fn scheme<'a>(input: &mut RawInput<'a>) -> Result<'a, Extent<&'a [u8]>> {
     let scheme = take_some_while(is_scheme_char)?;
     if !scheme.get(0).map_or(false, |b| b.is_ascii_alphabetic()) {
         parse_error!("invalid scheme")?;
     }
 
+    scheme
+}
+
+#[parser]
+pub fn absolute<'a>(input: &mut RawInput<'a>) -> Result<'a, Absolute<'a>> {
+    let scheme = scheme()?;
     let (_, (authority, path), query) = (eat(b':')?, hier_part()?, query()?);
     unsafe { Absolute::raw(input.start.into(), scheme, authority, path, query) }
 }
