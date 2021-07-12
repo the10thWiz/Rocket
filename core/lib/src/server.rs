@@ -541,13 +541,13 @@ impl Rocket<Orbit> {
         }
     }
 
-    async fn cleanup_tokens(&self) {
+    async fn cleanup_tokens(self: Arc<Self>) {
         let mut vec = vec![];
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
             self.websocket_tokens.get_expired(&mut vec);
             for token_ref in vec.drain(..) {
-                let mut req = Request::new(self, Method::Get, token_ref.uri);
+                let mut req = Request::new(self.as_ref(), Method::Get, token_ref.uri);
                 req.state.cache = token_ref.cache;
 
                 let (sender, _rx) = tokio::sync::mpsc::channel(1);
