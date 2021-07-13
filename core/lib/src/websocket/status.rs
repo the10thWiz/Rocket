@@ -14,6 +14,10 @@ use std::{borrow::Cow, string::FromUtf8Error};
 use bytes::{Bytes, BytesMut};
 use rocket_http::Status;
 
+/// The default return type. This can be converted into a WebSocketStatus, at the expense of losing
+/// information related to the error type.
+pub type WebSocketStatusResult<'a> = Result<WebSocketStatus<'a>, StatusError>;
+
 /// A webSocket status code sent while closing the connection
 #[derive(Debug, Clone, Eq)]
 pub struct WebSocketStatus<'a> {
@@ -35,6 +39,15 @@ impl<'a> std::fmt::Display for WebSocketStatus<'a> {
     }
 }
 
+impl<'a> From<WebSocketStatusResult<'a>> for WebSocketStatus<'a> {
+    fn from(r: WebSocketStatusResult<'a>) -> Self {
+        match r {
+            Ok(s) => s,
+            Err(e) => e.to_status(),
+        }
+    }
+}
+
 /// Errors for parsing Status codes
 #[derive(Debug)]
 #[non_exhaustive]
@@ -51,6 +64,22 @@ pub enum StatusError {
     NoStatus,
     /// A client connected to auth route, but did not connect before time ran out.
     NeverJoined,
+}
+
+impl StatusError {
+    /// Converts a StatusError into an appropriate WebSocketStatus. Errors related to
+    /// WebSocketStatus parsing return AbnormalClose, errors related to WebSocket parsing return
+    /// ProtocolError, and NeverJoined returns GoingAway.
+    fn to_status(self) -> WebSocketStatus<'static> {
+        match self {
+            Self::OutOfRange => WebSocketStatus::AbnormalClose,
+            Self::IllegalStatus => WebSocketStatus::AbnormalClose,
+            Self::BadFrame => WebSocketStatus::ProtocolError,
+            Self::Utf8Error(_) => WebSocketStatus::ProtocolError,
+            Self::NoStatus => WebSocketStatus::AbnormalClose,
+            Self::NeverJoined => WebSocketStatus::GoingAway,
+        }
+    }
 }
 
 impl From<FromUtf8Error> for StatusError {

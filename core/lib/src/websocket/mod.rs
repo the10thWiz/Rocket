@@ -344,7 +344,7 @@ use crate::{Data, Request};
 use crate::http::hyper;
 use crate::response::Builder;
 
-use self::status::StatusError;
+use self::status::{StatusError, WebSocketStatusResult};
 
 /// Identifier of WebSocketEvent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -379,10 +379,14 @@ pub(crate) fn upgrade(req: &mut hyper::Request<hyper::Body>) -> Option<(String, 
     }
 }
 
+/// A Data wrapper for WebSockets
 pub enum WebSocketData<'a> {
+    /// For the Join events, there is no data associated
     Join,
+    /// Message, just wraps Data
     Message(Data<'a>),
-    Leave(Result<WebSocketStatus<'a>, StatusError>),
+    /// Leave, wraps a WebSocketStatusResult
+    Leave(WebSocketStatusResult<'a>),
 }
 
 impl<'a> From<Data<'a>> for WebSocketData<'a> {

@@ -205,7 +205,7 @@ fn data_guard_decl(guard: &Guard, websocket: &WebSocketEvent) -> TokenStream {
         ),
         WebSocketEvent::WebSocketLeave => return quote_spanned! { ty.span() =>
             let #__data = match #__data {
-                #WebSocketData::Leave(data) => data,
+                #WebSocketData::Leave(data) => data.into(),
                 data => return #Outcome::Forward(data),
             };
         },
