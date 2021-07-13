@@ -26,7 +26,7 @@ use rocket::response::content::Html;
 use rocket::Data;
 
 #[message("/echo", data = "<data>")]
-async fn echo(data: Data<'_>, ch: Channel<'_>) {
+async fn echo(data: &str, ch: &Channel<'_>) {
     ch.send(data).await;
 }
 
@@ -48,11 +48,15 @@ to the client. There is a slight difference that will be discussed later.
 
 ### Join Events
 
-TODO
+Join events are run immediatly after client connects. There is no data associated
+with Join events, because the client has not sent any messages when this is called.
+Join handlers are not able to perform authentication, see [Authentication].
 
 ### Leave Events
 
-A Leave event is run after the client disconnects.
+A Leave event is run after the client disconnects. They do support a data parameter,
+but the data provided is a actually a `WebSocketStatusResult`. This represents the
+returned status code from the client, although this is not the same as HTTP Status.
 
 ### A Client implementation
 
@@ -137,8 +141,8 @@ Here is a typical event route that requires the use of a websocket token:
 
 ```rust,no_run
 #[message("/updates/listen", data = "<data>")]
-fn updates_message(data: Data<'_>, auth: &WebSocketToken<UserAuth>, ws: Channel<'_>) {
-}
+fn updates_message(data: &str, auth: &WebSocketToken<UserAuth>, ws: &Channel<'_>)
+{ }
 ```
 
 ! NOTE: The `&` is required

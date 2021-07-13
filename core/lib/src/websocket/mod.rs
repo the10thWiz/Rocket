@@ -51,8 +51,7 @@
 //! Run after the client disconnects, regaurdless of which endpoint initiated the close. Forwards
 //! and Failures are ignored, since the connection is already disconnected.
 //!
-//! This event doesn't have any data associated with it right now. This is implemented as an empty
-//! data. TODO: make this make sense.
+//! TODO: Add WebSocketStatus docs
 //!
 //! ## WebSocket Guards
 //!
@@ -65,6 +64,8 @@
 //! WebSockets do not have special data guards, rather they use the same data guards as HTTP
 //! routes. However, there is a different trait used for sending messages, which is (TODO)
 //! implemented on many of the types that implement Responder.
+//!
+//! TODO: Document the use of Responder itself
 //!
 //! ## WebSocket & HTTP routes
 //!
@@ -302,7 +303,7 @@
 //!     `topic!` uri, which just internally calls `uri!`, and wraps the result into a `Topic` type.
 //!     The codegen would then check the function body for the `topic!` macro, and emit a sentinel.
 //! - [ ] ChannelLocal
-//! - [ ] Close data
+//! - [x] Close data
 //!
 //! ### Later
 //!

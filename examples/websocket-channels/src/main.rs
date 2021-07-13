@@ -5,7 +5,7 @@ use rocket::response::content::Html;
 use rocket::{State, Data};
 
 #[message("/listen", data = "<data>")]
-async fn listen(data: Data<'_>, ws: Channel<'_>) {
+async fn listen(data: &str, ws: &Channel<'_>) {
     ws.broadcast(data).await;
 }
 
