@@ -47,7 +47,7 @@ impl<'r> IntoMessage for Data<'r> {
     }
 }
 
-const MAX_BUFFER_SIZE: usize = 1024 * 4;
+pub(crate) const MAX_BUFFER_SIZE: usize = 1024 * 4;
 
 /// Helper function for implementing `IntoMessage`. Converts a type that implements AsyncRead into
 /// `mpsc::Receiver<Bytes>`, the type `IntoMessage` requires.

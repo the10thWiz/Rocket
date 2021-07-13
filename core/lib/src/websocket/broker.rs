@@ -9,6 +9,8 @@
 //! nessecary since Rocket needs to know what type you would like to use as the `ChannelDescriptor`,
 //! and it also allows mutiple channels, depending on the descriptor type.
 
+use std::error::Error;
+
 use rocket_http::{ext::IntoOwned, uri::Origin};
 use tokio::sync::mpsc;
 
@@ -61,14 +63,11 @@ impl Broker {
     }
 
     /// Sends a message to all clients subscribed to the channel using descriptor `id`
-    pub async fn broadcast_to(&self, id: &Origin<'_>, message: impl IntoMessage) {
-        let (tx, rx) = mpsc::channel(1);
-        if let Ok(()) = self.channels.send(BrokerMessage::Forward(
-            id.clone().into_owned(),
-            WebSocketMessage::new(message.is_binary(), rx)
-        )) {
-            message.into_message(tx).await;
-        }
+    pub async fn broadcast_to(&self, id: &Origin<'_>, message: WebSocketMessage)
+        -> Result<(), ()>
+    {
+        self.channels.send(BrokerMessage::Forward(id.clone().into_owned(), message))
+            .map_err(|_| ())
     }
 
     /// Subscribes the client to this channel using the descriptor `id`

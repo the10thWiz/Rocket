@@ -511,7 +511,7 @@ impl<S, E> From<Outcome<S, E>> for WsOutcome<S, E> {
 
 /// Similar to [`FromRequest`], but specifically from a websocket connection
 #[crate::async_trait]
-pub trait FromWebSocket<'r>: Sized {
+pub trait FromWebSocket<'r, 'o>: Sized {
     /// The associated error to be returned if derivation fails.
     type Error: Debug;
 
@@ -521,11 +521,12 @@ pub trait FromWebSocket<'r>: Sized {
     /// the derivation fails in an unrecoverable fashion, `Failure` is returned.
     /// `Forward` is returned to indicate that the request should be forwarded
     /// to other matching routes, if any.
-    async fn from_websocket(request: &'r WebSocket<'_>) -> WsOutcome<Self, Self::Error>;
+    async fn from_websocket(request: &'r WebSocket<'o>) -> WsOutcome<Self, Self::Error>;
 }
 
+// TODO: manual impl to avoid double box
 #[crate::async_trait]
-impl<'r, T: FromRequest<'r>> FromWebSocket<'r> for T {
+impl<'r, 'o, T: FromRequest<'r>> FromWebSocket<'r, 'o> for T {
     /// The associated error to be returned if derivation fails.
     type Error = <T as FromRequest<'r>>::Error;
 
@@ -535,7 +536,7 @@ impl<'r, T: FromRequest<'r>> FromWebSocket<'r> for T {
     /// the derivation fails in an unrecoverable fashion, `Failure` is returned.
     /// `Forward` is returned to indicate that the request should be forwarded
     /// to other matching routes, if any.
-    async fn from_websocket(request: &'r WebSocket<'_>) -> WsOutcome<Self, Self::Error> {
+    async fn from_websocket(request: &'r WebSocket<'o>) -> WsOutcome<Self, Self::Error> {
         <T as FromRequest<'r>>::from_request(request.request()).await.into()
     }
 }

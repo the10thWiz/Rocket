@@ -6,6 +6,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use bytes::BytesMut;
 use futures::Future;
+use rocket_http::ContentType;
 use rocket_http::uri::Origin;
 use rocket_http::hyper::upgrade::Upgraded;
 use tokio::io::{AsyncWrite, ReadHalf, WriteHalf};
@@ -21,9 +22,12 @@ use websocket_codec::protocol::FrameHeaderCodec;
 use crate::Request;
 use crate::form::ValueField;
 use crate::request::{FromWebSocket, WsOutcome};
+use crate::response::Responder;
 
 use super::Extensions;
 use super::broker::Broker;
+use super::message::MAX_BUFFER_SIZE;
+use super::message::into_message;
 use super::message::{IntoMessage, WebSocketMessage, to_message};
 use super::status::WebSocketStatus;
 use validation::Utf8Validator;
@@ -620,89 +624,85 @@ impl<'r> WebSocket<'r> {
     }
 
     /// Gets the inner request object
-    pub fn request(&self) -> &Request<'r> {
+    ///
+    /// This should only be used by the codegen and Rocket itself
+    #[doc(hidden)]
+    pub(crate) fn request(&self) -> &Request<'r> {
         &self.request
     }
 
-    /// Gets the topic URI associated with this channel
-    pub fn topic(&self) -> &Origin<'r> {
-        self.request.uri()
-    }
-
     /// Sets the topic URI for this WebSocket
-    #[allow(unused)]
-    pub fn set_topic<'a>(&'r mut self, topic: Origin<'r>) {
+    pub(crate) fn set_topic<'a>(&'r mut self, topic: Origin<'r>) {
         self.request.set_uri(topic);
     }
 
     pub(crate) fn broker(&self) -> &Broker {
         &self.request.state.rocket.broker
     }
+
+    /// Gets the topic URI associated with this channel
+    pub fn topic(&self) -> &Origin<'r> {
+        self.request.uri()
+    }
 }
 
+impl<'r> WebSocket<'r> {
+    pub async fn send<'o: 'r>(&'r self, message: impl Responder<'r, 'o>) {
+        respond_to(message, |m| self.sender.send(m), &self.request).await
+    }
+
+    pub async fn broadcast<'o: 'r>(&'r self, message: impl Responder<'r, 'o>) {
+        respond_to(message, |m| self.broker().broadcast_to(self.topic(), m), &self.request).await
+    }
+
+    pub async fn broadcast_to<'o: 'r>(&'r self, id: &Origin<'_>, message: impl Responder<'r, 'o>) {
+        respond_to(message, |m| self.broker().broadcast_to(id, m), &self.request).await
+    }
+}
+
+async fn respond_to<'r, 'o: 'r, F, R>(
+    message: impl Responder<'r, 'o>,
+    send: impl FnOnce(WebSocketMessage) -> F,
+    request: &'r Request<'_>
+)
+    where F: Future<Output = Result<(), R>>,
+{
+    match message.respond_to(request) {
+        Ok(mut res) => {
+            let binary = !res.content_type().unwrap_or(ContentType::Text).is_utf8();
+            let t = res.body_mut();
+            let (tx, rx) = mpsc::channel(1);
+            if let Ok(()) = send(WebSocketMessage::new(binary, rx)).await {
+                let mut buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+                while let Ok(n) = t.read_buf(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                    let tmp = buf.split();
+                    let _e = tx.send(tmp.into()).await;
+                    if buf.capacity() <= 0 {
+                        buf.reserve(MAX_BUFFER_SIZE);
+                    }
+                }
+            }
+        },
+        Err(s) => (),
+    }
+}
+
+#[crate::async_trait]
+impl<'r, 'o> FromWebSocket<'r, 'o> for &'r WebSocket<'o> {
+    type Error = std::convert::Infallible;
+
+    async fn from_websocket(request: &'r WebSocket<'o>) -> WsOutcome<Self, Self::Error> {
+        WsOutcome::Success(request)
+    }
+}
 #[doc(hidden)]
 impl<'r> WebSocket<'r> {
     // Retrieves the pre-parsed query items. Used by matching and codegen.
     #[inline]
     pub fn query_fields(&self) -> impl Iterator<Item = ValueField<'_>> {
         self.request.query_fields()
-    }
-}
-
-/// A WebSocket Channel. This can be used to message the client that sent a message (namely, the
-/// one you are responding to), as well as broadcast messages to other clients. Note that every
-/// client will recieve a broadcast, including the client that triggered the broadcast.
-///
-/// The lifetime parameter should typically be <'_>. This is nessecary since the object contains
-/// references (which it might be possible to remove in later versions), and recent versions of
-/// Rust recommend not allowing implicit elided lifetimes.
-///
-/// This is only valid as a Guard on WebSocket handlers (`message`, `join`, and `leave`).
-pub struct Channel<'r> {
-    sender: mpsc::Sender<WebSocketMessage>,
-    broker: &'r Broker,
-    topic: &'r Origin<'r>,
-}
-
-impl<'r> Channel<'r> {
-    /// Sends a message to the client
-    pub async fn send(&self, message: impl IntoMessage) {
-        to_message(message, &self.sender).await;
-    }
-
-    /// Broadcasts a message to every client connected to the same topic
-    ///
-    /// This is equavelent to `channel.broadcast_to(channel.topic(), message)`
-    pub async fn broadcast(&self, message: impl IntoMessage) {
-        self.broker.broadcast_to(self.topic, message).await;
-    }
-
-    /// Gets the topic URI associated with this channel.
-    ///
-    /// If you would like to send the topic to
-    /// another task, you will need to make it owned, which will allocate a clone of it.
-    pub fn topic(&self) -> &Origin<'r> {
-        self.topic
-    }
-
-    /// Broadcasts a message to every client connected to `topic`
-    ///
-    /// When constructing topics, it is recommended to use the `uri!` macro, since it does type
-    /// checking and verification of the url.
-    pub async fn broadcast_to(&self, topic: &Origin<'_>, message: impl IntoMessage) {
-        self.broker.broadcast_to(topic, message).await;
-    }
-}
-
-#[crate::async_trait]
-impl<'r> FromWebSocket<'r> for Channel<'r> {
-    type Error = std::convert::Infallible;
-
-    async fn from_websocket(request: &'r WebSocket<'_>) -> WsOutcome<Self, Self::Error> {
-        WsOutcome::Success(Self {
-            sender: request.sender.clone(),
-            broker: request.broker(),
-            topic: request.topic(),
-        })
     }
 }
