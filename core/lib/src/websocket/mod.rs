@@ -20,7 +20,7 @@
 //!
 //! WebSockets use the HTTP Upgrade mechanism to create a connection. This is entirely handled by
 //! Rocket. Rocket will return a 404 error if the client attempts to connect to a route that
-//! doesn't exist (TODO: maybe run some guards?). Rocket may also return a 418 error, which should
+//! doesn't exist. Rocket may also return a 418 error, which should
 //! be reported as a bug within Rocket itself.
 //!
 //! After the client establishes a WebSocket connection, Rocket will wait for messages to be sent
@@ -34,6 +34,10 @@
 //!
 //! ## WebSocket events:
 //!
+//! If any handler fails, the connection is closed. This has less effect on Leave handlers, since
+//! the connection is being closed reguardless, but it can effect the status with which the
+//! connection is closed.
+//!
 //! ### Join
 //!
 //! Run before any messages have been sent. This is not capable of authentication; see [`token`]
@@ -41,10 +45,15 @@
 //!
 //! There is no data associated with join events
 //!
+//! For convience, if no Join handler matches, the guards of a message handler will be run. The
+//! only effect of this is causing the client to be disconnected faster. It will not catch every
+//! reason why the client sending a message might fail, but it will never disconnect a client that
+//! would have passed a Message handler.
+//!
 //! ### Message
 //!
 //! Runs on every message the client sends, after the Join handler. Forwards are treated as
-//! Failures. (Are they?)
+//! Failures.
 //!
 //! ### Leave
 //!
@@ -62,7 +71,9 @@
 //! ## Data Guards
 //!
 //! WebSockets do not have special data guards, rather they use the same data guards as HTTP
-//! routes. However, there is a different trait used for sending messages, which is (TODO)
+//! routes.
+//!
+//! However, there is a different trait used for sending messages, which is (TODO)
 //! implemented on many of the types that implement Responder.
 //!
 //! TODO: Document the use of Responder itself
