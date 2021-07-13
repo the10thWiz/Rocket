@@ -1,7 +1,7 @@
 [package]
 name = "websocket-auth"
 version = "0.0.0"
-worksapce = "../"
+workspace = "../"
 edition = "2018"
 publish = false
 
