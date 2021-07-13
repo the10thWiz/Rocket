@@ -104,7 +104,7 @@ define_exported_paths! {
     Status => ::rocket::http::Status,
 
     WebSocketEvent => ::rocket::route::WebSocketEvent,
-    WebSocket => ::rocket::websocket::WebSocket,
+    WebSocket => ::rocket::websocket::Channel,
     WebSocketData => ::rocket::websocket::WebSocketData,
     WebSocketStatus => ::rocket::websocket::WebSocketStatus,
 }

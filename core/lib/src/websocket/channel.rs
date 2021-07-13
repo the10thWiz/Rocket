@@ -611,12 +611,12 @@ mod validation {
 //
 // At a more fundamental level, this is undesirable, since it exposes the internal Request
 // object inside the handler. Request doesn't implement `FromRequest` for this exact reason.
-pub struct WebSocket<'r> {
+pub struct Channel<'r> {
     request: Request<'r>,
     sender: mpsc::Sender<WebSocketMessage>,
 }
 
-impl<'r> WebSocket<'r> {
+impl<'r> Channel<'r> {
     pub(crate) fn new(request: Request<'r>, sender: mpsc::Sender<WebSocketMessage>) -> Self {
         Self { request, sender }
     }
@@ -645,7 +645,7 @@ impl<'r> WebSocket<'r> {
     }
 }
 
-impl WebSocket<'_> {
+impl Channel<'_> {
     /// Send a message to a the WebSocket client.
     pub async fn send<'r, 'o: 'r>(&'r self, message: impl Responder<'r, 'o>) {
         respond_to(message, |m| self.sender.send(m), &self.request).await
@@ -701,15 +701,15 @@ async fn respond_to<'r, 'o: 'r, F, R>(
 }
 
 #[crate::async_trait]
-impl<'r, 'o> FromWebSocket<'r, 'o> for &'r WebSocket<'o> {
+impl<'r, 'o> FromWebSocket<'r, 'o> for &'r Channel<'o> {
     type Error = std::convert::Infallible;
 
-    async fn from_websocket(request: &'r WebSocket<'o>) -> WsOutcome<Self, Self::Error> {
+    async fn from_websocket(request: &'r Channel<'o>) -> WsOutcome<Self, Self::Error> {
         WsOutcome::Success(request)
     }
 }
 #[doc(hidden)]
-impl<'r> WebSocket<'r> {
+impl<'r> Channel<'r> {
     // Retrieves the pre-parsed query items. Used by matching and codegen.
     #[inline]
     pub fn query_fields(&self) -> impl Iterator<Item = ValueField<'_>> {

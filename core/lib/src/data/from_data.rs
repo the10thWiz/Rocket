@@ -202,7 +202,7 @@ pub trait FromData<'r>: Sized {
     /// WebSocket to a Request within Rocket itself.
     //
     // TODO: Can I make this a seperate function?
-    fn from_ws<'life0, 'async_trait>(req: &'r WebSocket<'life0>, data: Data<'r>)
+    fn from_ws<'life0, 'async_trait>(req: &'r Channel<'life0>, data: Data<'r>)
         -> Pin<Box<dyn Future<Output = Outcome<'r, Self>> + Send + 'async_trait>>
         where
             'life0: 'async_trait,
@@ -219,7 +219,7 @@ pub trait FromData<'r>: Sized {
 /// This should only be called by the codegen
 #[doc(hidden)]
 pub fn data_from_ws<'r, 'life0, 'async_trait, T: FromData<'r>>(
-    req: &'r WebSocket<'life0>,
+    req: &'r Channel<'life0>,
     data: Data<'r>
 ) -> Pin<Box<dyn Future<Output = Outcome<'r, T>> + Send + 'async_trait>>
     where
@@ -231,7 +231,7 @@ pub fn data_from_ws<'r, 'life0, 'async_trait, T: FromData<'r>>(
 }
 
 use crate::data::Capped;
-use crate::websocket::WebSocket;
+use crate::websocket::Channel;
 
 #[crate::async_trait]
 impl<'r> FromData<'r> for Capped<String> {

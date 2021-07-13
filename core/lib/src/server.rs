@@ -2,7 +2,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use channel::WebSocket;
+use channel::Channel;
 use rocket_http::hyper::upgrade::OnUpgrade;
 use yansi::Paint;
 use tokio::sync::oneshot;
@@ -438,7 +438,7 @@ impl Rocket<Orbit> {
     // TODO: Simplify the lifetime bounds
     async fn route_event<'s: 'ri, 'r, 'ri>(
         &'s self,
-        req: &'r WebSocket<'ri>,
+        req: &'r Channel<'ri>,
         event: WebSocketEvent,
         mut data: WebSocketData<'r>
     ) -> route::WsOutcome<'r> {
@@ -471,7 +471,7 @@ impl Rocket<Orbit> {
     ) {
         if let Ok(upgrade) = upgrade.await {
             let (ch, a, b) = WebSocketChannel::new(upgrade, extensions);
-            let req = WebSocket::new(req, ch.subscribe_handle());
+            let req = Channel::new(req, ch.subscribe_handle());
             let event_loop = async move {
                 // Explicit moves
                 let mut ch = ch;
@@ -561,7 +561,7 @@ impl Rocket<Orbit> {
 
             let (sender, _rx) = tokio::sync::mpsc::channel(1);
             drop(_rx);
-            let req = WebSocket::new(req, sender);
+            let req = Channel::new(req, sender);
             match self.route_event(
                 &req,
                 WebSocketEvent::Leave,

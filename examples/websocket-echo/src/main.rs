@@ -1,30 +1,24 @@
 #[macro_use] extern crate rocket;
 
-use rocket::websocket::WebSocket;
+use rocket::websocket::Channel;
 use rocket::response::content::Html;
 #[message("/echo", data = "<data>", rank = 2)]
 async fn echo(data: Data<'_>, websocket: &Channel<'_>) {
     websocket.send(data).await;
 }
 
-#[join("/echo", rank = 2)]
-async fn echo_j() {
-}
-
-#[message("/echo-auth", data = "<data>")]
-async fn echo_auth(data: Data<'_>, websocket: Channel<'_>, _t: &WebSocketToken<()>) {
-    websocket.send(data).await;
-}
-
 /// Authenticated route
 mod auth_routes {
+    use rocket::websocket::token::WebSocketToken;
+    use rocket::websocket::Channel;
+
     #[message("/echo-auth", data = "<data>")]
-    async fn echo_auth(data: &str, websocket: &WebSocket<'_>, _t: &WebSocketToken<()>) {
+    pub async fn echo_auth(data: &str, websocket: &Channel<'_>, _t: &WebSocketToken<()>) {
         websocket.send(data).await;
     }
 
     #[get("/echo-auth")]
-    async fn auth() -> WebSocketToken<()> {
+    pub async fn auth() -> WebSocketToken<()> {
         // No authentication is actually done here, but it would be trivial to add
         WebSocketToken::new(())
     }

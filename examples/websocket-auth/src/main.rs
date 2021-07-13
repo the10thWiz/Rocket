@@ -110,19 +110,19 @@ fn auth(data: Json<User>, users: &State<DashSet<User>>) -> Result<WebSocketToken
 // TODO: This is currently required (due to a todo!() in rocket), some additional work needs to be
 // done to the data attributes.
 #[join("/listen")]
-async fn join(ws: Channel<'_>, user: &WebSocketToken<User>) {
+async fn join(ws: &Channel<'_>, user: &WebSocketToken<User>) {
     ws.broadcast(format!("{} Joined", user.get_data().name)).await;
 }
 
 // This is more or less the same as before
 #[message("/listen", data = "<data>")]
-async fn listen(data: Data<'_>, ws: Channel<'_>, _user: &WebSocketToken<User>) {
+async fn listen(data: &str, ws: &Channel<'_>, _user: &WebSocketToken<User>) {
     ws.broadcast(data).await;
 }
 
 // Same here
 #[leave("/listen")]
-async fn leave(ws: Channel<'_>, user: &WebSocketToken<User>, users: &State<DashSet<User>>) {
+async fn leave(ws: &Channel<'_>, user: &WebSocketToken<User>, users: &State<DashSet<User>>) {
     ws.broadcast(format!("{} Left", user.get_data().name)).await;
     users.remove(user.get_data());
 }

@@ -1,4 +1,4 @@
-use crate::websocket::{WebSocket, WebSocketData, WebSocketStatus};
+use crate::websocket::{Channel, WebSocketData, WebSocketStatus};
 use crate::{Request, Data};
 use crate::response::{Response, Responder};
 use crate::http::Status;
@@ -197,19 +197,19 @@ pub trait WebSocketHandler: CloneableWS + Send + Sync + 'static {
     /// routes, the `404` error catcher is invoked.
     async fn handle<'r>(
         &self,
-        request: &'r WebSocket<'_>,
+        request: &'r Channel<'_>,
         data: WebSocketData<'r>
     ) -> WsOutcome<'r>;
 }
 
 // We write this manually to avoid double-boxing.
 impl<F: Clone + Sync + Send + 'static> WebSocketHandler for F
-    where for<'x> F: Fn(&'x WebSocket<'_>, WebSocketData<'x>) -> BoxWsFuture<'x>,
+    where for<'x> F: Fn(&'x Channel<'_>, WebSocketData<'x>) -> BoxWsFuture<'x>,
 {
     #[inline(always)]
     fn handle<'r, 'life0, 'life1, 'async_trait>(
         &'life0 self,
-        req: &'r WebSocket<'life1>,
+        req: &'r Channel<'life1>,
         data: WebSocketData<'r>,
     ) -> BoxWsFuture<'r>
         where 'r: 'async_trait,

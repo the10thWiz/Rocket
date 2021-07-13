@@ -337,7 +337,7 @@ pub(crate) mod broker;
 
 pub mod token;
 
-pub use channel::WebSocket;
+pub use channel::Channel;
 pub use status::WebSocketStatus;
 
 use crate::{Data, Request};

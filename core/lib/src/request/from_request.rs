@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr};
 
-use crate::websocket::{WebSocket, WebSocketStatus};
+use crate::websocket::{Channel, WebSocketStatus};
 use crate::{Request, Route};
 use crate::outcome::{self, IntoOutcome};
 use crate::outcome::Outcome::*;
@@ -521,7 +521,7 @@ pub trait FromWebSocket<'r, 'o>: Sized {
     /// the derivation fails in an unrecoverable fashion, `Failure` is returned.
     /// `Forward` is returned to indicate that the request should be forwarded
     /// to other matching routes, if any.
-    async fn from_websocket(request: &'r WebSocket<'o>) -> WsOutcome<Self, Self::Error>;
+    async fn from_websocket(request: &'r Channel<'o>) -> WsOutcome<Self, Self::Error>;
 }
 
 // TODO: manual impl to avoid double box
@@ -536,7 +536,7 @@ impl<'r, 'o, T: FromRequest<'r>> FromWebSocket<'r, 'o> for T {
     /// the derivation fails in an unrecoverable fashion, `Failure` is returned.
     /// `Forward` is returned to indicate that the request should be forwarded
     /// to other matching routes, if any.
-    async fn from_websocket(request: &'r WebSocket<'o>) -> WsOutcome<Self, Self::Error> {
+    async fn from_websocket(request: &'r Channel<'o>) -> WsOutcome<Self, Self::Error> {
         <T as FromRequest<'r>>::from_request(request.request()).await.into()
     }
 }
