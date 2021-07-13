@@ -179,22 +179,46 @@ fn param_guard_decl(guard: &Guard, _websocket: bool) -> TokenStream {
     quote!(let #ident: #ty = #expr;)
 }
 
-fn data_guard_decl(guard: &Guard, websocket: bool) -> TokenStream {
+fn data_guard_decl(guard: &Guard, websocket: &WebSocketEvent) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome);
+    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, WebSocketStatus, WebSocketData, _route);
 
-    let request = if websocket {
-        quote!(#__req.request())
-    } else {
-        quote!(#__req)
+    let (method, data) = match websocket {
+        WebSocketEvent::WebSocketJoin => (
+            quote!(from_ws),
+            quote! {
+                let #__data = match #__data {
+                    #WebSocketData::Join => (),
+                    data => return #Outcome::Forward(data),
+                };
+            }
+        ),
+        WebSocketEvent::WebSocketMessage => (
+            quote!(from_ws),
+            quote! {
+                let #__data = match #__data {
+                    #WebSocketData::Join => return #Outcome::Success(()),
+                    #WebSocketData::Message(data) => data,
+                    data => return #Outcome::Forward(data),
+                };
+            }
+        ),
+        WebSocketEvent::WebSocketLeave => return quote_spanned! { ty.span() =>
+            let #__data = match #__data {
+                #WebSocketData::Leave(data) => data,
+                data => return #Outcome::Forward(data),
+            };
+        },
+        WebSocketEvent::Http(_) => (quote!(from_data), quote! {}),
     };
 
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromData>::from_data(#request, #__data).await {
+        #data
+        let #ident: #ty = match <#ty as #FromData>::#method(#__req, #__data).await {
             #Outcome::Success(__d) => __d,
             #Outcome::Forward(__d) => {
                 #_log::warn_!("Data guard `{}` is forwarding.", stringify!(#ty));
-                return #Outcome::Forward(__d);
+                return #Outcome::Forward(__d.into());
             }
             #Outcome::Failure((__c, __e)) => {
                 #_log::warn_!("Data guard `{}` failed: {:?}.", stringify!(#ty), __e);
@@ -249,17 +273,18 @@ fn responder_outcome_expr(route: &Route, websocket: bool) -> TokenStream {
     let _await = route.handler.sig.asyncness
         .map(|a| quote_spanned!(a.span().into() => .await));
 
-    define_spanned_export!(ret_span => __req, _route);
+    define_spanned_export!(ret_span => __req, _route, Outcome);
 
-    let request = if websocket {
-        quote!(#__req.request())
+    if websocket {
+        quote_spanned! { ret_span =>
+            let ___responder: () = #user_handler_fn_name(#(#parameter_names),*) #_await;
+            #Outcome::Success(())
+        }
     } else {
-        quote!(#__req)
-    };
-
-    quote_spanned! { ret_span =>
-        let ___responder = #user_handler_fn_name(#(#parameter_names),*) #_await;
-        #_route::Outcome::from(#request, ___responder).into()
+        quote_spanned! { ret_span =>
+            let ___responder = #user_handler_fn_name(#(#parameter_names),*) #_await;
+            #_route::Outcome::from(#__req, ___responder).into()
+        }
     }
 }
 
@@ -324,20 +349,20 @@ fn monomorphized_function(route: &Route) -> TokenStream {
         .map(|r| param_guard_decl(r, route.attr.method.is_websocket()));
     let query_guards = query_decls(&route);
     let data_guard = route.data_guard.as_ref()
-        .map(|r| data_guard_decl(r, route.attr.method.is_websocket()));
+        .map(|r| data_guard_decl(r, &route.attr.method));
 
     let responder_outcome = responder_outcome_expr(&route, route.attr.method.is_websocket());
 
-    let (request, box_future) = if route.attr.method.is_websocket() {
-        (WebSocket, quote!(BoxWsFuture))
+    let (request, box_future, datatype) = if route.attr.method.is_websocket() {
+        (WebSocket, quote!(BoxWsFuture), WebSocketData)
     } else {
-        (Request, quote!(BoxFuture))
+        (Request, quote!(BoxFuture), Data)
     };
 
     quote! {
         fn monomorphized_function<'__r>(
             #__req: &'__r #request<'_>,
-            #__data: #Data<'__r>,
+            #__data: #datatype<'__r>,
         ) -> #_route::#box_future<'__r> {
             #_Box::pin(async move {
                 #(#request_guards)*

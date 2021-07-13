@@ -10,7 +10,7 @@ use tokio::sync::oneshot;
 use futures::stream::StreamExt;
 use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 
-use crate::websocket::Extensions;
+use crate::websocket::{Extensions, WebSocketData};
 use crate::websocket::WebSocketEvent;
 use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
@@ -441,7 +441,7 @@ impl Rocket<Orbit> {
         &'s self,
         req: &'r WebSocket<'ri>,
         event: WebSocketEvent,
-        mut data: Data<'r>
+        mut data: WebSocketData<'r>
     ) -> route::WsOutcome<'r> {
         for route in self.router.route_event(event).filter(|r| r.matches(req.request())) {
             info_!("Matched: {:#}", route);
@@ -478,14 +478,20 @@ impl Rocket<Orbit> {
                 let mut ch = ch;
                 let mut close_status = Err(StatusError::NoStatus);
                 let broker = self.broker();
-                match self.route_event(&req, WebSocketEvent::Join, Data::local(vec![])).await {
-                    Outcome::Success(_r) => {
+                match self.route_event(&req, WebSocketEvent::Join, WebSocketData::Join).await {
+                    Outcome::Success(()) => {
                         broker.subscribe(req.topic(), &ch).await;
                     },
                     Outcome::Failure(_r) => (),
-                    Outcome::Forward(_r) => {
-                        todo!("Check message guards than join")
-                    },
+                    // On forward (e.g. none match), we retry against the message handlers. This
+                    // runs everything up to the data guard.
+                    Outcome::Forward(_) =>
+                        match self.route_event(&req, WebSocketEvent::Message, WebSocketData::Join).await {
+                            Outcome::Success(()) => {
+                                broker.subscribe(req.topic(), &ch).await;
+                            },
+                            _ => (),
+                        },
                 }
                 while let Some(message) = ch.next().await {
                     let data = match message.opcode() {
@@ -502,7 +508,7 @@ impl Rocket<Orbit> {
                                     has an invalid opcode", message),
                     };
                     //req.set_topic(Origin::parse("/echo/we").unwrap());
-                    match self.route_event(&req, WebSocketEvent::Message, data).await {
+                    match self.route_event(&req, WebSocketEvent::Message, WebSocketData::Message(data)).await {
                         Outcome::Forward(_data) => {
                             break;
                         },
@@ -511,27 +517,23 @@ impl Rocket<Orbit> {
                             ch.close(status).await;
                             break;
                         },
-                        Outcome::Success(_response) => {
-                            // We ignore this, since the response should be empty
-                        },
+                        Outcome::Success(()) => (),
                     }
                 }
                 broker.unsubscribe_all(&ch).await;
                 info_!("Websocket closed with status: {:?}", close_status);
+                let default_response = WebSocketStatus::default_response(&close_status);
                 // TODO provide close message
-                match self.route_event(&req, WebSocketEvent::Leave, Data::local(vec![])).await {
-                    Outcome::Forward(_data) => {
-                    },
+                match self.route_event(&req, WebSocketEvent::Leave, WebSocketData::Leave(close_status)).await {
+                    Outcome::Forward(_data) => (),
                     Outcome::Failure(status) => {
                         error_!("{}", status);
                         ch.close(status).await;
                     }
-                    Outcome::Success(_response) => {
-                        // We ignore this, since the response should be empty
-                    }
+                    Outcome::Success(()) => (),
                 }
                 // Note: If a close has already been sent, the writer task will just drop this
-                ch.close(WebSocketStatus::default_response(close_status)).await;
+                ch.close(default_response).await;
             };
             // This will poll each future, on the same thread. This should actually be more
             // preformant than spawning tasks for each.
@@ -549,7 +551,7 @@ impl Rocket<Orbit> {
             let (sender, _rx) = tokio::sync::mpsc::channel(1);
             drop(_rx);
             let req = WebSocket::new(req, sender);
-            match self.route_event(&req, WebSocketEvent::Leave, Data::local(vec![])).await {
+            match self.route_event(&req, WebSocketEvent::Leave, WebSocketData::Leave(Err(StatusError::NeverJoined))).await {
                 Outcome::Forward(_data) => {
                 },
                 Outcome::Failure(_status) => {

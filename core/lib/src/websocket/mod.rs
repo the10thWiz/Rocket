@@ -337,12 +337,14 @@ pub(crate) mod broker;
 
 pub mod token;
 
-pub use channel::{WebSocket, Channel};
+pub use channel::WebSocket;
 pub use status::WebSocketStatus;
 
-use crate::Request;
+use crate::{Data, Request};
 use crate::http::hyper;
 use crate::response::Builder;
+
+use self::status::StatusError;
 
 /// Identifier of WebSocketEvent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -374,6 +376,18 @@ pub(crate) fn upgrade(req: &mut hyper::Request<hyper::Body>) -> Option<(String, 
         ).ok().map(|accept| (accept.ws_accept(), hyper::upgrade::on(req)))
     } else {
         None
+    }
+}
+
+pub enum WebSocketData<'a> {
+    Join,
+    Message(Data<'a>),
+    Leave(Result<WebSocketStatus<'a>, StatusError>),
+}
+
+impl<'a> From<Data<'a>> for WebSocketData<'a> {
+    fn from(data: Data<'a>) -> Self {
+        Self::Message(data)
     }
 }
 

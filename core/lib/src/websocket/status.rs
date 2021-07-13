@@ -37,6 +37,7 @@ impl<'a> std::fmt::Display for WebSocketStatus<'a> {
 
 /// Errors for parsing Status codes
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum StatusError {
     /// A status code that is outside the range defined by the RFC
     OutOfRange,
@@ -48,6 +49,8 @@ pub enum StatusError {
     Utf8Error(FromUtf8Error),
     /// An empty close frame
     NoStatus,
+    /// A client connected to auth route, but did not connect before time ran out.
+    NeverJoined,
 }
 
 impl From<FromUtf8Error> for StatusError {
@@ -185,17 +188,17 @@ impl WebSocketStatus<'static> {
         }
     }
 
-    pub(crate) fn default_response(status: Result<WebSocketStatus<'_>, StatusError>) -> Self {
+    pub(crate) fn default_response(status: &Result<WebSocketStatus<'_>, StatusError>) -> Self {
         match status {
             // Specific matches
-            Ok(s) if s == WebSocketStatus::Ok => WebSocketStatus::Ok,
-            Ok(s) if s == WebSocketStatus::GoingAway => WebSocketStatus::Ok,
-            Ok(s) if s == WebSocketStatus::ExtensionRequired => WebSocketStatus::Ok,
-            Ok(s) if s == WebSocketStatus::UnknownMessageType => WebSocketStatus::Ok,
-            Ok(s) if s == WebSocketStatus::InvalidDataType => WebSocketStatus::Ok,
-            Ok(s) if s == WebSocketStatus::PolicyViolation => WebSocketStatus::Ok,
-            Ok(s) if s == WebSocketStatus::MessageTooLarge => WebSocketStatus::Ok,
-            Ok(s) if s == WebSocketStatus::InternalServerError => WebSocketStatus::Ok,
+            Ok(s) if s == &WebSocketStatus::Ok => WebSocketStatus::Ok,
+            Ok(s) if s == &WebSocketStatus::GoingAway => WebSocketStatus::Ok,
+            Ok(s) if s == &WebSocketStatus::ExtensionRequired => WebSocketStatus::Ok,
+            Ok(s) if s == &WebSocketStatus::UnknownMessageType => WebSocketStatus::Ok,
+            Ok(s) if s == &WebSocketStatus::InvalidDataType => WebSocketStatus::Ok,
+            Ok(s) if s == &WebSocketStatus::PolicyViolation => WebSocketStatus::Ok,
+            Ok(s) if s == &WebSocketStatus::MessageTooLarge => WebSocketStatus::Ok,
+            Ok(s) if s == &WebSocketStatus::InternalServerError => WebSocketStatus::Ok,
             // 3000..=3999 is defined by the IANA, 4000..=4999 is private use
             Ok(s) if (3000..=4999).contains(&s.code()) => WebSocketStatus::Ok,
             // If the frame was empty (not malformed), we response with Ok

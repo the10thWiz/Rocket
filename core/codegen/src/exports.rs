@@ -105,6 +105,8 @@ define_exported_paths! {
 
     WebSocketEvent => ::rocket::route::WebSocketEvent,
     WebSocket => ::rocket::websocket::WebSocket,
+    WebSocketData => ::rocket::websocket::WebSocketData,
+    WebSocketStatus => ::rocket::websocket::WebSocketStatus,
 }
 
 macro_rules! define_spanned_export {

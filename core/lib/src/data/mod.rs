@@ -9,7 +9,7 @@ mod limits;
 
 pub use self::data::Data;
 pub use self::data_stream::DataStream;
-pub use self::from_data::{FromData, Outcome};
+pub use self::from_data::{FromData, Outcome, data_from_ws};
 pub use self::limits::Limits;
 pub use self::capped::{N, Capped};
 pub use ubyte::{ByteUnit, ToByteUnit};

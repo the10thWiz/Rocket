@@ -7,7 +7,7 @@ use yansi::Paint;
 use crate::http::{uri, Method, MediaType};
 use crate::route::{Handler, RouteUri, BoxFuture};
 use crate::sentinel::Sentry;
-use crate::websocket::WebSocket;
+use crate::websocket::{WebSocket, WebSocketData};
 
 use super::BoxWsFuture;
 use super::WebSocketHandler;
@@ -376,7 +376,7 @@ pub struct StaticInfo {
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data<'r>) -> BoxFuture<'r>,
     /// The route's websocket handler, i.e, the annotated function.
     pub websocket_handler:
-        WebSocketEvent<for<'r> fn(&'r WebSocket<'_>, crate::Data<'r>) -> BoxWsFuture<'r>>,
+        WebSocketEvent<for<'r> fn(&'r WebSocket<'_>, WebSocketData<'r>) -> BoxWsFuture<'r>>,
     /// The route's rank, if any.
     pub rank: Option<isize>,
     /// Route-derived sentinels, if any.

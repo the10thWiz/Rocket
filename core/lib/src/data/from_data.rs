@@ -1,3 +1,7 @@
+use std::pin::Pin;
+
+use futures::Future;
+
 use crate::http::{RawStr, Status};
 use crate::request::{Request, local_cache};
 use crate::data::{Data, Limits};
@@ -192,9 +196,35 @@ pub trait FromData<'r>: Sized {
     /// If the data is not appropriate given the type of `Self`, `Forward` is
     /// returned. If parsing fails, `Failure` is returned.
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self>;
+
+    /// Default implementation just converts the WebSocket to a Request and calls from_data.
+    /// This should never be called or implemented by hand, since it is only possible to convert a
+    /// WebSocket to a Request within Rocket itself.
+    //
+    // TODO: Can I make this a seperate function?
+    fn from_ws<'life0, 'async_trait>(req: &'r WebSocket<'life0>, data: Data<'r>)
+        -> Pin<Box<dyn Future<Output = Outcome<'r, Self>> + Send + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            'r: 'async_trait,
+            Self: 'async_trait,
+    {
+        <Self as FromData<'r>>::from_data(req.request(), data)
+    }
+}
+
+pub fn data_from_ws<'r, 'life0, 'async_trait, T: FromData<'r>>(req: &'r WebSocket<'life0>, data: Data<'r>)
+    -> Pin<Box<dyn Future<Output = Outcome<'r, T>> + Send + 'async_trait>>
+    where
+        'life0: 'async_trait,
+        'r: 'async_trait,
+        T: 'async_trait,
+{
+    <T as FromData<'r>>::from_data(req.request(), data)
 }
 
 use crate::data::Capped;
+use crate::websocket::WebSocket;
 
 #[crate::async_trait]
 impl<'r> FromData<'r> for Capped<String> {

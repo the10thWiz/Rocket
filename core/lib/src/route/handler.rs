@@ -1,4 +1,4 @@
-use crate::websocket::{WebSocket, WebSocketStatus};
+use crate::websocket::{WebSocket, WebSocketData, WebSocketStatus};
 use crate::{Request, Data};
 use crate::response::{Response, Responder};
 use crate::http::Status;
@@ -176,7 +176,7 @@ pub fn dummy_handler<'r>(r: &'r Request<'_>, _: Data<'r>) -> BoxFuture<'r> {
 
 /// Type alias for the return type of a [`Route`](crate::Route)'s
 /// [`Handler::handle()`].
-pub type WsOutcome<'r> = crate::outcome::Outcome<Response<'r>, WebSocketStatus<'static>, Data<'r>>;
+pub type WsOutcome<'r> = crate::outcome::Outcome<(), WebSocketStatus<'static>, WebSocketData<'r>>;
 
 /// Type alias for the return type of a _raw_ [`Route`](crate::Route)'s
 /// [`Handler`].
@@ -195,18 +195,18 @@ pub trait WebSocketHandler: CloneableWS + Send + Sync + 'static {
     /// generate a response. Otherwise, if the return value is `Forward(Data)`,
     /// the next matching route is attempted. If there are no other matching
     /// routes, the `404` error catcher is invoked.
-    async fn handle<'r>(&self, request: &'r WebSocket<'_>, data: Data<'r>) -> WsOutcome<'r>;
+    async fn handle<'r>(&self, request: &'r WebSocket<'_>, data: WebSocketData<'r>) -> WsOutcome<'r>;
 }
 
 // We write this manually to avoid double-boxing.
 impl<F: Clone + Sync + Send + 'static> WebSocketHandler for F
-    where for<'x> F: Fn(&'x WebSocket<'_>, Data<'x>) -> BoxWsFuture<'x>,
+    where for<'x> F: Fn(&'x WebSocket<'_>, WebSocketData<'x>) -> BoxWsFuture<'x>,
 {
     #[inline(always)]
     fn handle<'r, 'life0, 'life1, 'async_trait>(
         &'life0 self,
         req: &'r WebSocket<'life1>,
-        data: Data<'r>,
+        data: WebSocketData<'r>,
     ) -> BoxWsFuture<'r>
         where 'r: 'async_trait,
               'life0: 'async_trait,
