@@ -16,13 +16,18 @@ async fn echo_auth(data: Data<'_>, websocket: Channel<'_>, _t: &WebSocketToken<(
     websocket.send(data).await;
 }
 
-#[join("/echo-auth")]
-async fn echo_auth_j(_t: &WebSocketToken<()>) {
-}
+/// Authenticated route
+mod auth_routes {
+    #[message("/echo-auth", data = "<data>")]
+    async fn echo_auth(data: &str, websocket: &WebSocket<'_>, _t: &WebSocketToken<()>) {
+        websocket.send(data).await;
+    }
 
-#[get("/echo-auth")]
-async fn auth() -> WebSocketToken<()> {
-    WebSocketToken::new(())
+    #[get("/echo-auth")]
+    async fn auth() -> WebSocketToken<()> {
+        // No authentication is actually done here, but it would be trivial to add
+        WebSocketToken::new(())
+    }
 }
 
 #[get("/")]
@@ -66,5 +71,6 @@ fn index() -> Html<&'static str> {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![echo, index, auth, echo_auth, echo_auth_j, echo_j])
+    rocket::build()
+        .mount("/", routes![echo, index, auth_routes::auth, auth_routes::echo_auth])
 }
