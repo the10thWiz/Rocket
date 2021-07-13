@@ -3,10 +3,29 @@
 use rocket::websocket::Channel;
 use rocket::response::content::Html;
 use rocket::Data;
+use rocket::websocket::token::WebSocketToken;
 
-#[message("/echo", data = "<data>")]
+#[message("/echo", data = "<data>", rank = 2)]
 async fn echo(data: Data<'_>, websocket: Channel<'_>) {
     websocket.send(data).await;
+}
+
+#[join("/echo", rank = 2)]
+async fn echo_j() {
+}
+
+#[message("/echo-auth", data = "<data>")]
+async fn echo_auth(data: Data<'_>, websocket: Channel<'_>, _t: &WebSocketToken<()>) {
+    websocket.send(data).await;
+}
+
+#[join("/echo-auth")]
+async fn echo_auth_j(_t: &WebSocketToken<()>) {
+}
+
+#[get("/echo-auth")]
+async fn auth() -> WebSocketToken<()> {
+    WebSocketToken::new(())
 }
 
 #[get("/")]
@@ -50,5 +69,5 @@ fn index() -> Html<&'static str> {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![echo, index])
+    rocket::build().mount("/", routes![echo, index, auth, echo_auth, echo_auth_j, echo_j])
 }

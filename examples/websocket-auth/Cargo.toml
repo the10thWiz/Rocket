@@ -1,0 +1,10 @@
+[package]
+name = "websocket-auth"
+version = "0.0.0"
+workspace = "../"
+edition = "2018"
+publish = false
+
+[dependencies]
+rocket = { path = "../../core/lib", features = ["json"] }
+dashmap = "4.0.2"
