@@ -3,7 +3,7 @@
 use rocket::websocket::Channel;
 use rocket::response::content::Html;
 #[message("/echo", data = "<data>", rank = 2)]
-async fn echo(data: Data<'_>, websocket: &Channel<'_>) {
+async fn echo(data: &str, websocket: &Channel<'_>) {
     websocket.send(data).await;
 }
 
