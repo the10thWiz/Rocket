@@ -195,7 +195,11 @@ pub trait WebSocketHandler: CloneableWS + Send + Sync + 'static {
     /// generate a response. Otherwise, if the return value is `Forward(Data)`,
     /// the next matching route is attempted. If there are no other matching
     /// routes, the `404` error catcher is invoked.
-    async fn handle<'r>(&self, request: &'r WebSocket<'_>, data: WebSocketData<'r>) -> WsOutcome<'r>;
+    async fn handle<'r>(
+        &self,
+        request: &'r WebSocket<'_>,
+        data: WebSocketData<'r>
+    ) -> WsOutcome<'r>;
 }
 
 // We write this manually to avoid double-boxing.

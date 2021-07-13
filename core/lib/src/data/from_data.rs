@@ -213,8 +213,15 @@ pub trait FromData<'r>: Sized {
     }
 }
 
-pub fn data_from_ws<'r, 'life0, 'async_trait, T: FromData<'r>>(req: &'r WebSocket<'life0>, data: Data<'r>)
-    -> Pin<Box<dyn Future<Output = Outcome<'r, T>> + Send + 'async_trait>>
+/// Allows calling FromData using a WebSocket rather than a Request. This just extracts the
+/// internal Request and calls the from_request implementation.
+///
+/// This should only be called by the codegen
+#[doc(hidden)]
+pub fn data_from_ws<'r, 'life0, 'async_trait, T: FromData<'r>>(
+    req: &'r WebSocket<'life0>,
+    data: Data<'r>
+) -> Pin<Box<dyn Future<Output = Outcome<'r, T>> + Send + 'async_trait>>
     where
         'life0: 'async_trait,
         'r: 'async_trait,

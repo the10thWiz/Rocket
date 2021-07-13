@@ -37,7 +37,8 @@ fn index() -> Html<&'static str> {
                         error(e);
                     } else {
                         // Create the actual connection, and pass it to conn
-                        let connection = new WebSocket('ws://' + document.location.host + e.target.responseText);
+                        let connection =
+                           new WebSocket('ws://' + document.location.host + e.target.responseText);
                         conn(connection);
                     }
                 });
@@ -128,5 +129,7 @@ async fn leave(ws: Channel<'_>, user: &WebSocketToken<User>, users: &State<DashS
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().manage(DashSet::<User>::new()).mount("/", routes![auth, join, listen, leave, index])
+    rocket::build()
+       .manage(DashSet::<User>::new())
+       .mount("/", routes![auth, join, listen, leave, index])
 }

@@ -6,7 +6,6 @@ use std::time::Duration;
 use bytes::Bytes;
 use bytes::BytesMut;
 use futures::Future;
-use rocket_http::ContentType;
 use rocket_http::uri::Origin;
 use rocket_http::hyper::upgrade::Upgraded;
 use tokio::io::{AsyncWrite, ReadHalf, WriteHalf};
@@ -27,7 +26,6 @@ use crate::response::Responder;
 use super::Extensions;
 use super::broker::Broker;
 use super::message::MAX_BUFFER_SIZE;
-use super::message::into_message;
 use super::message::{IntoMessage, WebSocketMessage, to_message};
 use super::status::WebSocketStatus;
 use validation::Utf8Validator;
@@ -632,6 +630,7 @@ impl<'r> WebSocket<'r> {
     }
 
     /// Sets the topic URI for this WebSocket
+    #[allow(unused)]
     pub(crate) fn set_topic<'a>(&'r mut self, topic: Origin<'r>) {
         self.request.set_uri(topic);
     }
@@ -646,16 +645,23 @@ impl<'r> WebSocket<'r> {
     }
 }
 
-impl<'r> WebSocket<'r> {
-    pub async fn send<'o: 'r>(&'r self, message: impl Responder<'r, 'o>) {
+impl WebSocket<'_> {
+    /// Send a message to a the WebSocket client.
+    pub async fn send<'r, 'o: 'r>(&'r self, message: impl Responder<'r, 'o>) {
         respond_to(message, |m| self.sender.send(m), &self.request).await
     }
 
-    pub async fn broadcast<'o: 'r>(&'r self, message: impl Responder<'r, 'o>) {
+    /// Broadcast a message to every WebSocket client connected to the same topic
+    pub async fn broadcast<'r, 'o: 'r>(&'r self, message: impl Responder<'r, 'o>) {
         respond_to(message, |m| self.broker().broadcast_to(self.topic(), m), &self.request).await
     }
 
-    pub async fn broadcast_to<'o: 'r>(&'r self, id: &Origin<'_>, message: impl Responder<'r, 'o>) {
+    /// Broadcast a message to every WebSocket client connected to the specified topic
+    pub async fn broadcast_to<'r, 'o: 'r>(
+        &'r self,
+        id: &Origin<'_>,
+        message: impl Responder<'r, 'o>
+    ) {
         respond_to(message, |m| self.broker().broadcast_to(id, m), &self.request).await
     }
 }
@@ -669,7 +675,11 @@ async fn respond_to<'r, 'o: 'r, F, R>(
 {
     match message.respond_to(request) {
         Ok(mut res) => {
-            let binary = !res.content_type().unwrap_or(ContentType::Text).is_utf8();
+            let binary = if let Some(utf8) = res.content_type().map(|c| c.is_utf8()).flatten() {
+                !utf8
+            } else {
+                true // TODO: sniffing?
+            };
             let t = res.body_mut();
             let (tx, rx) = mpsc::channel(1);
             if let Ok(()) = send(WebSocketMessage::new(binary, rx)).await {
@@ -686,7 +696,7 @@ async fn respond_to<'r, 'o: 'r, F, R>(
                 }
             }
         },
-        Err(s) => (),
+        Err(_s) => (),
     }
 }
 

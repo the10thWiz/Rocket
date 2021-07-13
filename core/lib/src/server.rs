@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use channel::WebSocket;
-use rocket_http::ext::IntoOwned;
 use rocket_http::hyper::upgrade::OnUpgrade;
 use yansi::Paint;
 use tokio::sync::oneshot;
@@ -486,7 +485,11 @@ impl Rocket<Orbit> {
                     // On forward (e.g. none match), we retry against the message handlers. This
                     // runs everything up to the data guard.
                     Outcome::Forward(_) =>
-                        match self.route_event(&req, WebSocketEvent::Message, WebSocketData::Join).await {
+                        match self.route_event(
+                            &req,
+                            WebSocketEvent::Message,
+                            WebSocketData::Join
+                        ).await {
                             Outcome::Success(()) => {
                                 broker.subscribe(req.topic(), &ch).await;
                             },
@@ -508,7 +511,11 @@ impl Rocket<Orbit> {
                                     has an invalid opcode", message),
                     };
                     //req.set_topic(Origin::parse("/echo/we").unwrap());
-                    match self.route_event(&req, WebSocketEvent::Message, WebSocketData::Message(data)).await {
+                    match self.route_event(
+                        &req,
+                        WebSocketEvent::Message,
+                        WebSocketData::Message(data)
+                    ).await {
                         Outcome::Forward(_data) => {
                             break;
                         },
@@ -524,7 +531,11 @@ impl Rocket<Orbit> {
                 info_!("Websocket closed with status: {:?}", close_status);
                 let default_response = WebSocketStatus::default_response(&close_status);
                 // TODO provide close message
-                match self.route_event(&req, WebSocketEvent::Leave, WebSocketData::Leave(close_status)).await {
+                match self.route_event(
+                    &req,
+                    WebSocketEvent::Leave,
+                    WebSocketData::Leave(close_status)
+                ).await {
                     Outcome::Forward(_data) => (),
                     Outcome::Failure(status) => {
                         error_!("{}", status);
@@ -551,7 +562,11 @@ impl Rocket<Orbit> {
             let (sender, _rx) = tokio::sync::mpsc::channel(1);
             drop(_rx);
             let req = WebSocket::new(req, sender);
-            match self.route_event(&req, WebSocketEvent::Leave, WebSocketData::Leave(Err(StatusError::NeverJoined))).await {
+            match self.route_event(
+                &req,
+                WebSocketEvent::Leave,
+                WebSocketData::Leave(Err(StatusError::NeverJoined))
+            ).await {
                 Outcome::Forward(_data) => {
                 },
                 Outcome::Failure(_status) => {

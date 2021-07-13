@@ -181,7 +181,9 @@ fn param_guard_decl(guard: &Guard, _websocket: bool) -> TokenStream {
 
 fn data_guard_decl(guard: &Guard, websocket: &WebSocketEvent) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome, WebSocketStatus, WebSocketData, _route);
+    define_spanned_export!(ty.span() =>
+        _log, __req, __data, FromData, Outcome, WebSocketData, _route
+    );
 
     let (method, data) = match websocket {
         WebSocketEvent::WebSocketJoin => (

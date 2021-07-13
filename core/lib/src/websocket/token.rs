@@ -44,14 +44,14 @@
 //! This is actually handled via the request's local cache, and any values stored in the
 //! authentication request's local cache will also be in the websocket event's local cache.
 
-use std::{any::Any, net::SocketAddr, sync::Arc, time::{Duration, Instant}};
+use std::{sync::Arc, time::{Duration, Instant}};
 
 use dashmap::DashMap;
 use rand::Rng;
-use rocket_http::{Accept, ContentType, HeaderMap, ext::IntoOwned, uri::Origin};
-use state::{Container, Storage};
+use rocket_http::{ext::IntoOwned, uri::Origin};
+use state::Container;
 
-use crate::{Request, request::FromRequest, response::Responder};
+use crate::{request::FromRequest, response::Responder};
 
 /// A WebSocketToken for use in authenticating WebSocket connections
 pub struct WebSocketToken<T: Send + Sync + 'static> {
@@ -70,17 +70,6 @@ impl<T: Send + Sync + 'static> WebSocketToken<T> {
         Self { data, uri: Some(uri.into().into_owned()), }
     }
 
-    // Creates a temporary Connection URI using the provided Request. The URI is returned as a
-    // String, although that is subject to change
-    //pub fn create_connection_uri(self, request: &crate::Request<'_>) -> String {
-        //let token = if let Some(uri) = self.uri {
-            //request.rocket().websocket_tokens.create(self.data, uri)
-        //} else {
-            //request.rocket().websocket_tokens.create(self.data, request.uri().clone().into_owned())
-        //};
-        //format!("/websocket/token/{}", token)
-    //}
-
     /// Gets the inner data saved by this token
     pub fn get_data(&self) -> &T {
         &self.data
@@ -95,7 +84,10 @@ impl<'r, 'o: 'r, T: Send + Sync + 'static> Responder<'r, 'o> for WebSocketToken<
         let token = if let Some(uri) = self.uri.take() {
             request.rocket().websocket_tokens.create(Arc::clone(&request.state.cache), uri)
         } else {
-            request.rocket().websocket_tokens.create(Arc::clone(&request.state.cache), request.uri().clone().into_owned())
+            request.rocket().websocket_tokens.create(
+                Arc::clone(&request.state.cache),
+                request.uri().clone().into_owned()
+            )
         };
         request.local_cache(|| WebSocketTokenWrapper(self));
         format!("/websocket/token/{}", token).respond_to(request)

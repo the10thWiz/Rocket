@@ -9,14 +9,12 @@
 //! nessecary since Rocket needs to know what type you would like to use as the `ChannelDescriptor`,
 //! and it also allows mutiple channels, depending on the descriptor type.
 
-use std::error::Error;
-
 use rocket_http::{ext::IntoOwned, uri::Origin};
 use tokio::sync::mpsc;
 
 use crate::{Request, request::{FromRequest, Outcome}};
 
-use super::{Protocol, channel::WebSocketChannel, message::{IntoMessage, WebSocketMessage}};
+use super::{Protocol, channel::WebSocketChannel, message::WebSocketMessage};
 
 /// Internal enum for sharing messages between clients
 enum BrokerMessage {

@@ -344,7 +344,7 @@ use crate::{Data, Request};
 use crate::http::hyper;
 use crate::response::Builder;
 
-use self::status::{StatusError, WebSocketStatusResult};
+use self::status::WebSocketStatusResult;
 
 /// Identifier of WebSocketEvent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

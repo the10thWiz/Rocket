@@ -291,14 +291,18 @@ impl ContentType {
     known_media_types!(content_types);
 
     /// Returns whether this data type is UTF8 encoded or not
-    pub fn is_utf8(&self) -> bool {
-        self.0.top() == "text"
-        || self == &Self::JSON
-        || self == &Self::JsonApi
-        || self == &Self::Form
-        || self == &Self::JavaScript
-        || self == &Self::XML
-        || self == &Self::FormData
+    pub fn is_utf8(&self) -> Option<bool> {
+        if self == &Self::Any {
+            None
+        } else {
+            Some(self.0.top() == "text"
+            || self == &Self::JSON
+            || self == &Self::JsonApi
+            || self == &Self::Form
+            || self == &Self::JavaScript
+            || self == &Self::XML
+            || self == &Self::FormData)
+        }
     }
 }
 

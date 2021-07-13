@@ -142,7 +142,7 @@ fn updates_message(data: Data<'_>, auth: &WebSocketToken<UserAuth>, ws: Channel<
 ```
 
 ! NOTE: The `&` is required
-  
+
   Since the `WebSocketToken` is passed to every websocket event handler, it must
   be passed as a reference.
 
