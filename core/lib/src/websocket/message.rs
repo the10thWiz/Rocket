@@ -146,7 +146,7 @@ impl WebSocketMessage {
     ///
     /// TODO: create seperate status struct
     pub(crate) fn close<'a>(status: impl Into<Option<WebSocketStatus<'a>>>) -> Self {
-        let (tx, data) = mpsc::channel(3);
+        let (tx, data) = mpsc::channel(1);
         if let Some(status) = status.into() {
             let _e = tx.try_send(status.encode());
         }

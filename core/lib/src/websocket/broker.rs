@@ -9,12 +9,15 @@
 //! nessecary since Rocket needs to know what type you would like to use as the `ChannelDescriptor`,
 //! and it also allows mutiple channels, depending on the descriptor type.
 
-use rocket_http::{ext::IntoOwned, uri::Origin};
-use tokio::sync::mpsc;
+use std::{hash::Hash, sync::{Arc, Weak}};
 
-use crate::{Request, request::{FromRequest, Outcome}};
+use bytes::BytesMut;
+use rocket_http::{Method, ext::IntoOwned, uri::Origin};
+use tokio::{io::AsyncReadExt, sync::{OnceCell, mpsc}};
 
-use super::{Protocol, channel::WebSocketChannel, message::WebSocketMessage};
+use crate::{Request, Rocket, request::{FromRequest, Outcome}, response::Responder, Orbit};
+
+use super::{Protocol, channel::WebSocketChannel, message::{MAX_BUFFER_SIZE, WebSocketMessage, to_message}};
 
 /// Internal enum for sharing messages between clients
 enum BrokerMessage {
@@ -44,9 +47,15 @@ enum BrokerMessage {
 ///
 /// See the examples for how to use Channel.
 /// TODO: Create examples
-#[derive(Clone)]
 pub struct Broker {
+    rocket: Arc<OnceCell<Weak<Rocket<Orbit>>>>,
     channels: mpsc::UnboundedSender<BrokerMessage>,
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum BrokerError {
+    RocketNotRunning,
+    ResponderFailed,
 }
 
 impl Broker {
@@ -56,16 +65,78 @@ impl Broker {
         let (sender, reciever) = mpsc::unbounded_channel();
         tokio::spawn(Self::channel_task(reciever));
         Self {
+            rocket: Arc::new(OnceCell::new()),
             channels: sender,
         }
     }
 
     /// Sends a message to all clients subscribed to the channel using descriptor `id`
-    pub async fn broadcast_to(&self, id: &Origin<'_>, message: WebSocketMessage)
+    pub(crate) async fn broadcast_to(&self, id: &Origin<'_>, message: WebSocketMessage)
         -> Result<(), ()>
     {
         self.channels.send(BrokerMessage::Forward(id.clone().into_owned(), message))
             .map_err(|_| ())
+    }
+
+    /// Sends a message to all clients subscribed to the channel using descriptor `id`
+    ///
+    /// In general, it should never be nessecary to construct a topic id by hand. The `uri!` macro
+    /// allows constructing arbitrary topics from topics at compile time, see [`uri!`](crate::uri)
+    /// for more info. Within a websocket event handler, using `&Origin<'_>` as a request guard
+    /// will get the topic of the event currently being handled, and can be passed as is to
+    /// broadcast.
+    pub async fn broadcast<'r, 'o: 'r>(&'r self, id: impl AsRef<Origin<'_>>, message: impl Responder<'r, 'o>) -> Result<(), BrokerError> {
+        let rocket = self.rocket
+            .get()
+            .expect("No rocket added")
+            .upgrade()
+            .ok_or(BrokerError::RocketNotRunning)?;
+        // This works, but it's not ideal. However, we cannot send message as a dyn Responder<'r,
+        // 'o>, since the type isn't 'static. However, it may be possible to find a better way to
+        // handle this, potentially using a 
+        let request = Request::new(
+            rocket.as_ref(),
+            Method::Get,
+            id.as_ref().clone().into_owned(),
+        );
+
+        // Safety: the borrow is only used by the resonse created from message, which is consumed &
+        // dropped before the end of the function. The request isn't dropped until the end of the
+        // fn. This relies on the fact that values are dropped in the reverse order they were
+        // defined. This MUST be mem::transmute, since it avoids using a raw pointer and making the
+        // future !Send.
+        //
+        // This 'static is likely unnessecary, but I don't think there is an easy way around it.
+        let borrow: &'r Request<'static> = unsafe { std::mem::transmute(&request) };
+        let _ = request; // Shadow request to make sure it cannot be modified or moved
+        #[allow(unused_variables)]
+        let request = 0usize;
+        match message.respond_to(borrow) {
+            Ok(mut res) => {
+                let binary = if let Some(utf8) = res.content_type().map(|c| c.is_utf8()).flatten() {
+                    !utf8
+                } else {
+                    true // TODO: sniffing?
+                };
+                let t = res.body_mut();
+                let (tx, rx) = mpsc::channel(1);
+                if let Ok(()) = self.broadcast_to(borrow.uri(), WebSocketMessage::new(binary, rx)).await {
+                    let mut buf = BytesMut::with_capacity(MAX_BUFFER_SIZE);
+                    while let Ok(n) = t.read_buf(&mut buf).await {
+                        if n == 0 {
+                            break;
+                        }
+                        let tmp = buf.split();
+                        let _e = tx.send(tmp.into()).await;
+                        if buf.capacity() <= 0 {
+                            buf.reserve(MAX_BUFFER_SIZE);
+                        }
+                    }
+                }
+                Ok(())
+            },
+            Err(_s) => Err(BrokerError::ResponderFailed),
+        }
     }
 
     /// Subscribes the client to this channel using the descriptor `id`
@@ -113,6 +184,23 @@ impl Broker {
             // TODO make this happen less often
             subs.cleanup();
         }
+    }
+
+    /// Creates a new handle to this broker.
+    pub fn clone(&self) -> Self {
+        Self {
+            rocket: Arc::clone(&self.rocket),
+            channels: self.channels.clone(),
+        }
+    }
+
+    /// Initialize the broker with a weak reference to Rocket
+    ///
+    /// # Panics
+    ///
+    /// Panics if this is called more than once
+    pub(crate) fn with_rocket(&self, rocket: Weak<Rocket<Orbit>>) {
+        self.rocket.set(rocket).expect("The broker was already initialized!");
     }
 }
 

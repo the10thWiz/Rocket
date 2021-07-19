@@ -532,6 +532,7 @@ mod validation {
             Self::Start
         }
 
+        #[inline]
         fn set_error(&mut self) -> bool {
             *self = Self::Error;
             false
@@ -592,11 +593,13 @@ mod validation {
         }
 
         /// Returns true if the last call to validate ended on a UTF-8 character boundary.
+        #[inline]
         pub fn fin(&self) -> bool {
             matches!(self, Self::Start)
         }
 
         /// Returns true if this validator has previously encountered invalid UTF-8
+        #[inline]
         pub fn error(&self) -> bool {
             matches!(self, Self::Error)
         }
@@ -664,9 +667,14 @@ impl Channel<'_> {
     ) {
         respond_to(message, |m| self.broker().broadcast_to(id, m), &self.request).await
     }
+
+    /// Close the websocket connection with a specific status
+    pub async fn close<'a>(&self, status: impl Into<Option<WebSocketStatus<'a>>>) {
+        let _ = self.sender.send(WebSocketMessage::close(status)).await;
+    }
 }
 
-async fn respond_to<'r, 'o: 'r, F, R>(
+pub(crate) async fn respond_to<'r, 'o: 'r, F, R>(
     message: impl Responder<'r, 'o>,
     send: impl FnOnce(WebSocketMessage) -> F,
     request: &'r Request<'_>
@@ -710,9 +718,16 @@ impl<'r, 'o> FromWebSocket<'r, 'o> for &'r Channel<'o> {
 }
 #[doc(hidden)]
 impl<'r> Channel<'r> {
-    // Retrieves the pre-parsed query items. Used by matching and codegen.
+    /// Retrieves the pre-parsed query items. Used by matching and codegen.
     #[inline]
     pub fn query_fields(&self) -> impl Iterator<Item = ValueField<'_>> {
         self.request.query_fields()
+    }
+
+    /// Get the `n`th path segment, 0-indexed, after the mount point for the
+    /// currently matched route, as a string, if it exists. Used by codegen.
+    #[inline]
+    pub fn routed_segment(&self, n: usize) -> Option<&str> {
+        self.request.routed_segments(0..).get(n)
     }
 }

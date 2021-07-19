@@ -631,6 +631,8 @@ impl Rocket<Orbit> {
         let mercy = self.config.shutdown.mercy as u64;
 
         let rocket = Arc::new(self);
+        // ~ rocket.broker(), but avoids clone
+        rocket.0.broker.with_rocket(Arc::downgrade(&rocket));
         // Spawn periodic cleanup task
         let rocket_handle = Arc::clone(&rocket);
         tokio::spawn(async move {
