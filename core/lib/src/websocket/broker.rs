@@ -11,6 +11,8 @@
 
 use std::hash::Hash;
 
+use evmap::{ReadHandle, ShallowCopy, WriteHandle};
+use rand::Rng;
 use rocket_http::{ext::IntoOwned, uri::Origin};
 use tokio::sync::mpsc;
 
@@ -49,16 +51,19 @@ enum BrokerMessage {
 #[derive(Clone)]
 pub struct Broker {
     channels: mpsc::UnboundedSender<BrokerMessage>,
+    map: ReadHandle<String, Box<ChannelDescriptor>>,
 }
 
 impl Broker {
     /// Creates a new channel, and starts the nessecary tasks in the background. The task will
     /// automatically end as soon as every handle on this channel has been dropped.
     pub(crate) fn new() -> Self {
-        let (sender, reciever) = mpsc::unbounded_channel();
-        tokio::spawn(Self::channel_task(reciever));
+        let (channels, reciever) = mpsc::unbounded_channel();
+        let (map, write_handle) = evmap::new();
+        tokio::spawn(Self::channel_task(reciever, map));
         Self {
-            channels: sender,
+            channels,
+            map,
         }
     }
 
@@ -106,20 +111,39 @@ impl Broker {
     }
 
     /// Channel task for tracking subscribtions and forwarding messages
-    async fn channel_task(mut rx: mpsc::UnboundedReceiver<BrokerMessage>) {
-        let mut subs = ChannelMap::new(100);
+    async fn channel_task(
+        mut rx: mpsc::UnboundedReceiver<BrokerMessage>,
+        mut map: WriteHandle<String, Box<ChannelDescriptor>>,
+    ) {
         while let Some(wsm) = rx.recv().await {
             match wsm {
-                BrokerMessage::Register(room, tx, protocol) => subs.insert(tx, room, protocol),
-                BrokerMessage::Forward(room, message) => subs.send(room, message).await,
-                BrokerMessage::Unregister(room, tx) => subs.remove_value(tx, room),
-                BrokerMessage::UnregisterAll(tx) => subs.remove_key(tx),
+                BrokerMessage::Register(room, tx, protocol) => {
+                    let room = room.to_string();
+                    if let Some(true) = map.get(&room).map(|v| v.iter().any(|c| c.handle.same_channel(&tx))) {
+                        // The handle is already added
+                    } else {
+                        map.insert(room, ChannelDescriptor::new(tx, protocol));
+                    }
+                },
+                BrokerMessage::Forward(room, message) => todo!(),
+                BrokerMessage::Unregister(room, tx) => {
+                    // Safety: The fn has no mutable state, and will select the same set of values
+                    unsafe { map.retain(room.to_string(), move |c, _| c.handle.same_channel(&tx)) };
+                },
+                BrokerMessage::UnregisterAll(tx) => {
+                    let (k, v) = map.read().expect("Map Invalid")
+                        .iter()
+                        .flat_map(|(k, v)| v.iter().filter(|v| v.handle.same_channel(&tx)).map(|v| (k, v)))
+                        .nth(0).expect("");
+                    map.remove(k, v);
+                    map.r
+                },
             }
-            // TODO make this happen less often
-            subs.cleanup();
+            map.refresh();
         }
     }
 }
+
 
 impl std::fmt::Debug for Broker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -138,20 +162,6 @@ impl<'r> FromRequest<'r> for Broker {
 
 /// Convient struct for holding channel subscribtions
 struct ChannelMap(Vec<(mpsc::Sender<WebSocketMessage>, Vec<Origin<'static>>, Protocol)>);
-
-struct ChannelDesc {
-    id: usize,
-    chan: mpsc::Sender<WebSocketMessage>,
-    protocol: Protocol
-}
-
-impl Hash for ChannelDesc {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_usize(self.id);
-    }
-}
-
-//struct ChannelMap(evmap<String [>use origin.to_string() or similar<], Box<ChannelDesc>>);
 
 impl ChannelMap {
     /// Create map with capactity
@@ -222,5 +232,74 @@ impl ChannelMap {
 
     fn cleanup(&mut self) {
         self.0.retain(|(t, _, _)| !t.is_closed());
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ChannelDescriptor {
+    /// Random value to be used as hash
+    hash: usize,
+    /// Handle to send messages to the associated task
+    handle: mpsc::Sender<WebSocketMessage>,
+    /// WebSocket protocol to use when communicating
+    protocol: Protocol,
+}
+
+impl ChannelDescriptor {
+    fn new(handle: mpsc::Sender<WebSocketMessage>, protocol: Protocol) -> Box<Self> {
+        Box::new(Self {
+            hash: rand::thread_rng().gen(), handle, protocol,
+        })
+    }
+}
+
+impl Hash for ChannelDescriptor {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
+    }
+}
+
+impl PartialEq for ChannelDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash.eq(&other.hash)
+    }
+}
+
+impl Eq for ChannelDescriptor {}
+
+struct SharedChannelMap(ReadHandle<String, Box<ChannelDescriptor>>);
+
+pub enum BrokerError {
+    MapNotActive
+}
+
+impl SharedChannelMap {
+    /// A potentially more efficient Broker implementation. This executes the actual sending of the
+    /// message before completing, using the internal evmap read handle to get the list of active
+    /// clients listening on the topic
+    pub(crate) async fn broadcast_to(&self, id: Origin<'static>, message: WebSocketMessage) -> Result<(), BrokerError> {
+        let (header, _, mut data) = message.into_parts();
+        let list = self.0.get(&id.to_string()).ok_or(BrokerError::MapNotActive)?;
+        let mut chs = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            let (data_tx, data_rx) = mpsc::channel(2);
+            if let Ok(()) = item.handle.send(WebSocketMessage::from_parts(
+                header.clone(),
+                item.protocol.with_topic(&id),
+                data_rx
+            )).await {
+                chs.push(data_tx);
+            }
+        }
+
+        tokio::spawn(async move {
+            while let Some(next) = data.recv().await {
+                for ch in chs.iter() {
+                    // TODO prevent a slow client from blocking others
+                    let _e = ch.send(next.clone()).await;
+                }
+            }
+        });
+        Ok(())
     }
 }
