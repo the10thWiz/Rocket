@@ -135,8 +135,8 @@ impl Broker {
                         .iter()
                         .flat_map(|(k, v)| v.iter().filter(|v| v.handle.same_channel(&tx)).map(|v| (k, v)))
                         .nth(0).expect("");
-                    map.remove(k, v);
-                    map.r
+                    //map.remove(k, v);
+                    //map.r
                 },
             }
             map.refresh();
@@ -234,6 +234,17 @@ impl ChannelMap {
         self.0.retain(|(t, _, _)| !t.is_closed());
     }
 }
+
+// # evmap based broker:
+//
+// Doesn't seem to be worthwhile. There are a number of drawbacks (which could be solved by adding
+// some features to evmap), but evmap doesn't seem to be worth the extra effort to use. At first
+// glance, it makes a compelling case, since it's almost exactly what we need: a way to share data
+// on the fly, optimized for reads. The drawbacks come as soon as an implementation attempt is
+// made: Origin doesn't implement Hash (although we just convert to a String internally), and evmap
+// imposes the extra restriction that the value (the channel descriptor) must also implement Hash.
+// This makes is much harder to handle, and doesn't provide any advantage for our use case, since
+// we almost always need to iterate over the entire bag anyways.
 
 #[derive(Debug, Clone)]
 struct ChannelDescriptor {
