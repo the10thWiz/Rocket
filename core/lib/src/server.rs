@@ -144,6 +144,7 @@ impl Rocket<Orbit> {
         let hyp_response = hyp_res.body(hyp_body)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
+        coz::progress!("Response sent");
         tx.send(hyp_response).map_err(|_| {
             let msg = "client disconnect before response started";
             io::Error::new(io::ErrorKind::BrokenPipe, msg)
@@ -170,6 +171,7 @@ impl Rocket<Orbit> {
         req: &mut Request<'_>,
         data: &mut Data<'_>
     ) -> RequestToken {
+        coz::scope!("Preprocessing");
         // Check if this is a form and if the form contains the special _method
         // field which we use to reinterpret the request's method.
         let (min_len, max_len) = ("_method=get".len(), "_method=delete".len());
@@ -200,6 +202,7 @@ impl Rocket<Orbit> {
         request: &'r Request<'s>,
         data: Data<'r>
     ) -> Response<'r> {
+        coz::scope!("Dispatch");
         info!("{}:", request);
 
         // Remember if the request is `HEAD` for later body stripping.

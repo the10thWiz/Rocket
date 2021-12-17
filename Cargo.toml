@@ -8,3 +8,6 @@ members = [
   "contrib/dyn_templates/",
   "site/tests",
 ]
+
+[profile.release]
+debug = 1

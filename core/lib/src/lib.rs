@@ -226,6 +226,7 @@ pub fn async_test<R>(fut: impl std::future::Future<Output = R>) -> R {
 /// WARNING: This is unstable! Do not use this method outside of Rocket!
 #[doc(hidden)]
 pub fn async_main<R>(fut: impl std::future::Future<Output = R> + Send) -> R {
+    coz::thread_init();
     // FIXME: The `workers` value won't reflect swaps of `Rocket` in attach
     // fairings with different config values, or values from non-Rocket configs.
     // See tokio-rs/tokio#3329 for a necessary solution in `tokio`.
