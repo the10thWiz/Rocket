@@ -101,10 +101,13 @@ impl WebSocketChannel {
             header.opcode() == u8::from(Opcode::Pong)) &&
             (remaining > 125 || !header.fin())
         {
+            // Close, Ping, and Pong only allow a single message and up to 125 bytes in size
             true
         } else if header.rsv() & !extensions.allowed_rsv_bits() != 0u8 {
+            // Disallowed reserved bits
             true
         } else if Opcode::try_from(header.opcode()).is_none() && header.opcode() != 0x0 {
+            // Invalid Opcode
             true
         } else {
             false

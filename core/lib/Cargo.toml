@@ -60,7 +60,7 @@ state = "0.5.1"
 websocket-codec = "0.5.0"
 dashmap = "4.0.2"
 flurry = "0.3.1"
-coz-profiler = "*"
+coz = "*"
 
 [dependencies.rocket_codegen]
 version = "0.5.0-rc.1"

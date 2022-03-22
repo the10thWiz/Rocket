@@ -81,6 +81,7 @@ async fn hyper_service_fn(
     let (tx, rx) = oneshot::channel();
 
     tokio::spawn(async move {
+        coz::scope!("incomming_http_request");
         let upgrade = crate::websocket::upgrade(&mut hyp_req);
         // Convert a Hyper request into a Rocket request.
         let (h_parts, mut h_body) = hyp_req.into_parts();
@@ -470,6 +471,7 @@ impl Rocket<Orbit> {
         extensions: Extensions
     ) {
         if let Ok(upgrade) = upgrade.await {
+            //coz::scope!("ws_event_loop");
             let (ch, a, b) = WebSocketChannel::new(upgrade, extensions);
             let req = Channel::new(req, ch.subscribe_handle());
             let event_loop = async move {
@@ -510,6 +512,7 @@ impl Rocket<Orbit> {
                                     processing websocket messages. {:?}\
                                     has an invalid opcode", message),
                     };
+                    coz::progress!("websocket_message");
                     //req.set_topic(Origin::parse("/echo/we").unwrap());
                     match self.route_event(
                         &req,
