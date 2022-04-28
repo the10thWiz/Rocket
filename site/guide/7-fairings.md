@@ -32,7 +32,7 @@ that can be used to solve problems in a clean, composable, and robust manner.
   effected through fairings. You should **_not_** use a fairing to implement
   authentication or authorization (preferring to use a [request guard] instead)
   _unless_ the authentication or authorization applies to all or the
-  overwhelming majority application. On the other hand, you _should_ use a
+  overwhelming majority of the application. On the other hand, you _should_ use a
   fairing to record timing and usage statistics or to enforce global security
   policies.
 
@@ -78,7 +78,7 @@ events is described below:
   * **Ignite (`on_ignite`)**
 
     An ignite callback is called during [ignition] An ignite callback can
-    arbitrarily modify the `Rocket` instance being build. They are are commonly
+    arbitrarily modify the `Rocket` instance being built. They are commonly
     used to parse and validate configuration values, aborting on bad
     configurations, and inserting the parsed value into managed state for later
     retrieval.

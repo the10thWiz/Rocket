@@ -154,7 +154,7 @@ impl FileName {
         let file_name = std::path::Path::new(&self.0)
             .file_name()
             .and_then(|n| n.to_str())
-            .and_then(|n| n.split(bad_char).filter(|s| !s.is_empty()).next())?;
+            .and_then(|n| n.split(bad_char).find(|s| !s.is_empty()))?;
 
         // At this point, `file_name` can't contain `bad_chars` because of
         // `.split()`, but it can be empty or reserved.
@@ -195,7 +195,7 @@ impl FileName {
     /// The raw, unsanitized, potentially unsafe file name. Prefer to use
     /// [`FileName::as_str()`], always.
     ///
-    /// # Danger
+    /// # ⚠️ DANGER ⚠️
     ///
     /// This method returns the file name exactly as it was specified by the
     /// client. You should **_not_** use this name _unless_ you require the

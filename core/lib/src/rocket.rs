@@ -1,6 +1,7 @@
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::convert::TryInto;
+use std::net::SocketAddr;
 
 use yansi::Paint;
 use either::Either;
@@ -184,7 +185,7 @@ impl Rocket<Build> {
     /// let config = Config {
     ///     port: 7777,
     ///     address: Ipv4Addr::new(18, 127, 0, 1).into(),
-    ///     temp_dir: PathBuf::from("/tmp/config-example"),
+    ///     temp_dir: "/tmp/config-example".into(),
     ///     ..Config::debug_default()
     /// };
     ///
@@ -192,7 +193,7 @@ impl Rocket<Build> {
     /// let rocket = rocket::custom(&config).ignite().await?;
     /// assert_eq!(rocket.config().port, 7777);
     /// assert_eq!(rocket.config().address, Ipv4Addr::new(18, 127, 0, 1));
-    /// assert_eq!(rocket.config().temp_dir, Path::new("/tmp/config-example"));
+    /// assert_eq!(rocket.config().temp_dir.relative(), Path::new("/tmp/config-example"));
     ///
     /// // Create a new figment which modifies _some_ keys the existing figment:
     /// let figment = rocket.figment().clone()
@@ -205,7 +206,7 @@ impl Rocket<Build> {
     ///
     /// assert_eq!(rocket.config().port, 8888);
     /// assert_eq!(rocket.config().address, Ipv4Addr::new(171, 64, 200, 10));
-    /// assert_eq!(rocket.config().temp_dir, Path::new("/tmp/config-example"));
+    /// assert_eq!(rocket.config().temp_dir.relative(), Path::new("/tmp/config-example"));
     /// # Ok(())
     /// # });
     /// ```
@@ -214,6 +215,7 @@ impl Rocket<Build> {
         self
     }
 
+    #[track_caller]
     fn load<'a, B, T, F, M>(mut self, kind: &str, base: B, items: Vec<T>, m: M, f: F) -> Self
         where B: TryInto<Origin<'a>> + Clone + fmt::Display,
               B::Error: fmt::Display,
@@ -221,13 +223,15 @@ impl Rocket<Build> {
               F: Fn(&mut Self, T),
               T: Clone + fmt::Display,
     {
-        let mut base = base.clone().try_into()
-            .map(|origin| origin.into_owned())
-            .unwrap_or_else(|e| {
+        let mut base = match base.clone().try_into() {
+            Ok(origin) => origin.into_owned(),
+            Err(e) => {
                 error!("invalid {} base: {}", kind, Paint::white(&base));
                 error_!("{}", e);
+                info_!("{} {}", Paint::white("in"), std::panic::Location::caller());
                 panic!("aborting due to {} base error", kind);
-            });
+            }
+        };
 
         if base.query().is_some() {
             warn!("query in {} base '{}' is ignored", kind, Paint::white(&base));
@@ -235,12 +239,15 @@ impl Rocket<Build> {
         }
 
         for unmounted_item in items {
-            let item = m(&base, unmounted_item.clone())
-                .unwrap_or_else(|e| {
+            let item = match m(&base, unmounted_item.clone()) {
+                Ok(item) => item,
+                Err(e) => {
                     error!("malformed URI in {} {}", kind, unmounted_item);
                     error_!("{}", e);
+                    info_!("{} {}", Paint::white("in"), std::panic::Location::caller());
                     panic!("aborting due to invalid {} URI", kind);
-                });
+                }
+            };
 
             f(&mut self, item)
         }
@@ -302,6 +309,7 @@ impl Rocket<Build> {
     ///     rocket::build().mount("/hello", vec![hi_route])
     /// }
     /// ```
+    #[track_caller]
     pub fn mount<'a, B, R>(self, base: B, routes: R) -> Self
         where B: TryInto<Origin<'a>> + Clone + fmt::Display,
               B::Error: fmt::Display,
@@ -477,20 +485,19 @@ impl Rocket<Build> {
 
         // Extract the configuration; initialize the logger.
         #[allow(unused_mut)]
-        let mut config = self.figment.extract::<Config>().map_err(ErrorKind::Config)?;
+        let mut config = Config::try_from(&self.figment).map_err(ErrorKind::Config)?;
         crate::log::init(&config);
 
         // Check for safely configured secrets.
         #[cfg(feature = "secrets")]
         if !config.secret_key.is_provided() {
-            let profile = self.figment.profile();
-            if profile != Config::DEBUG_PROFILE {
-                return Err(Error::new(ErrorKind::InsecureSecretKey(profile.clone())));
+            if config.profile != Config::DEBUG_PROFILE {
+                return Err(Error::new(ErrorKind::InsecureSecretKey(config.profile.clone())));
             }
 
             if config.secret_key.is_zero() {
                 config.secret_key = crate::config::SecretKey::generate()
-                    .unwrap_or(crate::config::SecretKey::zero());
+                    .unwrap_or_else(crate::config::SecretKey::zero);
             }
         };
 
@@ -506,8 +513,8 @@ impl Rocket<Build> {
         // Log everything we know: config, routes, catchers, fairings.
         // TODO: Store/print managed state type names?
         config.pretty_print(self.figment());
-        log_items("🛰  ", "Routes", self.routes(), |r| &r.uri.base, |r| &r.uri);
-        log_items("👾 ", "Catchers", self.catchers(), |c| &c.base, |c| &c.base);
+        log_items("📬 ", "Routes", self.routes(), |r| &r.uri.base, |r| &r.uri);
+        log_items("🥅 ", "Catchers", self.catchers(), |c| &c.base, |c| &c.base);
         self.fairings.pretty_print();
 
         // Ignite the rocket.
@@ -631,7 +638,8 @@ impl Rocket<Ignite> {
             rkt.fairings.handle_liftoff(&rkt).await;
 
             let proto = rkt.config.tls_enabled().then(|| "https").unwrap_or("http");
-            let addr = format!("{}://{}:{}", proto, rkt.config.address, rkt.config.port);
+            let socket_addr = SocketAddr::new(rkt.config.address, rkt.config.port);
+            let addr = format!("{}://{}", proto, socket_addr);
             launch_info!("{}{} {}",
                 Paint::emoji("🚀 "),
                 Paint::default("Rocket has launched from").bold(),

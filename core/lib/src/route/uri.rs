@@ -123,12 +123,13 @@ impl<'a> RouteUri<'a> {
         let source = origin.to_string().into();
         let metadata = Metadata::from(&base, &origin);
 
-        Ok(RouteUri { source, unmounted_origin, base, origin, metadata })
+        Ok(RouteUri { source, base, unmounted_origin, origin, metadata })
     }
 
     /// Create a new `RouteUri`.
     ///
     /// Panics if  `base` or `uri` cannot be parsed as `Origin`s.
+    #[track_caller]
     pub(crate) fn new(base: &str, uri: &str) -> RouteUri<'static> {
         Self::try_new(base, uri).expect("Expected valid URIs")
     }
@@ -287,8 +288,8 @@ impl Metadata {
         let trailing_path = path_segs.last().map_or(false, |p| p.trailing);
 
         Metadata {
-            static_query_fields, path_color, query_color, trailing_path,
-            path_segs, query_segs, base_segs,
+            base_segs, path_segs, query_segs, static_query_fields,
+            path_color, query_color, trailing_path,
         }
     }
 }

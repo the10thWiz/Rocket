@@ -15,16 +15,15 @@ use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
 use crate::websocket::status::StatusError;
 use crate::websocket::status::WebSocketStatus;
-use crate::{Rocket, Orbit, Request, Response, Data, route};
+use crate::{Rocket, Orbit, Request, Response, Data, route, Config};
 use crate::form::Form;
 use crate::outcome::Outcome;
 use crate::error::{Error, ErrorKind};
 use crate::ext::{AsyncReadExt, CancellableListener, CancellableIo};
+use crate::request::ConnectionMeta;
 
-use crate::http::{Method, Status, Header, hyper};
-use crate::http::private::{Listener, Connection, Incoming};
-use crate::http::uri::Origin;
-use crate::http::private::bind_tcp;
+use crate::http::{uri::Origin, hyper, Method, Status, Header};
+use crate::http::private::{bind_tcp, Listener, Connection, Incoming};
 
 // A token returned to force the execution of one method before another.
 pub(crate) struct RequestToken;
@@ -45,7 +44,7 @@ async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
             info_!("A panic in Rust must be treated as an exceptional event.");
             info_!("Panicking is not a suitable error handling mechanism.");
             info_!("Unwinding, the result of a panic, is an expensive operation.");
-            info_!("Panics will severely degrade application performance.");
+            info_!("Panics will degrade application performance.");
             info_!("Instead of panicking, return `Option` and/or `Result`.");
             info_!("Values of either type can be returned directly from handlers.");
             warn_!("A panic is treated as an internal server error.");
@@ -74,6 +73,8 @@ async fn hyper_service_fn(
     rocket: Arc<Rocket<Orbit>>,
     addr: std::net::SocketAddr,
     mut hyp_req: hyper::Request<hyper::Body>,
+    conn: ConnectionMeta,
+    mut hyp_req: hyper::Request<hyper::Body>,
 ) -> Result<hyper::Response<hyper::Body>, io::Error> {
     // This future must return a hyper::Response, but the response body might
     // borrow from the request. Instead, write the body in another future that
@@ -84,17 +85,22 @@ async fn hyper_service_fn(
         let upgrade = crate::websocket::upgrade(&mut hyp_req);
         // Convert a Hyper request into a Rocket request.
         let (h_parts, mut h_body) = hyp_req.into_parts();
-        let mut req = match Request::from_hyp(&rocket, &h_parts, addr) {
-            Ok(req) => req,
+        match Request::from_hyp(&rocket, &h_parts, Some(conn)) {
+            Ok(mut req) => {
+                // Convert into Rocket `Data`, dispatch request, write response.
+                let mut data = Data::from(&mut h_body);
+                let token = rocket.preprocess_request(&mut req, &mut data).await;
+                let response = rocket.dispatch(token, &mut req, data).await;
+                rocket.send_response(response, tx).await;
+            },
             Err(e) => {
+                // TODO: We don't have a request to pass in, so we fabricate
+                // one. This is weird. Instead, let the user know that we failed
+                // to parse a request (a special handler?).
                 error!("Bad incoming request: {}", e);
-                // TODO: We don't have a request to pass in, so we just
-                // fabricate one. This is weird. We should let the user know
-                // that we failed to parse a request (by invoking some special
-                // handler) instead of doing this.
                 let dummy = Request::new(&rocket, Method::Get, Origin::ROOT);
-                let r = rocket.handle_error(Status::BadRequest, &dummy).await;
-                return rocket.send_response(r, tx).await;
+                let response = rocket.handle_error(Status::BadRequest, &dummy).await;
+                rocket.send_response(response, tx).await;
             }
         };
 
@@ -131,62 +137,66 @@ async fn hyper_service_fn(
     });
 
     // Receive the response written to `tx` by the task above.
-    rx.await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    rx.await.map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))
 }
 
 impl Rocket<Orbit> {
-    /// Wrapper around `make_response` to log a success or failure.
+    /// Wrapper around `_send_response` to log a success or failure.
     #[inline]
     async fn send_response(
         &self,
         response: Response<'_>,
         tx: oneshot::Sender<hyper::Response<hyper::Body>>,
     ) {
-        match self.make_response(response, tx).await {
+        let remote_hungup = |e: &io::Error| match e.kind() {
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted => true,
+            _ => false,
+        };
+
+        match self._send_response(response, tx).await {
             Ok(()) => info_!("{}", Paint::green("Response succeeded.")),
-            Err(e) => error_!("Failed to write response: {}.", e),
+            Err(e) if remote_hungup(&e) => warn_!("Remote left: {}.", e),
+            Err(e) => warn_!("Failed to write response: {}.", e),
         }
     }
 
     /// Attempts to create a hyper response from `response` and send it to `tx`.
     #[inline]
-    async fn make_response(
+    async fn _send_response(
         &self,
         mut response: Response<'_>,
         tx: oneshot::Sender<hyper::Response<hyper::Body>>,
     ) -> io::Result<()> {
-        let mut hyp_res = hyper::Response::builder()
-            .status(response.status().code);
+        let mut hyp_res = hyper::Response::builder();
 
+        hyp_res = hyp_res.status(response.status().code);
         for header in response.headers().iter() {
             let name = header.name.as_str();
             let value = header.value.as_bytes();
             hyp_res = hyp_res.header(name, value);
         }
 
-        let send_response = move |res: hyper::ResponseBuilder, body| -> io::Result<()> {
-            let response = res.body(body)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-            tx.send(response).map_err(|_| {
-                let msg = "client disconnected before the response was started";
-                io::Error::new(io::ErrorKind::BrokenPipe, msg)
-            })
-        };
-
         let body = response.body_mut();
         if let Some(n) = body.size().await {
             hyp_res = hyp_res.header(hyper::header::CONTENT_LENGTH, n);
         }
 
-        let max_chunk_size = body.max_chunk_size();
         let (mut sender, hyp_body) = hyper::Body::channel();
-        send_response(hyp_res, hyp_body)?;
+        let hyp_response = hyp_res.body(hyp_body)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
+        tx.send(hyp_response).map_err(|_| {
+            let msg = "client disconnect before response started";
+            io::Error::new(io::ErrorKind::BrokenPipe, msg)
+        })?;
+
+        let max_chunk_size = body.max_chunk_size();
         let mut stream = body.into_bytes_stream(max_chunk_size);
         while let Some(next) = stream.next().await {
             sender.send_data(next?).await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
         }
 
         Ok(())
@@ -311,7 +321,7 @@ impl Rocket<Orbit> {
 
             let name = route.name.as_deref();
             let outcome = handle(name, || route.handler.handle(request, data)).await
-                .unwrap_or_else(|| Outcome::Failure(Status::InternalServerError));
+                .unwrap_or(Outcome::Failure(Status::InternalServerError));
 
             // Check if the request processing completed (Some) or if the
             // request needs to be forwarded. If it does, continue the loop
@@ -589,16 +599,18 @@ impl Rocket<Orbit> {
             .map_err(|e| Error::new(ErrorKind::Io(e)))?;
 
         #[cfg(feature = "tls")]
-        if let Some(ref config) = self.config.tls {
-            use crate::http::private::tls::bind_tls;
+        if self.config.tls_enabled() {
+            if let Some(ref config) = self.config.tls {
+                use crate::http::tls::TlsListener;
 
-            let (certs, key) = config.to_readers().map_err(ErrorKind::Io)?;
-            let l = bind_tls(addr, certs, key).await.map_err(ErrorKind::Bind)?;
-            addr = l.local_addr().unwrap_or(addr);
-            self.config.address = addr.ip();
-            self.config.port = addr.port();
-            ready(&mut self).await;
-            return self.http_server(l).await;
+                let conf = config.to_native_config().map_err(ErrorKind::Io)?;
+                let l = TlsListener::bind(addr, conf).await.map_err(ErrorKind::Bind)?;
+                addr = l.local_addr().unwrap_or(addr);
+                self.config.address = addr.ip();
+                self.config.port = addr.port();
+                ready(&mut self).await;
+                return self.http_server(l).await;
+            }
         }
 
         let l = bind_tcp(addr).await.map_err(ErrorKind::Bind)?;
@@ -613,6 +625,18 @@ impl Rocket<Orbit> {
     pub(crate) async fn http_server<L>(self, listener: L) -> Result<(), Error>
         where L: Listener + Send, <L as Listener>::Connection: Send + Unpin + 'static
     {
+        // Emit a warning if we're not running inside of Rocket's async runtime.
+        if self.config.profile == Config::DEBUG_PROFILE {
+            tokio::task::spawn_blocking(|| {
+                let this  = std::thread::current();
+                if !this.name().map_or(false, |s| s.starts_with("rocket-worker")) {
+                    warn!("Rocket is executing inside of a custom runtime.");
+                    info_!("Rocket's runtime is enabled via `#[rocket::main]` or `#[launch]`.");
+                    info_!("Forced shutdown is disabled. Runtime settings may be suboptimal.");
+                }
+            });
+        }
+
         // Determine keep-alives.
         let http1_keepalive = self.config.keep_alive != 0;
         let http2_keep_alive = match self.config.keep_alive {
@@ -630,39 +654,6 @@ impl Rocket<Orbit> {
         let grace = self.config.shutdown.grace as u64;
         let mercy = self.config.shutdown.mercy as u64;
 
-        let rocket = Arc::new(self);
-        // ~ rocket.broker(), but avoids clone
-        rocket.0.broker.with_rocket(Arc::downgrade(&rocket));
-        // Spawn periodic cleanup task
-        let rocket_handle = Arc::clone(&rocket);
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-                rocket_handle.cleanup_tokens().await;
-            }
-        });
-
-        let service_fn = move |conn: &CancellableIo<_, L::Connection>| {
-            let rocket = rocket.clone();
-            let remote = conn.remote_addr().unwrap_or_else(|| ([0, 0, 0, 0], 0).into());
-            async move {
-                Ok::<_, std::convert::Infallible>(hyper::service_fn(move |req| {
-                    hyper_service_fn(rocket.clone(), remote, req)
-                }))
-            }
-        };
-
-
-        // NOTE: `hyper` uses `tokio::spawn()` as the default executor.
-        let listener = CancellableListener::new(shutdown.clone(), listener, grace, mercy);
-        let server = hyper::Server::builder(Incoming::new(listener))
-            .http1_keepalive(http1_keepalive)
-            .http1_preserve_header_case(true)
-            .http2_keep_alive_interval(http2_keep_alive)
-            .serve(hyper::make_service_fn(service_fn))
-            .with_graceful_shutdown(shutdown.clone())
-            .map_err(|e| Error::new(ErrorKind::Runtime(Box::new(e))));
-
         // Start a task that listens for external signals and notifies shutdown.
         if let Some(mut stream) = sig_stream {
             let shutdown = shutdown.clone();
@@ -679,6 +670,44 @@ impl Rocket<Orbit> {
             });
         }
 
+        // Create the Hyper `Service`.
+        let rocket = Arc::new(self);
+        // ~ rocket.broker(), but avoids clone
+        rocket.0.broker.with_rocket(Arc::downgrade(&rocket));
+        // Spawn periodic cleanup task
+        let rocket_handle = Arc::clone(&rocket);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                rocket_handle.cleanup_tokens().await;
+            }
+        });
+
+        let service_fn = move |conn: &CancellableIo<_, L::Connection>| {
+            let rocket = rocket.clone();
+            let connection = ConnectionMeta {
+                remote: conn.peer_address(),
+                client_certificates: conn.peer_certificates().map(Arc::new),
+            };
+
+            async move {
+                Ok::<_, std::convert::Infallible>(hyper::service::service_fn(move |req| {
+                    hyper_service_fn(rocket.clone(), connection.clone(), req)
+                }))
+            }
+        };
+
+
+        // NOTE: `hyper` uses `tokio::spawn()` as the default executor.
+        let listener = CancellableListener::new(shutdown.clone(), listener, grace, mercy);
+        let server = hyper::Server::builder(Incoming::new(listener))
+            .http1_keepalive(http1_keepalive)
+            .http1_preserve_header_case(true)
+            .http2_keep_alive_interval(http2_keep_alive)
+            .serve(hyper::service::make_service_fn(service_fn))
+            .with_graceful_shutdown(shutdown.clone())
+            .map_err(|e| Error::new(ErrorKind::Runtime(Box::new(e))));
+
         // Wait for a shutdown notification or for the server to somehow fail.
         tokio::pin!(server);
         match future::select(shutdown, server).await {
@@ -687,20 +716,15 @@ impl Rocket<Orbit> {
                 // runtime will block indefinitely when it is dropped. To
                 // subvert, we start a ticking process-exit time bomb here.
                 if force_shutdown {
-                    use std::thread;
-
                     // Only a worker thread will have the specified thread name.
                     tokio::task::spawn_blocking(move || {
-                        let this = thread::current();
-                        let is_rocket_runtime = this.name()
-                            .map_or(false, |s| s.starts_with("rocket-worker"));
-
                         // We only hit our `exit()` if the process doesn't
                         // otherwise exit since this `spawn()` won't block.
-                        thread::spawn(move || {
-                            thread::sleep(Duration::from_secs(grace + mercy));
-                            thread::sleep(Duration::from_millis(500));
-                            if is_rocket_runtime {
+                        let this = std::thread::current();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_secs(grace + mercy));
+                            std::thread::sleep(Duration::from_millis(500));
+                            if this.name().map_or(false, |s| s.starts_with("rocket-worker")) {
                                 error!("Server failed to shutdown cooperatively. Terminating.");
                                 std::process::exit(1);
                             } else {

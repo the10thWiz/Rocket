@@ -1,5 +1,8 @@
+use std::collections::{BTreeMap, HashMap};
 use std::{fmt, path};
 use std::borrow::Cow;
+
+use time::{macros::format_description, format_description::FormatItem};
 
 use crate::RawStr;
 use crate::uri::fmt::{Part, Path, Query, Formatter};
@@ -323,7 +326,7 @@ impl UriDisplay<Path> for path::Path {
 }
 
 macro_rules! impl_with_display {
-    ($($T:ty),+) => {$(
+    ($($T:ty),+ $(,)?) => {$(
         /// This implementation is identical to the `Display` implementation.
         impl<P: Part> UriDisplay<P> for $T  {
             #[inline(always)]
@@ -336,16 +339,55 @@ macro_rules! impl_with_display {
 }
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::num::{
+    NonZeroIsize, NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128,
+    NonZeroUsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128,
+};
 
+// Keep in-sync with the 'FromUriParam' impls.
 impl_with_display! {
     i8, i16, i32, i64, i128, isize,
     u8, u16, u32, u64, u128, usize,
     f32, f64, bool,
-    IpAddr, Ipv4Addr, Ipv6Addr
+    IpAddr, Ipv4Addr, Ipv6Addr,
+    NonZeroIsize, NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128,
+    NonZeroUsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128,
+}
+
+macro_rules! impl_with_string {
+    ($($T:ty => $f:expr),+ $(,)?) => {$(
+        /// This implementation is identical to a percent-encoded version of the
+        /// `Display` implementation.
+        impl<P: Part> UriDisplay<P> for $T  {
+            #[inline(always)]
+            fn fmt(&self, f: &mut Formatter<'_, P>) -> fmt::Result {
+                let func: fn(&$T) -> Result<String, fmt::Error> = $f;
+                func(self).and_then(|s| s.as_str().fmt(f))
+            }
+        }
+    )+}
+}
+
+use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+
+// Keep formats in sync with 'FromFormField' impls.
+static DATE_FMT: &[FormatItem<'_>] = format_description!("[year padding:none]-[month]-[day]");
+static TIME_FMT: &[FormatItem<'_>] = format_description!("[hour padding:none]:[minute]:[second]");
+static DATE_TIME_FMT: &[FormatItem<'_>] =
+    format_description!("[year padding:none]-[month]-[day]T[hour padding:none]:[minute]:[second]");
+
+// Keep list in sync with the 'FromUriParam' impls.
+impl_with_string! {
+    time::Date => |d| d.format(&DATE_FMT).map_err(|_| fmt::Error),
+    time::Time => |d| d.format(&TIME_FMT).map_err(|_| fmt::Error),
+    time::PrimitiveDateTime => |d| d.format(&DATE_TIME_FMT).map_err(|_| fmt::Error),
+    SocketAddr => |a| Ok(a.to_string()),
+    SocketAddrV4 => |a| Ok(a.to_string()),
+    SocketAddrV6 => |a| Ok(a.to_string()),
 }
 
 // These are second level implementations: they all defer to an existing
-// implementation.
+// implementation. Keep in-sync with `FromUriParam` impls.
 
 /// Percent-encodes the raw string. Defers to `str`.
 impl<P: Part> UriDisplay<P> for String {
@@ -406,6 +448,52 @@ impl<T: UriDisplay<Query>, E> UriDisplay<Query> for Result<T, E> {
             Ok(v) => v.fmt(f),
             Err(_) => Ok(())
         }
+    }
+}
+
+impl<T: UriDisplay<Query>> UriDisplay<Query> for Vec<T> {
+    fn fmt(&self, f: &mut Formatter<'_, Query>) -> fmt::Result {
+        for value in self {
+            f.write_value(value)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<K: UriDisplay<Query>, V: UriDisplay<Query>> UriDisplay<Query> for HashMap<K, V> {
+    fn fmt(&self, f: &mut Formatter<'_, Query>) -> fmt::Result {
+        use std::fmt::Write;
+
+        let mut field_name = String::with_capacity(8);
+        for (i, (key, value)) in self.iter().enumerate() {
+            field_name.truncate(0);
+            write!(field_name, "k:{}", i)?;
+            f.write_named_value(&field_name, key)?;
+
+            field_name.replace_range(..1, "v");
+            f.write_named_value(&field_name, value)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<K: UriDisplay<Query>, V: UriDisplay<Query>> UriDisplay<Query> for BTreeMap<K, V> {
+    fn fmt(&self, f: &mut Formatter<'_, Query>) -> fmt::Result {
+        use std::fmt::Write;
+
+        let mut field_name = String::with_capacity(8);
+        for (i, (key, value)) in self.iter().enumerate() {
+            field_name.truncate(0);
+            write!(field_name, "k:{}", i)?;
+            f.write_named_value(&field_name, key)?;
+
+            field_name.replace_range(..1, "v");
+            f.write_named_value(&field_name, value)?;
+        }
+
+        Ok(())
     }
 }
 

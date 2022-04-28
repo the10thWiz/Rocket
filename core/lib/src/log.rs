@@ -79,7 +79,7 @@ impl log::Log for RocketLogger {
         let max = log::max_level();
         let from = |path| record.module_path().map_or(false, |m| m.starts_with(path));
         let debug_only = from("hyper") || from("rustls") || from("r2d2");
-        if LogLevel::Debug.to_level_filter() > max && debug_only {
+        if log::LevelFilter::from(LogLevel::Debug) > max && debug_only {
             return;
         }
 
@@ -129,32 +129,43 @@ impl log::Log for RocketLogger {
     }
 }
 
-pub(crate) fn init_default() -> bool {
+pub(crate) fn init_default() {
     crate::log::init(&crate::Config::debug_default())
 }
 
-pub(crate) fn init(config: &crate::Config) -> bool {
-    static HAS_ROCKET_LOGGER: AtomicBool = AtomicBool::new(false);
+pub(crate) fn init(config: &crate::Config) {
+    static ROCKET_LOGGER_SET: AtomicBool = AtomicBool::new(false);
 
-    let r = log::set_boxed_logger(Box::new(RocketLogger));
-    if r.is_ok() {
-        HAS_ROCKET_LOGGER.store(true, Ordering::Release);
+    // Try to initialize Rocket's logger, recording if we succeeded.
+    if log::set_boxed_logger(Box::new(RocketLogger)).is_ok() {
+        ROCKET_LOGGER_SET.store(true, Ordering::Release);
     }
 
-    // If another has been set, don't touch anything.
-    if !HAS_ROCKET_LOGGER.load(Ordering::Acquire) {
-        return false;
-    }
-
-    if !atty::is(atty::Stream::Stdout)
-        || (cfg!(windows) && !Paint::enable_windows_ascii())
-        || !config.cli_colors
-    {
+    // Always disable colors if requested or if they won't work on Windows.
+    if !config.cli_colors || !Paint::enable_windows_ascii() {
         Paint::disable();
     }
 
-    log::set_max_level(config.log_level.to_level_filter());
-    true
+    // Set Rocket-logger specific settings only if Rocket's logger is set.
+    if ROCKET_LOGGER_SET.load(Ordering::Acquire) {
+        // Rocket logs to stdout, so disable coloring if it's not a TTY.
+        if !atty::is(atty::Stream::Stdout) {
+            Paint::disable();
+        }
+
+        log::set_max_level(config.log_level.into());
+    }
+}
+
+impl From<LogLevel> for log::LevelFilter {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Critical => log::LevelFilter::Warn,
+            LogLevel::Normal => log::LevelFilter::Info,
+            LogLevel::Debug => log::LevelFilter::Trace,
+            LogLevel::Off => log::LevelFilter::Off
+        }
+    }
 }
 
 impl LogLevel {
@@ -164,15 +175,6 @@ impl LogLevel {
             LogLevel::Normal => "normal",
             LogLevel::Debug => "debug",
             LogLevel::Off => "off",
-        }
-    }
-
-    fn to_level_filter(self) -> log::LevelFilter {
-        match self {
-            LogLevel::Critical => log::LevelFilter::Warn,
-            LogLevel::Normal => log::LevelFilter::Info,
-            LogLevel::Debug => log::LevelFilter::Trace,
-            LogLevel::Off => log::LevelFilter::Off
         }
     }
 }

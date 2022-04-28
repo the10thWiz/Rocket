@@ -21,6 +21,7 @@ all-features = true
 [features]
 default = []
 tls = ["rocket_http/tls"]
+mtls = ["rocket_http/mtls", "tls"]
 secrets = ["rocket_http/private-cookies"]
 json = ["serde_json", "tokio/io-util"]
 msgpack = ["rmp-serde", "tokio/io-util"]
@@ -33,11 +34,11 @@ rmp-serde = { version = "0.15.0", optional = true }
 uuid_ = { package = "uuid", version = "0.8", optional = true, features = ["serde"] }
 
 # Non-optional, core dependencies from here on out.
-futures = "0.3.0"
+futures = { version = "0.3.0", default-features = false, features = ["std"] }
 yansi = "0.5"
 log = { version = "0.4", features = ["std"] }
 num_cpus = "1.0"
-time = "0.2.11"
+time = { version = "0.3", features = ["macros", "parsing"] }
 memchr = "2" # TODO: Use pear instead.
 binascii = "0.1"
 atty = "0.2"
@@ -46,7 +47,7 @@ atomic = "0.5"
 parking_lot = "0.11"
 ubyte = {version = "0.10", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
-figment = { version = "0.10.4", features = ["toml", "env"] }
+figment = { version = "0.10.6", features = ["toml", "env"] }
 rand = "0.8"
 either = "1"
 pin-project-lite = "0.2"

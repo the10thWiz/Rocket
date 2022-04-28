@@ -54,7 +54,7 @@ pub struct StreamReader<'r> {
 /// The current state of `StreamReader` `AsyncRead` adapter.
 enum State {
     Pending,
-    Partial(Cursor<hyper::Bytes>),
+    Partial(Cursor<hyper::body::Bytes>),
     Done,
 }
 
@@ -266,7 +266,7 @@ impl AsyncRead for DataStream<'_> {
 }
 
 impl Stream for StreamKind<'_> {
-    type Item = io::Result<hyper::Bytes>;
+    type Item = io::Result<hyper::body::Bytes>;
 
     fn poll_next(
         self: Pin<&mut Self>,

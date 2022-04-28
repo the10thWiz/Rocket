@@ -73,6 +73,16 @@ function indir() {
 }
 
 function test_contrib() {
+  DB_POOLS_FEATURES=(
+    deadpool_postgres
+    deadpool_redis
+    sqlx_mysql
+    sqlx_postgres
+    sqlx_sqlite
+    sqlx_mssql
+    mongodb
+  )
+
   SYNC_DB_POOLS_FEATURES=(
     diesel_postgres_pool
     diesel_sqlite_pool
@@ -86,6 +96,11 @@ function test_contrib() {
     tera
     handlebars
   )
+
+  for feature in "${DB_POOLS_FEATURES[@]}"; do
+    echo ":: Building and testing db_pools [$feature]..."
+    $CARGO test -p rocket_db_pools --no-default-features --features $feature $@
+  done
 
   for feature in "${SYNC_DB_POOLS_FEATURES[@]}"; do
     echo ":: Building and testing sync_db_pools [$feature]..."
@@ -102,17 +117,20 @@ function test_core() {
   FEATURES=(
     secrets
     tls
+    mtls
     json
     msgpack
     uuid
   )
 
-  echo ":: Building and testing core [no features]..."
-  indir "${CORE_LIB_ROOT}" $CARGO test --no-default-features $@
+  echo ":: Building and checking core [no features]..."
+  RUSTDOCFLAGS="-Zunstable-options --no-run" \
+    indir "${CORE_LIB_ROOT}" $CARGO test --no-default-features $@
 
   for feature in "${FEATURES[@]}"; do
-    echo ":: Building and testing core [${feature}]..."
-    indir "${CORE_LIB_ROOT}" $CARGO test --no-default-features --features "${feature}" $@
+    echo ":: Building and checking core [${feature}]..."
+    RUSTDOCFLAGS="-Zunstable-options --no-run" \
+      indir "${CORE_LIB_ROOT}" $CARGO test --no-default-features --features "${feature}" $@
   done
 }
 
@@ -169,6 +187,9 @@ echo ":: Ensuring core crate versions match..."
 check_versions_match "${CORE_CRATE_ROOTS[@]}"
 
 echo ":: Ensuring contrib sync_db_pools versions match..."
+check_versions_match "${CONTRIB_SYNC_DB_POOLS_CRATE_ROOTS[@]}"
+
+echo ":: Ensuring contrib db_pools versions match..."
 check_versions_match "${CONTRIB_SYNC_DB_POOLS_CRATE_ROOTS[@]}"
 
 echo ":: Ensuring minimum style requirements are met..."

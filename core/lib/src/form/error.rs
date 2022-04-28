@@ -161,6 +161,7 @@ pub struct Error<'v> {
 ///   * [`io::Error`] => [`ErrorKind::Io`]
 ///   * `Box<dyn std::error::Error + Send` => [`ErrorKind::Custom`]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ErrorKind<'v> {
     /// The value's length, in bytes, was outside the range `[min, max]`.
     InvalidLength {
@@ -380,7 +381,7 @@ impl crate::http::ext::IntoOwned for Errors<'_> {
 
 impl fmt::Display for Errors<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} errors:", self.len())?;
+        write!(f, "{} error(s):", self.len())?;
         for error in self.iter() {
             write!(f, "\n{}", error)?;
         }
@@ -820,9 +821,9 @@ impl fmt::Display for ErrorKind<'_> {
                 }
             }
             ErrorKind::InvalidChoice { choices } => {
-                match choices.as_ref() {
-                    &[] => write!(f, "invalid choice")?,
-                    &[ref choice] => write!(f, "expected {}", choice)?,
+                match *choices.as_ref() {
+                    [] => write!(f, "invalid choice")?,
+                    [ref choice] => write!(f, "expected {}", choice)?,
                     _ => {
                         write!(f, "expected one of ")?;
                         for (i, choice) in choices.iter().enumerate() {

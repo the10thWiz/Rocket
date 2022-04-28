@@ -8,15 +8,16 @@ use state::{Container, Storage};
 use futures::future::BoxFuture;
 use atomic::{Atomic, Ordering};
 
-// use crate::request::{FromParam, FromSegments, FromRequest, Outcome};
+use crate::{Rocket, Route, Orbit};
 use crate::request::{FromParam, FromSegments, FromRequest, Outcome};
 use crate::form::{self, ValueField, FromForm};
-
-use crate::{Rocket, Route, Orbit};
-use crate::http::{hyper, uri::{Origin, Segments, fmt::Path}, uncased::UncasedStr};
-use crate::http::{Method, Header, HeaderMap};
-use crate::http::{ContentType, Accept, MediaType, CookieJar, Cookie};
 use crate::data::Limits;
+
+use crate::http::{hyper, Method, Header, HeaderMap};
+use crate::http::{ContentType, Accept, MediaType, CookieJar, Cookie};
+use crate::http::uncased::UncasedStr;
+use crate::http::private::RawCertificate;
+use crate::http::uri::{fmt::Path, Origin, Segments, Host, Authority};
 
 /// The type of an incoming web request.
 ///
@@ -28,10 +29,18 @@ pub struct Request<'r> {
     method: Atomic<Method>,
     uri: Origin<'r>,
     headers: HeaderMap<'r>,
-    remote: Option<SocketAddr>,
+    pub(crate) connection: ConnectionMeta,
     pub(crate) state: RequestState<'r>,
 }
 
+/// Information derived from an incoming connection, if any.
+#[derive(Clone)]
+pub(crate) struct ConnectionMeta {
+    pub remote: Option<SocketAddr>,
+    pub client_certificates: Option<Arc<Vec<RawCertificate>>>,
+}
+
+/// Information derived from the request.
 pub(crate) struct RequestState<'r> {
     pub rocket: &'r Rocket<Orbit>,
     pub route: Atomic<Option<&'r Route>>,
@@ -39,6 +48,7 @@ pub(crate) struct RequestState<'r> {
     pub accept: Storage<Option<Accept>>,
     pub content_type: Storage<Option<ContentType>>,
     pub cache: Arc<Container![Send + Sync]>,
+    pub host: Option<Host<'r>>,
 }
 
 impl Request<'_> {
@@ -47,7 +57,7 @@ impl Request<'_> {
             method: Atomic::new(self.method()),
             uri: self.uri.clone(),
             headers: self.headers.clone(),
-            remote: self.remote.clone(),
+            connection: self.connection.clone(),
             state: self.state.clone(),
         }
     }
@@ -62,6 +72,7 @@ impl RequestState<'_> {
             accept: self.accept.clone(),
             content_type: self.content_type.clone(),
             cache: self.cache.clone(),
+            host: self.host.clone(),
         }
     }
 }
@@ -78,7 +89,10 @@ impl<'r> Request<'r> {
             uri,
             method: Atomic::new(method),
             headers: HeaderMap::new(),
-            remote: None,
+            connection: ConnectionMeta {
+                remote: None,
+                client_certificates: None,
+            },
             state: RequestState {
                 rocket,
                 route: Atomic::new(None),
@@ -86,6 +100,7 @@ impl<'r> Request<'r> {
                 accept: Storage::new(),
                 content_type: Storage::new(),
                 cache: Arc::new(<Container![Send + Sync]>::new()),
+                host: None,
             }
         }
     }
@@ -168,6 +183,123 @@ impl<'r> Request<'r> {
         self.uri = uri;
     }
 
+    /// Returns the [`Host`] identified in the request, if any.
+    ///
+    /// If the request is made via HTTP/1.1 (or earlier), this method returns
+    /// the value in the `HOST` header without the deprecated `user_info`
+    /// component. Otherwise, this method returns the contents of the
+    /// `:authority` pseudo-header request field.
+    ///
+    /// Note that this method _only_ reflects the `HOST` header in the _initial_
+    /// request and not any changes made thereafter. To change the value
+    /// returned by this method, use [`Request::set_host()`].
+    ///
+    /// # ⚠️ DANGER ⚠️
+    ///
+    /// Using the user-controlled `host` to construct URLs is a security hazard!
+    /// _Never_ do so without first validating the host against a whitelist. For
+    /// this reason, Rocket disallows constructing host-prefixed URIs with
+    /// [`uri!`]. _Always_ use [`uri!`] to construct URIs.
+    ///
+    /// [`uri!`]: crate::uri!
+    ///
+    /// # Example
+    ///
+    /// Retrieve the raw host, unusable to construct safe URIs:
+    ///
+    /// ```rust
+    /// use rocket::http::uri::Host;
+    /// # use rocket::uri;
+    /// # let c = rocket::local::blocking::Client::debug_with(vec![]).unwrap();
+    /// # let mut req = c.get("/");
+    /// # let request = req.inner_mut();
+    ///
+    /// assert_eq!(request.host(), None);
+    ///
+    /// request.set_host(Host::from(uri!("rocket.rs")));
+    /// let host = request.host().unwrap();
+    /// assert_eq!(host.domain(), "rocket.rs");
+    /// assert_eq!(host.port(), None);
+    ///
+    /// request.set_host(Host::from(uri!("rocket.rs:2392")));
+    /// let host = request.host().unwrap();
+    /// assert_eq!(host.domain(), "rocket.rs");
+    /// assert_eq!(host.port(), Some(2392));
+    /// ```
+    ///
+    /// Retrieve the raw host, check it against a whitelist, and construct a
+    /// URI:
+    ///
+    /// ```rust
+    /// # #[macro_use] extern crate rocket;
+    /// # type Token = String;
+    /// # let c = rocket::local::blocking::Client::debug_with(vec![]).unwrap();
+    /// # let mut req = c.get("/");
+    /// # let request = req.inner_mut();
+    /// use rocket::http::uri::Host;
+    ///
+    /// // A sensitive URI we want to prefix with safe hosts.
+    /// #[get("/token?<secret>")]
+    /// fn token(secret: Token) { /* .. */ }
+    ///
+    /// // Whitelist of known hosts. In a real setting, you might retrieve this
+    /// // list from config at ignite-time using tools like `AdHoc::config()`.
+    /// const WHITELIST: [Host<'static>; 3] = [
+    ///     Host::new(uri!("rocket.rs")),
+    ///     Host::new(uri!("rocket.rs:443")),
+    ///     Host::new(uri!("guide.rocket.rs:443")),
+    /// ];
+    ///
+    /// // A request with a host of "rocket.rs". Note the case-insensitivity.
+    /// request.set_host(Host::from(uri!("ROCKET.rs")));
+    /// let prefix = request.host().and_then(|h| h.to_absolute("https", &WHITELIST));
+    ///
+    /// // `rocket.rs` is in the whitelist, so we'll get back a `Some`.
+    /// assert!(prefix.is_some());
+    /// if let Some(prefix) = prefix {
+    ///     // We can use this prefix to safely construct URIs.
+    ///     let uri = uri!(prefix, token("some-secret-token"));
+    ///     assert_eq!(uri, "https://ROCKET.rs/token?secret=some-secret-token");
+    /// }
+    ///
+    /// // A request with a host of "attacker-controlled.com".
+    /// request.set_host(Host::from(uri!("attacker-controlled.com")));
+    /// let prefix = request.host().and_then(|h| h.to_absolute("https", &WHITELIST));
+    ///
+    /// // `attacker-controlled.come` is _not_ on the whitelist.
+    /// assert!(prefix.is_none());
+    /// assert!(request.host().is_some());
+    /// ```
+    #[inline(always)]
+    pub fn host(&self) -> Option<&Host<'r>> {
+        self.state.host.as_ref()
+    }
+
+    /// Sets the host of `self` to `host`.
+    ///
+    /// # Example
+    ///
+    /// Set the host to `rocket.rs:443`.
+    ///
+    /// ```rust
+    /// use rocket::http::uri::Host;
+    /// # use rocket::uri;
+    /// # let c = rocket::local::blocking::Client::debug_with(vec![]).unwrap();
+    /// # let mut req = c.get("/");
+    /// # let request = req.inner_mut();
+    ///
+    /// assert_eq!(request.host(), None);
+    ///
+    /// request.set_host(Host::from(uri!("rocket.rs:443")));
+    /// let host = request.host().unwrap();
+    /// assert_eq!(host.domain(), "rocket.rs");
+    /// assert_eq!(host.port(), Some(443));
+    /// ```
+    #[inline(always)]
+    pub fn set_host(&mut self, host: Host<'r>) {
+        self.state.host = Some(host);
+    }
+
     /// Returns the raw address of the remote connection that initiated this
     /// request if the address is known. If the address is not known, `None` is
     /// returned.
@@ -197,7 +329,7 @@ impl<'r> Request<'r> {
     /// ```
     #[inline(always)]
     pub fn remote(&self) -> Option<SocketAddr> {
-        self.remote
+        self.connection.remote
     }
 
     /// Sets the remote address of `self` to `address`.
@@ -220,7 +352,7 @@ impl<'r> Request<'r> {
     /// ```
     #[inline(always)]
     pub fn set_remote(&mut self, address: SocketAddr) {
-        self.remote = Some(address);
+        self.connection.remote = Some(address);
     }
 
     /// Returns the IP address in the "X-Real-IP" header of the request if such
@@ -832,23 +964,33 @@ impl<'r> Request<'r> {
     /// Convert from Hyper types into a Rocket Request.
     pub(crate) fn from_hyp(
         rocket: &'r Rocket<Orbit>,
-        hyper: &'r hyper::RequestParts,
-        addr: SocketAddr
+        hyper: &'r hyper::request::Parts,
+        connection: Option<ConnectionMeta>,
     ) -> Result<Request<'r>, Error<'r>> {
         // Ensure that the method is known. TODO: Allow made-up methods?
         let method = Method::from_hyp(&hyper.method)
-            .ok_or_else(|| Error::BadMethod(&hyper.method))?;
+            .ok_or(Error::BadMethod(&hyper.method))?;
 
         // In debug, make sure we agree with Hyper. Otherwise, cross our fingers
         // and trust that it only gives us valid URIs like it's supposed to.
         // TODO: Keep around not just the path/query, but the rest, if there?
-        let uri = hyper.uri.path_and_query().ok_or_else(|| Error::InvalidUri(&hyper.uri))?;
+        let uri = hyper.uri.path_and_query().ok_or(Error::InvalidUri(&hyper.uri))?;
         debug_assert!(Origin::parse(uri.as_str()).is_ok());
         let uri = Origin::new(uri.path(), uri.query().map(Cow::Borrowed));
 
         // Construct the request object.
         let mut request = Request::new(rocket, method, uri);
-        request.set_remote(addr);
+        if let Some(connection) = connection {
+            request.connection = connection;
+        }
+
+        // Determine the host. On HTTP < 2, use the `HOST` header. Otherwise,
+        // use the `:authority` pseudo-header which hyper makes part of the URI.
+        request.state.host = if hyper.version < hyper::Version::HTTP_2 {
+            hyper.headers.get("host").and_then(|h| Host::parse_bytes(h.as_bytes()).ok())
+        } else {
+            hyper.uri.host().map(|h| Host::new(Authority::new(None, h, hyper.uri.port_u16())))
+        };
 
         // Set the request cookies, if they exist.
         for header in hyper.headers.get_all("Cookie") {

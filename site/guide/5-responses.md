@@ -50,7 +50,7 @@ fn new(id: usize) -> status::Accepted<String> {
 Similarly, the types in the [`content` module](@api/rocket/response/content/)
 can be used to override the Content-Type of a response. For instance, to set the
 Content-Type of `&'static str` to JSON, as well as setting the status code to an
-arbitrary one like `418 I'm a teapot`, combine [`content::Json`] with
+arbitrary one like `418 I'm a teapot`, combine [`content::RawJson`] with
 [`status::Custom`]:
 
 ```rust
@@ -59,16 +59,16 @@ use rocket::http::Status;
 use rocket::response::{content, status};
 
 #[get("/")]
-fn json() -> status::Custom<content::Json<&'static str>> {
-    status::Custom(Status::ImATeapot, content::Json("{ \"hi\": \"world\" }"))
+fn json() -> status::Custom<content::RawJson<&'static str>> {
+    status::Custom(Status::ImATeapot, content::RawJson("{ \"hi\": \"world\" }"))
 }
 ```
 
 ! warning: This is _not_ the same as [`serde::json::Json`]!
 
 The built-in `(Status, R)` and `(ContentType, R)` responders, where `R:
-Responder`, are short-hands for the `status::Custom` and `content::Custom`
-responders:
+Responder`, also override the `Status` and `Content-Type` of responses,
+respectively:
 
 ```rust
 # #[macro_use] extern crate rocket;
@@ -352,14 +352,14 @@ returns an infinite [`TextStream`] that produces one `"hello"` every second:
 
 ```rust
 # use rocket::get;
-use rocket::tokio::time::{self, Duration};
+use rocket::tokio::time::{Duration, interval};
 use rocket::response::stream::TextStream;
 
 /// Produce an infinite series of `"hello"`s, one per second.
 #[get("/infinite-hellos")]
 fn hello() -> TextStream![&'static str] {
     TextStream! {
-        let mut interval = time::interval(Duration::from_secs(1));
+        let mut interval = interval(Duration::from_secs(1));
         loop {
             yield "hello";
             interval.tick().await;
@@ -441,6 +441,24 @@ a template and a context to render the template with. The context can be any
 type that implements `Serialize` and serializes into an `Object` value, such as
 structs, `HashMaps`, and others.
 
+You can also use [`context!`] to create ad-hoc templating contexts without
+defining a new type:
+
+```rust
+# #[macro_use] extern crate rocket;
+# #[macro_use] extern crate rocket_dyn_templates;
+# fn main() {}
+
+use rocket_dyn_templates::Template;
+
+#[get("/")]
+fn index() -> Template {
+    Template::render("index", context! {
+        foo: 123,
+    })
+}
+```
+
 For a template to be renderable, it must first be registered. The `Template`
 fairing automatically registers all discoverable templates when attached. The
 [Fairings](../fairings) sections of the guide provides more information on
@@ -471,6 +489,8 @@ used.
   For a template file named `index.html.tera`, call `render("index")` and use
   the name `"index"` in templates, i.e, `{% extends "index" %}` or `{% extends
   "base" %}` for `base.html.tera`.
+
+[`context`]: @api/rocket_dyn_templates/macro.context.html
 
 ### Live Reloading
 
@@ -649,8 +669,8 @@ generated.
 ```rust
 # #[macro_use] extern crate rocket;
 
-# #[get("/<id>/<name>?<age>")]
-# fn person(id: Option<usize>, name: &str, age: Option<u8>) { /* .. */ }
+#[get("/<id>/<name>?<age>")]
+fn person(id: Option<usize>, name: &str, age: Option<u8>) { /* .. */ }
 
 /// Note that `id` is `Option<usize>` in the route, but `id` in `uri!` _cannot_
 /// be an `Option`. `age`, on the other hand, _must_ be an `Option` (or `Result`
