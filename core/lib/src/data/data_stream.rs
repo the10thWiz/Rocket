@@ -63,7 +63,7 @@ enum StreamKind<'r> {
     Empty,
     Body(&'r mut hyper::Body),
     Multipart(multer::Field<'r>),
-    WebSocket(mpsc::Receiver<hyper::Bytes>),
+    WebSocket(mpsc::Receiver<hyper::body::Bytes>),
 }
 
 impl<'r> DataStream<'r> {
@@ -80,8 +80,8 @@ impl<'r> DataStream<'r> {
             let mut buf = [0u8; 1];
             Ok(stream.read(&mut buf).await? != 0)
         }
-
-        Ok(self.chain.limit() == 0 && _limit_exceeded(self).await?)
+        let tmp = self.chain.limit() == 0;
+        Ok(tmp && _limit_exceeded(self).await?)
     }
 
     /// Number of bytes a full read from `self` will _definitely_ read.
