@@ -15,6 +15,7 @@ pub use self::from_param::{FromParam, FromSegments};
 pub use crate::response::flash::FlashMessage;
 
 pub(crate) use self::request::ConnectionMeta;
+pub(crate) use self::request::RequestState;
 
 crate::export! {
     /// Store and immediately retrieve a value `$v` in `$request`'s local cache

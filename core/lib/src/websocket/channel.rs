@@ -615,8 +615,8 @@ mod validation {
 // At a more fundamental level, this is undesirable, since it exposes the internal Request
 // object inside the handler. Request doesn't implement `FromRequest` for this exact reason.
 pub struct Channel<'r> {
-    request: Request<'r>,
-    sender: mpsc::Sender<WebSocketMessage>,
+    pub(crate) request: Request<'r>,
+    pub(crate) sender: mpsc::Sender<WebSocketMessage>,
 }
 
 impl<'r> Channel<'r> {

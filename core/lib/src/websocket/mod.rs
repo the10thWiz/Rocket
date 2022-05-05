@@ -348,6 +348,7 @@ pub(crate) mod status;
 
 pub mod broker;
 pub mod token;
+pub mod request;
 
 pub use channel::Channel;
 pub use status::WebSocketStatus;
@@ -476,8 +477,8 @@ pub(crate) enum Protocol {
 }
 
 impl Protocol {
-    pub fn new(_req: &Request<'_>) -> Self {
-        _req.headers()
+    pub fn new(req: &Request<'_>) -> Self {
+        req.headers()
             .get("Sec-WebSocket-Protocol")
             .flat_map(|s| s.split(','))
             .find_map(|s| match s.trim() {
@@ -637,6 +638,23 @@ pub mod rocket_multiplex {
     //!
     //! There is also no builtin mechanism for message persistance, this should be implemented
     //! seperatly. This can take the form of a HTTP route to get previous messages.
+    //!
+    //! # Alternatives
+    //!
+    //! There are a few options for alternatives to the protocol described above. For example, we
+    //! could provide a similar functionality, with some restrictions, by requiring the rust
+    //! handler to subscribe the client to the topics they desire. The client would then be
+    //! un-aware of the multiplexing, and therefore unable to tell which topic a message was sent
+    //! on. In many situtations, this is an acceptable alternative, since not all clients require
+    //! the ability to identify indivitual channels, and the user could choose to add a topic
+    //! marker to each message if the client does need to know.
+    //!
+    //! This also makes implementing access control more obvious to implement, but may have the
+    //! drawback that access control is therefore easier to get wrong.
+    //!
+    //! I think it may also be acceptable to release websocket support without a multiplexing
+    //! protocol at all. Once we choose, I don't think should can go back, so I want to get this
+    //! right.
 
     use std::{str::Utf8Error, string::FromUtf8Error, sync::Arc};
 

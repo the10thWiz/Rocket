@@ -17,7 +17,7 @@ use tokio::{io::AsyncReadExt, sync::{OnceCell, mpsc}};
 
 use crate::{Request, Rocket, request::{FromRequest, Outcome}, response::Responder, Orbit};
 
-use super::{Protocol, channel::WebSocketChannel, message::{MAX_BUFFER_SIZE, WebSocketMessage, to_message}};
+use super::{Protocol, channel::WebSocketChannel, message::{MAX_BUFFER_SIZE, WebSocketMessage}};
 
 /// Internal enum for sharing messages between clients
 enum BrokerMessage {
@@ -52,9 +52,12 @@ pub struct Broker {
     channels: mpsc::UnboundedSender<BrokerMessage>,
 }
 
+/// Potential errors arrising from sending a message on the broker.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum BrokerError {
+    /// Rocket is not yet running
     RocketNotRunning,
+    /// The responder failed to produce a message
     ResponderFailed,
 }
 
@@ -93,7 +96,7 @@ impl Broker {
             .ok_or(BrokerError::RocketNotRunning)?;
         // This works, but it's not ideal. However, we cannot send message as a dyn Responder<'r,
         // 'o>, since the type isn't 'static. However, it may be possible to find a better way to
-        // handle this, potentially using a 
+        // handle this, potentially using a
         let request = Request::new(
             rocket.as_ref(),
             Method::Get,

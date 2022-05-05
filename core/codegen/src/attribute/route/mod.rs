@@ -219,9 +219,8 @@ fn data_guard_decl(guard: &Guard, websocket: &WebSocketEvent) -> TokenStream {
     quote_spanned! { ty.span() =>
         #data
         let mut #__data = #__data;
-        println!("in handler: {}", String::from_utf8_lossy(#__data.peek(100).await));
         let #ident: #ty = match <#ty as #FromData>::#method(#__req, #__data).await {
-            #Outcome::Success(__d) => dbg!(__d),
+            #Outcome::Success(__d) => __d,
             #Outcome::Forward(__d) => {
                 #_log::warn_!("Data guard `{}` is forwarding.", stringify!(#ty));
                 return #Outcome::Forward(__d.into());

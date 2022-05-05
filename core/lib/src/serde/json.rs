@@ -24,7 +24,6 @@
 //! [`json()`]: crate::local::blocking::LocalRequest::json()
 //! [`into_json()`]: crate::local::blocking::LocalResponse::into_json()
 
-use std::sync::Mutex;
 use std::{io, fmt, error};
 use std::ops::{Deref, DerefMut};
 
@@ -190,23 +189,8 @@ impl<'r, T: Deserialize<'r>> Json<T> {
             Err(e) => return Err(Error::Io(e)),
         };
 
-        struct StringBacking(Mutex<String>);
-        // Safety: This String backing type is used to hold the actual string that str_ref points
-        // to.
-        // In an HTTP route, the backing will only be deallocated after the request has
-        // completed, and str_ref is tied to the request's lifetime.
-        // In a Websocket routes, the backing string WILL be deallocated before the request has
-        // completed, specifically when the next message is parsed. However, (I believe) the exposed
-        // lifetime actually prevents the data from being held between messages.
-        let str_ref = unsafe { &*(string.as_str() as *const str) };
-        let backing = req.local_cache(|| StringBacking(Mutex::new(String::new())));
-        {
-            let mut lock = backing.0.lock().unwrap();
-            *lock = string;
-        }
-
         // TODO This is an issue for websockets
-        Self::from_str(str_ref)
+        Self::from_str(local_cache!(req, string))
     }
 }
 

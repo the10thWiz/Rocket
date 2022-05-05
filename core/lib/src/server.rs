@@ -16,6 +16,7 @@ use crate::outcome::Outcome;
 use crate::request::ConnectionMeta;
 use crate::websocket::channel;
 use crate::websocket::channel::WebSocketChannel;
+use crate::websocket::request::WsRequest;
 use crate::websocket::status::StatusError;
 use crate::websocket::status::WebSocketStatus;
 use crate::websocket::WebSocketEvent;
@@ -104,13 +105,14 @@ async fn hyper_service_fn(
                 // Dispatch the request to get a response, then write that response out.
                 let token = rocket.preprocess_request(&mut req, &mut data).await;
                 if let Some((accept, upgrade)) = upgrade {
+                    let ws_req = WsRequest::new(&req);
                     // req.clone() is nessecary since the request is borrowed to hande the response. This
                     // copy can (and will) outlive the actual request, but will not outlive the websocket
                     // connection.
-                    let req_copy = req.clone();
+                    //let req_copy = req.clone();
                     let (r, ext) = rocket.dispatch_ws(token, &mut req, data, accept).await;
                     rocket.send_response(r, tx).await;
-                    rocket.ws_event_loop(req_copy, upgrade, ext).await;
+                    rocket.ws_event_loop(ws_req, upgrade, ext).await;
                 } else {
                     let response = rocket.dispatch(token, &mut req, data).await;
                     rocket.send_response(response, tx).await;
@@ -481,40 +483,42 @@ impl Rocket<Orbit> {
 
     async fn ws_event_loop<'r>(
         &'r self,
-        req: Request<'r>,
+        mut req: WsRequest<'r>,
         upgrade: OnUpgrade,
         extensions: Extensions,
     ) {
         if let Ok(upgrade) = upgrade.await {
             let (ch, a, b) = WebSocketChannel::new(upgrade, extensions);
-            let req = Channel::new(req, ch.subscribe_handle());
+            req.set_handle(ch.subscribe_handle());
             let event_loop = async move {
                 // Explicit moves
                 let mut ch = ch;
                 let mut close_status = Err(StatusError::NoStatus);
                 let broker = self.broker();
+                let chan = req.ephemeral_channel();
                 match self
-                    .route_event(&req, WebSocketEvent::Join, WebSocketData::Join)
+                    .route_event(&chan, WebSocketEvent::Join, WebSocketData::Join)
                     .await
                 {
                     Outcome::Success(()) => {
-                        broker.subscribe(req.topic(), &ch).await;
+                        broker.subscribe(chan.topic(), &ch).await;
                     }
                     Outcome::Failure(_r) => (),
                     // On forward (e.g. none match), we retry against the message handlers. This
                     // runs everything up to the data guard.
                     Outcome::Forward(_) => match self
-                        .route_event(&req, WebSocketEvent::Message, WebSocketData::Join)
+                        .route_event(&chan, WebSocketEvent::Message, WebSocketData::Join)
                         .await
                     {
                         Outcome::Success(()) => {
-                            broker.subscribe(req.topic(), &ch).await;
+                            broker.subscribe(chan.topic(), &ch).await;
                         }
                         _ => (),
                     },
                 }
+                req.complete_channel(chan);
                 while let Some(message) = ch.next().await {
-                    let mut data = match message.opcode() {
+                    let data = match message.opcode() {
                         websocket_codec::Opcode::Text => Data::from_ws(message, Some(false)),
                         websocket_codec::Opcode::Binary => Data::from_ws(message, Some(true)),
                         websocket_codec::Opcode::Close => {
@@ -531,8 +535,9 @@ impl Rocket<Orbit> {
                         ),
                     };
                     //req.set_topic(Origin::parse("/echo/we").unwrap());
+                    let chan = req.ephemeral_channel();
                     match self
-                        .route_event(&req, WebSocketEvent::Message, WebSocketData::Message(data))
+                        .route_event(&chan, WebSocketEvent::Message, WebSocketData::Message(data))
                         .await
                     {
                         Outcome::Forward(_data) => {
@@ -545,14 +550,16 @@ impl Rocket<Orbit> {
                         }
                         Outcome::Success(()) => (),
                     }
+                    req.complete_channel(chan);
                 }
                 broker.unsubscribe_all(&ch).await;
                 info_!("Websocket closed with status: {:?}", close_status);
                 let default_response = WebSocketStatus::default_response(&close_status);
                 // TODO provide close message
+                let chan = req.ephemeral_channel();
                 match self
                     .route_event(
-                        &req,
+                        &chan,
                         WebSocketEvent::Leave,
                         WebSocketData::Leave(close_status),
                     )
@@ -567,6 +574,7 @@ impl Rocket<Orbit> {
                 }
                 // Note: If a close has already been sent, the writer task will just drop this
                 ch.close(default_response).await;
+                req.complete_channel(chan); // TODO: likely unnessecary, since there are no more messages
             };
             // This will poll each future, on the same thread. This should actually be more
             // preformant than spawning tasks for each.
