@@ -628,7 +628,7 @@ impl<'r> Channel<'r> {
     ///
     /// This should only be used by the codegen and Rocket itself
     #[doc(hidden)]
-    pub(crate) fn request(&self) -> &Request<'r> {
+    pub fn request(&self) -> &Request<'r> {
         &self.request
     }
 

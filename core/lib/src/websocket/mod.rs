@@ -345,10 +345,10 @@ use websocket_codec::ClientRequest;
 pub(crate) mod channel;
 pub(crate) mod message;
 pub(crate) mod status;
+pub(crate) mod request;
 
 pub mod broker;
 pub mod token;
-pub mod request;
 
 pub use channel::Channel;
 pub use status::WebSocketStatus;

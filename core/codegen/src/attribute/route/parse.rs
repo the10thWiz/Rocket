@@ -1,16 +1,18 @@
-use devise::{Diagnostic, FromMeta, Result, SpanWrapped, Spanned};
+use std::net::IpAddr;
+
 use devise::ext::{SpanDiagnosticExt, TypeExt};
-use indexmap::{IndexSet, IndexMap};
-use proc_macro2::Span;
+use devise::{Diagnostic, FromMeta, MetaItem, Result, SpanWrapped, Spanned};
+use indexmap::{IndexMap, IndexSet};
+use proc_macro2::{Delimiter, Literal, Span, TokenStream, TokenTree};
 use quote::ToTokens;
 
-use crate::proc_macro_ext::Diagnostics;
-use crate::http_codegen::{MediaType, WebSocketEvent};
-use crate::attribute::param::{Parameter, Dynamic, Guard};
-use crate::syn_ext::FnArgExt;
-use crate::name::Name;
+use crate::attribute::param::{Dynamic, Guard, Parameter};
 use crate::http::ext::IntoOwned;
-use crate::http::uri::{Origin, fmt};
+use crate::http::uri::{fmt, Origin};
+use crate::http_codegen::{MediaType, WebSocketEvent};
+use crate::name::Name;
+use crate::proc_macro_ext::Diagnostics;
+use crate::syn_ext::FnArgExt;
 
 /// This structure represents the parsed `route` attribute and associated items.
 #[derive(Debug)]
@@ -36,7 +38,7 @@ type ArgumentMap = IndexMap<Name, (syn::Ident, syn::Type)>;
 #[derive(Debug)]
 pub struct Arguments {
     pub span: Span,
-    pub map: ArgumentMap
+    pub map: ArgumentMap,
 }
 
 /// Convience struct to represent an isize that cannot be `isize::max_value()`.
@@ -52,7 +54,7 @@ impl FromMeta for NonMax {
             Err(Diagnostic::spanned(
                 meta.span(),
                 devise::Level::Error,
-                "isize::max_value() is not a permitted value"
+                "isize::max_value() is not a permitted value",
             ))
         }
     }
@@ -73,6 +75,7 @@ pub struct Attribute {
     pub data: Option<SpanWrapped<Dynamic>>,
     pub format: Option<SpanWrapped<MediaType>>,
     pub rank: Option<NonMax>,
+    pub allowed_origins: Option<OriginPatterns>,
 }
 
 /// The parsed `#[method(..)]` (e.g, `get`, `put`, etc.) attribute.
@@ -83,6 +86,153 @@ pub struct MethodAttribute {
     pub data: Option<SpanWrapped<Dynamic>>,
     pub format: Option<SpanWrapped<MediaType>>,
     pub rank: Option<NonMax>,
+    pub allowed_origins: Option<OriginPatterns>,
+}
+
+#[derive(Debug)]
+pub struct OriginPatterns {
+    // TODO
+    pub patterns: Vec<OriginPattern>,
+    pub span: Span,
+}
+
+impl OriginPatterns {
+    fn from_tokens(tokens: &TokenStream) -> Result<Self> {
+        let mut iter = tokens.clone().into_iter();
+        match iter.next() {
+            None => todo!("No tokens provided"),
+            Some(TokenTree::Literal(lit)) => Ok(Self {
+                span: lit.span(),
+                patterns: vec![OriginPattern::from_literal(lit)?],
+            }),
+            Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => Ok(Self {
+                span: group.span(),
+                patterns: OriginPattern::from_stream(group.stream())?,
+            }),
+            _ => todo!("Invalid tokens {:#?}", tokens),
+        }
+    }
+}
+
+impl FromMeta for OriginPatterns {
+    fn from_meta(item: &MetaItem) -> Result<Self> {
+        //panic!("origin patterns: {:?}", item);
+        match item {
+            MetaItem::Path(path) => todo!("{:?}", path),
+            MetaItem::Tokens(tokens) => Self::from_tokens(tokens),
+            MetaItem::KeyValue { path, eq, tokens } => Self::from_tokens(tokens),
+            MetaItem::List { path, paren, items } => todo!("{:?}, {:?}, {:?}", path, paren, items),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum OriginPattern {
+    IP {
+        ip: IpAddr,
+        port: Option<u16>,
+        span: Span,
+    },
+    Localhost {
+        port: Option<u16>,
+        span: Span,
+    },
+    Domain {
+        domain: Vec<OriginPatternPart>,
+        port: Option<u16>,
+        span: Span,
+    },
+}
+
+impl OriginPattern {
+    fn from_stream(stream: TokenStream) -> Result<Vec<Self>> {
+        let mut iter = stream.into_iter();
+        let mut ret = vec![];
+        loop {
+            match iter.next() {
+                None => break Ok(ret),
+                Some(TokenTree::Literal(lit)) => ret.push(Self::from_literal(lit)?),
+                t => todo!("Error: {:?}", t),
+            }
+            match iter.next() {
+                None => break Ok(ret),
+                Some(TokenTree::Punct(punct)) if punct.as_char() == ',' => (),
+                t => todo!("Error: {:?}", t),
+            }
+        }
+    }
+
+    fn from_literal(lit: Literal) -> Result<Self> {
+        let span = lit.span();
+        let s = format!("{}", lit);
+        let mut s = &s[1..s.len() - 1];
+        let port = if let Some((domain, port)) = s.split_once(':') {
+            s = domain;
+            match port.parse() {
+                Ok(port) => Some(port),
+                Err(e) => {
+                    return Err(Diagnostic::spanned(
+                        span,
+                        devise::Level::Error,
+                        format!("`{}` is not a valid port number", port),
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+        if s == "localhost" || s == "127.0.0.1" {
+            Ok(Self::Localhost { port, span })
+        } else if let Ok(ip) = s.parse() {
+            Ok(Self::IP { ip, port, span })
+        } else {
+            // Trim final dot
+            if s.ends_with('.') {
+                s = &s[..s.len() - 1];
+            }
+            let mut domain = vec![];
+            for part in s.split('.') {
+                if part == "" {
+                    todo!("Empty space?")
+                } else if part == "*" {
+                    domain.push(OriginPatternPart::Wildcard);
+                } else if part
+                    .chars()
+                    .all(|c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '-'))
+                {
+                    domain.push(OriginPatternPart::Domain(part.to_string()));
+                } else {
+                    todo!("Invalid part")
+                }
+            }
+            if domain.len() < 2 {
+                return Err(Diagnostic::spanned(
+                    span,
+                    devise::Level::Error,
+                    format!("Allowed origins must have at least two components"),
+                ));
+            }
+            if !domain
+                .iter()
+                .rev()
+                .take(2)
+                .all(|part| matches!(part, OriginPatternPart::Domain(_)))
+            {
+                return Err(Diagnostic::spanned(
+                    span,
+                    devise::Level::Error,
+                    format!("The final two components of an allowed origin must be literals, not wildcards {:?}", domain),
+                ));
+            }
+            Ok(Self::Domain { domain, port, span })
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum OriginPatternPart {
+    Wildcard,
+    Domain(String),
 }
 
 #[derive(Debug)]
@@ -102,23 +252,28 @@ impl FromMeta for RouteUri {
     fn from_meta(meta: &devise::MetaItem) -> Result<Self> {
         let string = crate::proc_macro_ext::StringLit::from_meta(meta)?;
 
-        let origin = Origin::parse_route(&string)
-            .map_err(|e| {
-                let span = string.subspan(e.index() + 1..(e.index() + 2));
-                span.error(format!("invalid route URI: {}", e))
-                    .help("expected URI in origin form: \"/path/<param>\"")
-            })?;
+        let origin = Origin::parse_route(&string).map_err(|e| {
+            let span = string.subspan(e.index() + 1..(e.index() + 2));
+            span.error(format!("invalid route URI: {}", e))
+                .help("expected URI in origin form: \"/path/<param>\"")
+        })?;
 
         if !origin.is_normalized() {
             let normalized = origin.clone().into_normalized();
-            let span = origin.path().find("//")
-                .or_else(|| origin.query()
-                    .and_then(|q| q.find("&&"))
-                    .map(|i| origin.path().len() + 1 + i))
+            let span = origin
+                .path()
+                .find("//")
+                .or_else(|| {
+                    origin
+                        .query()
+                        .and_then(|q| q.find("&&"))
+                        .map(|i| origin.path().len() + 1 + i)
+                })
                 .map(|i| string.subspan((1 + i)..(1 + i + 2)))
                 .unwrap_or_else(|| string.span());
 
-            return Err(span.error("route URIs cannot contain empty segments")
+            return Err(span
+                .error("route URIs cannot contain empty segments")
                 .note(format!("expected \"{}\", found \"{}\"", normalized, origin)));
         }
 
@@ -129,7 +284,11 @@ impl FromMeta for RouteUri {
             string.subspan(len_to_q..end_of_q)
         });
 
-        Ok(RouteUri { origin: origin.into_owned(), path_span, query_span })
+        Ok(RouteUri {
+            origin: origin.into_owned(),
+            path_span,
+            query_span,
+        })
     }
 }
 
@@ -148,7 +307,10 @@ impl Route {
             Ok(Guard::from(param, ident.clone(), ty.clone()))
         } else {
             let msg = format!("expected argument named `{}` here", param.name);
-            let diag = param.span().error("unused parameter").span_note(args.span, msg);
+            let diag = param
+                .span()
+                .error("unused parameter")
+                .span_note(args.span, msg);
             Err(diag)
         }
     }
@@ -162,7 +324,8 @@ impl Route {
             if !attr.method.supports_payload() {
                 let msg = format!("'{}' does not typically support payloads", *attr.method);
                 // FIXME(diag: warning)
-                data.full_span.warning("`data` used with non-payload-supporting method")
+                data.full_span
+                    .warning("`data` used with non-payload-supporting method")
                     .span_note(attr.method.span, msg)
                     .emit_as_item_tokens();
             }
@@ -170,7 +333,10 @@ impl Route {
 
         // Check the validity of function arguments.
         let span = handler.sig.paren_token.span;
-        let mut arguments = Arguments { map: ArgumentMap::new(), span };
+        let mut arguments = Arguments {
+            map: ArgumentMap::new(),
+            span,
+        };
         for arg in &handler.sig.inputs {
             if let Some((ident, ty)) = arg.typed() {
                 let value = (ident.clone(), ty.with_stripped_lifetimes());
@@ -201,16 +367,20 @@ impl Route {
                 .map(|p| Route::upgrade_param(p?, &arguments))
                 .filter_map(|p| p.map_err(|e| diags.push(e)).ok())
                 .collect::<Vec<_>>(),
-            _ => vec![]
+            _ => vec![],
         };
 
         // Remove the `SpanWrapped` layer and upgrade to a guard.
-        let data_guard = attr.data.clone()
+        let data_guard = attr
+            .data
+            .clone()
             .map(|p| Route::upgrade_dynamic(p.value, &arguments))
             .and_then(|p| p.map_err(|e| diags.push(e)).ok());
 
         // Collect all of the declared dynamic route parameters.
-        let all_dyn_params = path_params.iter().filter_map(|p| p.dynamic())
+        let all_dyn_params = path_params
+            .iter()
+            .filter_map(|p| p.dynamic())
             .chain(query_params.iter().filter_map(|p| p.dynamic()))
             .chain(data_guard.as_ref().map(|g| &g.source).into_iter());
 
@@ -218,15 +388,22 @@ impl Route {
         let mut dyn_params: IndexSet<&Dynamic> = IndexSet::new();
         for p in all_dyn_params {
             if let Some(prev) = dyn_params.replace(p) {
-                diags.push(p.span().error(format!("duplicate parameter: `{}`", p.name))
-                    .span_note(prev.span(), "previous parameter with the same name here"))
+                diags.push(
+                    p.span()
+                        .error(format!("duplicate parameter: `{}`", p.name))
+                        .span_note(prev.span(), "previous parameter with the same name here"),
+                )
             }
         }
 
         // Collect the request guards: all the arguments not already a guard.
-        let request_guards = arguments.map.iter()
+        let request_guards = arguments
+            .map
+            .iter()
             .filter(|(name, _)| {
-                let mut all_other_guards = path_params.iter().filter_map(|p| p.guard())
+                let mut all_other_guards = path_params
+                    .iter()
+                    .filter_map(|p| p.guard())
                     .chain(query_params.iter().filter_map(|p| p.guard()))
                     .chain(data_guard.as_ref().into_iter());
 
@@ -234,15 +411,24 @@ impl Route {
             })
             .enumerate()
             .map(|(index, (name, (ident, ty)))| Guard {
-                source: Dynamic { index, name: name.clone(), trailing: false },
+                source: Dynamic {
+                    index,
+                    name: name.clone(),
+                    trailing: false,
+                },
                 fn_ident: ident.clone(),
                 ty: ty.clone(),
             })
             .collect();
 
         diags.head_err_or(Route {
-            attr, path_params, query_params, data_guard, request_guards,
-            handler, arguments,
+            attr,
+            path_params,
+            query_params,
+            data_guard,
+            request_guards,
+            handler,
+            arguments,
         })
     }
 }
