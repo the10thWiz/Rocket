@@ -186,13 +186,13 @@ macro_rules! pub_response_impl {
     /// # Example
     ///
     /// ```rust
-    /// # use rocket::get;
+    /// # use rocket::{get, routes};
     /// #[get("/")]
     /// fn index() -> &'static str { "Hello World" }
     #[doc = $doc_prelude]
-    /// # Client::_test(|_, _, response| {
+    /// # Client::_test_with(|r| r.mount("/", routes![index]), |_, _, response| {
     /// let response: LocalResponse = response;
-    /// assert!(response.routed_by::<index>())
+    /// assert!(response.routed_by::<index>());
     /// # });
     /// ```
     ///
@@ -214,13 +214,13 @@ macro_rules! pub_response_impl {
     /// # Example
     ///
     /// ```rust
-    /// # use rocket::get;
+    /// # use rocket::{catch, catchers};
     /// #[catch(404)]
     /// fn default_404() -> &'static str { "Hello World" }
     #[doc = $doc_prelude]
-    /// # Client::_test(|_, _, response| {
+    /// # Client::_test_with(|r| r.register("/", catchers![default_404]), |_, _, response| {
     /// let response: LocalResponse = response;
-    /// assert!(response.caught_by::<default_404>())
+    /// assert!(response.caught_by::<default_404>());
     /// # });
     /// ```
     ///

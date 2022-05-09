@@ -85,7 +85,7 @@ pub fn _catch(
                     name: stringify!(#user_catcher_fn_name),
                     code: #status_code,
                     handler: monomorphized_function,
-                    route_type: #_Box::new(self),
+                    catcher_type: #_Box::new(self),
                 }
             }
 
