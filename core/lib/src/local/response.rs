@@ -180,7 +180,8 @@ macro_rules! pub_response_impl {
         self._into_msgpack() $(.$suffix)?
     }
 
-    /// Checks if a route was routed by a specific route type
+    /// Checks if a route was routed by a specific route type. This only returns true if the route
+    /// actually generated a response, and a catcher was not run.
     ///
     /// # Example
     ///
@@ -194,6 +195,12 @@ macro_rules! pub_response_impl {
     /// assert!(response.routed_by::<index>())
     /// # });
     /// ```
+    ///
+    /// # Other Route types
+    ///
+    /// [`FileServer`](crate::fs::FileServer) implementes `RouteType`, so a route that should
+    /// return a static file can be checked against it. Libraries which provide a Route type should
+    /// implement `RouteType`, see [`RouteType`](crate::route::RouteType) for more information.
     pub fn routed_by<T: crate::route::RouteType>(&self) -> bool {
         if let Some(route_type) = self._request().route().map(|r| r.route_type).flatten() {
             route_type == std::any::TypeId::of::<T>()
@@ -208,20 +215,40 @@ macro_rules! pub_response_impl {
     ///
     /// ```rust
     /// # use rocket::get;
-    /// #[get("/")]
-    /// fn index() -> &'static str { "Hello World" }
+    /// #[catch(404)]
+    /// fn default_404() -> &'static str { "Hello World" }
     #[doc = $doc_prelude]
     /// # Client::_test(|_, _, response| {
     /// let response: LocalResponse = response;
-    /// assert!(response.routed_by::<index>())
+    /// assert!(response.caught_by::<default_404>())
     /// # });
     /// ```
+    ///
+    /// # Rocket's default catcher
+    ///
+    /// The default catcher has a `CatcherType` of [`DefaultCatcher`](crate::catcher::DefaultCatcher)
     pub fn caught_by<T: crate::catcher::CatcherType>(&self) -> bool {
         if let Some(catcher_type) = self._request().catcher().map(|r| r.catcher_type).flatten() {
             catcher_type == std::any::TypeId::of::<T>()
         } else {
             false
         }
+    }
+
+    /// Checks if a route was caught by a catcher
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use rocket::get;
+    #[doc = $doc_prelude]
+    /// # Client::_test(|_, _, response| {
+    /// let response: LocalResponse = response;
+    /// assert!(response.was_caught())
+    /// # });
+    /// ```
+    pub fn was_caught(&self) -> bool {
+        self._request().catcher().is_some()
     }
 
     #[cfg(test)]
