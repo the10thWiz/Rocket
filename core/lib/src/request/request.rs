@@ -8,7 +8,7 @@ use state::{TypeMap, InitCell};
 use futures::future::BoxFuture;
 use atomic::{Atomic, Ordering};
 
-use crate::{Rocket, Route, Orbit};
+use crate::{Rocket, Route, Orbit, Catcher};
 use crate::request::{FromParam, FromSegments, FromRequest, Outcome};
 use crate::form::{self, ValueField, FromForm};
 use crate::data::Limits;
@@ -45,6 +45,7 @@ pub(crate) struct ConnectionMeta {
 pub(crate) struct RequestState<'r> {
     pub rocket: &'r Rocket<Orbit>,
     pub route: Atomic<Option<&'r Route>>,
+    pub catcher: Atomic<Option<&'r Catcher>>,
     pub cookies: CookieJar<'r>,
     pub accept: InitCell<Option<Accept>>,
     pub content_type: InitCell<Option<ContentType>>,
@@ -69,6 +70,7 @@ impl RequestState<'_> {
         RequestState {
             rocket: self.rocket,
             route: Atomic::new(self.route.load(Ordering::Acquire)),
+            catcher: Atomic::new(self.catcher.load(Ordering::Acquire)),
             cookies: self.cookies.clone(),
             accept: self.accept.clone(),
             content_type: self.content_type.clone(),
@@ -97,6 +99,7 @@ impl<'r> Request<'r> {
             state: RequestState {
                 rocket,
                 route: Atomic::new(None),
+                catcher: Atomic::new(None),
                 cookies: CookieJar::new(rocket.config()),
                 accept: InitCell::new(),
                 content_type: InitCell::new(),
@@ -691,6 +694,22 @@ impl<'r> Request<'r> {
         self.state.route.load(Ordering::Acquire)
     }
 
+    /// Get the presently matched catcher, if any.
+    ///
+    /// This method returns `Some` while a catcher is running.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # let c = rocket::local::blocking::Client::debug_with(vec![]).unwrap();
+    /// # let request = c.get("/");
+    /// let catcher = request.catcher();
+    /// ```
+    #[inline(always)]
+    pub fn catcher(&self) -> Option<&'r Catcher> {
+        self.state.catcher.load(Ordering::Acquire)
+    }
+
     /// Invokes the request guard implementation for `T`, returning its outcome.
     ///
     /// # Example
@@ -969,8 +988,15 @@ impl<'r> Request<'r> {
     /// Set `self`'s parameters given that the route used to reach this request
     /// was `route`. Use during routing when attempting a given route.
     #[inline(always)]
-    pub(crate) fn set_route(&self, route: &'r Route) {
-        self.state.route.store(Some(route), Ordering::Release)
+    pub(crate) fn set_route(&self, route: Option<&'r Route>) {
+        self.state.route.store(route, Ordering::Release)
+    }
+
+    /// Set `self`'s parameters given that the route used to reach this request
+    /// was `catcher`. Use during routing when attempting a given catcher.
+    #[inline(always)]
+    pub(crate) fn set_catcher(&self, catcher: Option<&'r Catcher>) {
+        self.state.catcher.store(catcher, Ordering::Release)
     }
 
     /// Set the method of `self`, even when `self` is a shared reference. Used

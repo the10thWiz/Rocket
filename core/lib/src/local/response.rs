@@ -180,6 +180,50 @@ macro_rules! pub_response_impl {
         self._into_msgpack() $(.$suffix)?
     }
 
+    /// Checks if a route was routed by a specific route type
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use rocket::get;
+    /// #[get("/")]
+    /// fn index() -> &'static str { "Hello World" }
+    #[doc = $doc_prelude]
+    /// # Client::_test(|_, _, response| {
+    /// let response: LocalResponse = response;
+    /// assert!(response.routed_by::<index>())
+    /// # });
+    /// ```
+    pub fn routed_by<T: crate::route::RouteType>(&self) -> bool {
+        if let Some(route_type) = self._request().route().map(|r| r.route_type).flatten() {
+            route_type == std::any::TypeId::of::<T>()
+        } else {
+            false
+        }
+    }
+
+    /// Checks if a route was caught by a specific route type
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use rocket::get;
+    /// #[get("/")]
+    /// fn index() -> &'static str { "Hello World" }
+    #[doc = $doc_prelude]
+    /// # Client::_test(|_, _, response| {
+    /// let response: LocalResponse = response;
+    /// assert!(response.routed_by::<index>())
+    /// # });
+    /// ```
+    pub fn caught_by<T: crate::catcher::CatcherType>(&self) -> bool {
+        if let Some(catcher_type) = self._request().catcher().map(|r| r.catcher_type).flatten() {
+            catcher_type == std::any::TypeId::of::<T>()
+        } else {
+            false
+        }
+    }
+
     #[cfg(test)]
     #[allow(dead_code)]
     fn _ensure_impls_exist() {
