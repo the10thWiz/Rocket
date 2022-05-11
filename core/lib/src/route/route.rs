@@ -24,8 +24,7 @@ pub trait RouteType: Any + Send + Sync + 'static { }
 ///
 /// ```rust
 /// # #[macro_use] extern crate rocket;
-/// #
-/// use std::path::PathBuf;
+/// # use std::path::PathBuf;
 /// #[get("/route/<path..>?query", rank = 2, format = "json")]
 /// fn route_name(path: PathBuf) { /* handler procedure */ }
 ///
