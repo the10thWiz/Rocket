@@ -31,6 +31,9 @@
 //! let response = content::RawHtml("<h1>Hello, world!</h1>");
 //! ```
 
+use rocket_http::Header;
+
+use crate::fairing::{Fairing, Info, Kind};
 use crate::request::Request;
 use crate::response::{self, Response, Responder};
 use crate::http::ContentType;
@@ -83,5 +86,61 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for (ContentType, R) {
             .merge(self.1.respond_to(req)?)
             .header(self.0)
             .ok()
+    }
+}
+
+/// Fairing to set a default accepted content type for incoming requests.
+///
+/// This sets the `Accept` header of any incoming request if it is not already set. The default
+/// catcher, and some other types of responses inspect this header to select an appropriate content
+/// type.
+///
+/// # Example
+///
+/// ```rust
+/// # use rocket::{Rocket, uri};
+/// # use rocket::response::content::DefaultContentType;
+/// # use rocket::http::ContentType;
+/// # use rocket::local::blocking::Client;
+/// let rocket = Rocket::build()
+///     .attach(DefaultContentType::new(ContentType::JSON));
+/// let client = Client::untracked(rocket).unwrap();
+/// let ret_ty = client.get("/").dispatch().content_type();
+/// assert_eq!(ret_ty, Some(ContentType::JSON), "Wrong Content Type");
+/// ```
+///
+/// This header is typlically already set by the client, but there are some cases where a client
+/// may not have specified. This is also useful for malformed requests, since Rocket has to
+/// fabricate a request in order to route it to the 400 catcher.
+pub struct DefaultContentType(ContentType);
+
+impl DefaultContentType {
+    /// Set a default content type for incoming messages
+    pub fn new(t: ContentType) -> Self {
+        Self(t)
+    }
+}
+
+#[crate::async_trait]
+impl Fairing for DefaultContentType {
+    fn info(&self) -> Info {
+        Info {
+            name: "DefaultContentType",
+            kind: Kind::Request,
+        }
+    }
+
+    async fn on_request(&self, req: &mut Request<'_>, _data: &mut crate::Data<'_>) {
+        if req.headers().get_one("Accept").is_none() {
+            req.add_header(Header::new("Accept", format!("{}", self.0)));
+        }
+    }
+}
+
+mod tests {
+    use crate as rocket;
+
+    #[test]
+    fn test_default_content_type() {
     }
 }
