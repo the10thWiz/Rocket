@@ -1069,7 +1069,7 @@ struct CreditCard {
     expiration: Date,
 }
 
-fn luhn<'v>(number: &u64, cvv: u16, exp: &Date) -> form::Result<'v, ()> {
+fn luhn(number: &u64, cvv: u16, exp: &Date) -> form::Result<'static, ()> {
     # let valid = false;
     if !valid {
         Err(Error::validation("invalid credit card number"))?;
@@ -1082,6 +1082,14 @@ fn luhn<'v>(number: &u64, cvv: u16, exp: &Date) -> form::Result<'v, ()> {
 If a field's validation doesn't depend on other fields (validation is _local_),
 it is validated prior to those fields that do. For `CreditCard`, `cvv` and
 `expiration` will be validated prior to `number`.
+
+! NOTE Validator lifetimes
+
+  The lifetime of the field passed to the validator NEEDS to be different from the
+  lifetime returned in the Result. In the above example, the returned lifetime is
+  `'v`, while the number and exp date aren't given explicit lifetimes (i.e. they
+  are NOT `'v`). In general, the returned lifetime can be static, since it isn't
+  allowed to borrow from any of the parameters anyway.
 
 ### Wrapping Validators
 

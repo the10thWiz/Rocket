@@ -210,6 +210,40 @@ pub enum ErrorKind<'v> {
     Io(io::Error),
 }
 
+/// Map the choices Cow from any lifetime to a shorter one
+fn cow_map<'r, 'v>(c: Cow<'r, [Cow<'r, str>]>) -> Cow<'v, [Cow<'v, str>]> where 'r: 'v {
+    match c {
+        Cow::Owned(v) => Cow::Owned(v),
+        Cow::Borrowed(v) => Cow::Borrowed(v),
+    }
+}
+
+impl<'v> ErrorKind<'v> {
+    /// Explicitly shorten the ErrorKind's lifetime
+    fn with_lifetime<'r>(s: ErrorKind<'r>) -> Self where 'r: 'v {
+        match s {
+            ErrorKind::InvalidLength { min, max } => Self::InvalidLength { min, max },
+            ErrorKind::InvalidChoice { choices } => Self::InvalidChoice {
+                choices: cow_map(choices)
+            },
+            ErrorKind::OutOfRange { start, end } => Self::OutOfRange { start, end },
+            ErrorKind::Validation(e) => Self::Validation(e),
+            ErrorKind::Duplicate => Self::Duplicate,
+            ErrorKind::Missing => Self::Missing,
+            ErrorKind::Unexpected => Self::Unexpected,
+            ErrorKind::Unknown => Self::Unknown,
+            ErrorKind::Custom(e) => Self::Custom(e),
+            ErrorKind::Multipart(e) => Self::Multipart(e),
+            ErrorKind::Utf8(e) => Self::Utf8(e),
+            ErrorKind::Int(e) => Self::Int(e),
+            ErrorKind::Bool(e) => Self::Bool(e),
+            ErrorKind::Float(e) => Self::Float(e),
+            ErrorKind::Addr(e) => Self::Addr(e),
+            ErrorKind::Io(e) => Self::Io(e),
+        }
+    }
+}
+
 /// The erranous form entity or form component.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Entity {
@@ -369,6 +403,12 @@ impl<'v> Errors<'v> {
         let max = self.iter().map(|e| e.status()).max();
         max.unwrap_or(Status::InternalServerError)
     }
+
+    /// Override the extend method provided by `Vec` to allow shortening the Error lifetimes.
+    #[doc(hidden)]
+    pub fn extend<'r>(&mut self, iter: Errors<'r>) where 'r: 'v {
+        self.0.extend(iter.0.into_iter().map(|e| Error::with_lifetime(e)));
+    }
 }
 
 impl crate::http::ext::IntoOwned for Errors<'_> {
@@ -429,6 +469,15 @@ impl<'v> IntoIterator for Errors<'v> {
 }
 
 impl<'v> Error<'v> {
+    /// Explicitly shorten the Error's lifetime
+    fn with_lifetime<'r>(s: Error<'r>) -> Self where 'r: 'v {
+        Self {
+            name: s.name.map_or(None, |name: NameBuf<'r>| Some(name)),
+            value: s.value,
+            kind: ErrorKind::with_lifetime(s.kind),
+            entity: s.entity,
+        }
+    }
     /// Creates a new `Error` with `ErrorKind::Custom`.
     ///
     /// For validation errors, use [`Error::validation()`].
