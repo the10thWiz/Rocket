@@ -11,9 +11,7 @@ use devise::ext::TypeExt as _;
 use devise::{Diagnostic, FromMeta, Result, SpanWrapped, Spanned};
 use proc_macro2::{Literal, Span, TokenStream};
 
-use self::parse::{
-    Attribute, MethodAttribute, OriginPattern, OriginPatternPart, OriginPatterns, Route,
-};
+use self::parse::{Attribute, MethodAttribute, Route};
 
 impl Route {
     pub fn guards(&self) -> impl Iterator<Item = &Guard> {
@@ -374,141 +372,9 @@ fn sentinels_expr(route: &Route) -> TokenStream {
     quote!(::std::vec![#(#sentinel),*])
 }
 
-fn ip_quote(ip: &IpAddr) -> TokenStream {
-    match ip {
-        IpAddr::V6(ip) => {
-            let segments = ip.segments();
-            let segments = segments.iter().map(|&u| Literal::u16_suffixed(u));
-            quote! {
-                [#(#segments)*]
-            }
-        }
-        IpAddr::V4(ip) => {
-            let segments = ip.octets();
-            let segments = segments.iter().map(|&u| Literal::u8_suffixed(u));
-            quote! {
-                [#(#segments)*]
-            }
-        }
-    }
-}
-
-fn port_quote(port: &Option<u16>) -> TokenStream {
-    match port {
-        None => quote! {},
-        Some(port) => quote! { && port == Some(#port) },
-    }
-}
-
-fn domain_match_quote(domain: &Vec<OriginPatternPart>) -> TokenStream {
-    // How to match?
-    let parts = domain.iter().rev().map(|p| match p {
-        OriginPatternPart::Domain(d) => quote! {
-            if !parts.next().map_or(false, |d| ::rocket::http::uncased::eq(d, #d)) { false } else
-        },
-        OriginPatternPart::Wildcard => quote! {
-            if !parts.next().is_some() { false } else
-        },
-    });
-    quote! {
-        {
-            let mut parts = domain.as_str().rsplit('.');
-            #(#parts)* {
-                true
-            }
-        }
-    }
-    //quote! { true }
-}
-
-fn allowed_origins_guard(origins: &OriginPatterns, websocket: bool) -> TokenStream {
-    // TODO
-    define_spanned_export!(origins.span =>
-        _log, __req, __data, Outcome, _route
-    );
-
-    let mut ips = origins.patterns.iter().filter_map(|pat| match pat {
-        OriginPattern::IP { ip, port, span } => {
-            let ip = ip_quote(ip);
-            let port = port_quote(port);
-            Some(quote_spanned! { *span =>
-                if ip == ::std::net::IpAddr::from(#ip) #port {
-                    // Origin allowed
-                } else
-            })
-        }
-        _ => None,
-    });
-    // Only attempt to parse as an IP addr if at least one ip pattern exists
-    let ips = if let Some(cond) = ips.next() {
-        quote! {
-            else if let Ok(ip) = domain.as_str().parse::<::std::net::IpAddr>() {
-                #cond #(#ips)* {
-                    return #Outcome::Forward(#__data);
-                }
-            }
-        }
-    } else {
-        quote! {}
-    };
-
-    let domains = origins.patterns.iter().filter_map(|pat| match pat {
-        OriginPattern::Domain { domain, port, span } => {
-            let domain_match = domain_match_quote(domain);
-            let port = port_quote(port);
-            Some(quote_spanned! { *span =>
-                if #domain_match #port {
-                    // Origin allowed
-                } else
-            })
-        }
-        _ => None,
-    });
-
-    let request = if websocket {
-        quote!(#__req.request())
-    } else {
-        quote!(#__req)
-    };
-
-    // How to match on a list of
-    quote! {
-        if let Some(host) = #request.host() {
-            let mut domain = host.domain();
-            // Trim final dot
-            if domain.as_str().ends_with('.') {
-                domain = &domain[..domain.len() - 1];
-            }
-            let port = host.port();
-            if domain == "localhost" || domain == "127.0.0.1" {
-                // Allowed
-            } #ips else {
-                #(#domains)* {
-                    return #Outcome::Forward(#__data);
-                }
-            }
-        } else {
-            return #Outcome::Forward(#__data);
-        }
-    }
-}
-
 fn monomorphized_function(route: &Route) -> TokenStream {
     use crate::exports::*;
 
-    // Generate the declarations for all of the guards.
-    let origin_guard = route
-        .attr
-        .allowed_origins
-        .as_ref()
-        .map(|o| allowed_origins_guard(o, route.attr.method.is_websocket()))
-        .or_else(|| {
-            if route.attr.method.is_websocket() {
-                Some(quote! { todo!("Cookies must be disabled") })
-            } else {
-                None
-            }
-        });
     let request_guards = route
         .request_guards
         .iter()
@@ -536,7 +402,6 @@ fn monomorphized_function(route: &Route) -> TokenStream {
             #__data: #datatype<'__r>,
         ) -> #_route::#box_future<'__r> {
             #_Box::pin(async move {
-                #origin_guard
                 #(#request_guards)*
                 #(#param_guards)*
                 #query_guards
@@ -706,7 +571,6 @@ fn incomplete_route(
         data: method_attribute.data,
         format: method_attribute.format,
         rank: method_attribute.rank,
-        allowed_origins: method_attribute.allowed_origins,
     };
 
     codegen_route(Route::from(attribute, function)?)

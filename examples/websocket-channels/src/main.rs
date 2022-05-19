@@ -1,7 +1,7 @@
 #[macro_use] extern crate rocket;
 
 use rocket::websocket::Channel;
-use rocket::response::content::Html;
+use rocket::response::content::RawHtml;
 use rocket::{State, Data};
 
 #[message("/listen", data = "<data>")]
@@ -10,8 +10,8 @@ async fn listen(data: &str, ws: &Channel<'_>) {
 }
 
 #[get("/")]
-fn index() -> Html<&'static str> {
-    Html(r#"<!DOCTYPE html>
+fn index() -> RawHtml<&'static str> {
+    RawHtml(r#"<!DOCTYPE html>
 <html lang="en">
     <head>
         <title>WebSocket Channel Server</title>
