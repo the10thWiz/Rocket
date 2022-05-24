@@ -73,6 +73,8 @@ pub struct Config {
     /// _**Note:** Rocket only reads this value from sources in the [default
     /// provider](Config::figment())._
     pub workers: usize,
+    /// Limit on threads to start for synchronous tasks. **(default: `512`)**
+    pub sync_threads: usize,
     /// How, if at all, to identify the server via the `Server` header.
     /// **(default: `"Rocket"`)**
     pub ident: Ident,
@@ -170,6 +172,7 @@ impl Config {
             address: Ipv4Addr::new(127, 0, 0, 1).into(),
             port: 8000,
             workers: num_cpus::get(),
+            sync_threads: 512,
             ident: Ident::default(),
             limits: Limits::default(),
             temp_dir: std::env::temp_dir().into(),
@@ -358,6 +361,7 @@ impl Config {
         launch_info_!("address: {}", bold(&self.address));
         launch_info_!("port: {}", bold(&self.port));
         launch_info_!("workers: {}", bold(self.workers));
+        launch_info_!("sync_threads: {}", bold(self.sync_threads));
         launch_info_!("ident: {}", bold(&self.ident));
         launch_info_!("limits: {}", bold(&self.limits));
         launch_info_!("temp dir: {}", bold(&self.temp_dir.relative().display()));
@@ -450,6 +454,9 @@ impl Config {
 
     /// The stringy parameter name for setting/extracting [`Config::workers`].
     pub const WORKERS: &'static str = "workers";
+
+    /// The stringy parameter name for setting/extracting [`Config::sync_threads`].
+    pub const SYNC_THREADS: &'static str = "sync_threads";
 
     /// The stringy parameter name for setting/extracting [`Config::keep_alive`].
     pub const KEEP_ALIVE: &'static str = "keep_alive";
