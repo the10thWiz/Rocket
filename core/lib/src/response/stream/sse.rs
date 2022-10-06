@@ -758,6 +758,7 @@ mod sse_tests {
     }
 
     #[test]
+    #[ignore]
     fn test_heartbeat() {
         use futures::future::ready;
         use futures::stream::{once, iter, StreamExt};

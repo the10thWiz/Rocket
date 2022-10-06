@@ -1,8 +1,10 @@
 use std::{
     fmt::{Debug, Display},
     num::NonZeroU64,
-    sync::atomic::AtomicU64,
+    sync::atomic::AtomicU64, convert::Infallible,
 };
+
+use super::{FromRequest, Outcome, Request};
 
 /// Opaque Request ID type. Every incoming request is assigned a unique ID, which can be used to
 /// identify which log messages are related to a specific request
@@ -21,6 +23,17 @@ pub struct RequestId {
     id: NonZeroU64,
 }
 
+impl RequestId {
+    /// Convert a number to an id
+    ///
+    /// # Panics
+    /// panics if the id is zero
+    #[cfg(test)]
+    pub(crate) fn from(id: u64) -> Self {
+        Self { id: NonZeroU64::new(id).unwrap() }
+    }
+}
+
 const MAX_PRINT_ID: u64 = 0x10000;
 
 impl Display for RequestId {
@@ -36,6 +49,15 @@ impl Display for RequestId {
 impl Debug for RequestId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Request ID {{ {:X} }}", self.id)
+    }
+}
+
+#[crate::async_trait]
+impl<'r> FromRequest<'r> for RequestId {
+    type Error = Infallible;
+
+    async fn from_request(request: & 'r Request<'_>) -> Outcome<Self,Self::Error> {
+        Outcome::Success(request.request_id())
     }
 }
 
