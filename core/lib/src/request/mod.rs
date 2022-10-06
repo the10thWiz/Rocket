@@ -3,6 +3,7 @@
 mod request;
 mod from_param;
 mod from_request;
+mod request_id;
 
 #[cfg(test)]
 mod tests;
@@ -10,11 +11,13 @@ mod tests;
 pub use self::request::Request;
 pub use self::from_request::{FromRequest, Outcome};
 pub use self::from_param::{FromParam, FromSegments};
+pub use self::request_id::{RequestId, current_request};
 
 #[doc(inline)]
 pub use crate::response::flash::FlashMessage;
 
 pub(crate) use self::request::ConnectionMeta;
+pub(crate) use self::request_id::{ RequestIdGenerator, CURRENT_REQUEST};
 
 crate::export! {
     /// Store and immediately retrieve a vector-like value `$v` (`String` or

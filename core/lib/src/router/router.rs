@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::request::Request;
+use crate::request::{Request, RequestId, RequestIdGenerator};
 use crate::http::{Method, Status};
 
 use crate::{Route, Catcher};
@@ -10,6 +10,7 @@ use crate::router::Collide;
 pub(crate) struct Router {
     routes: HashMap<Method, Vec<Route>>,
     catchers: HashMap<Option<u16>, Vec<Catcher>>,
+    current_id: RequestIdGenerator,
 }
 
 #[derive(Debug)]
@@ -98,6 +99,10 @@ impl Router {
         }
 
         Ok(())
+    }
+
+    pub fn next_id(&self) -> RequestId {
+        self.current_id.next()
     }
 }
 

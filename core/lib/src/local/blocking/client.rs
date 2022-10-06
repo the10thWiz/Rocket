@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use crate::{Rocket, Phase, Orbit, Ignite, Error};
 use crate::local::{asynchronous, blocking::{LocalRequest, LocalResponse}};
 use crate::http::{Method, uri::Origin};
+use crate::request::RequestId;
 
 /// A `blocking` client to construct and dispatch local requests.
 ///
@@ -88,10 +89,10 @@ impl Client {
     }
 
     #[inline(always)]
-    fn _req<'c, 'u: 'c, U>(&'c self, method: Method, uri: U) -> LocalRequest<'c>
+    fn _req<'c, 'u: 'c, U>(&'c self, method: Method, uri: U, id: RequestId) -> LocalRequest<'c>
         where U: TryInto<Origin<'u>> + fmt::Display
     {
-        LocalRequest::new(self, method, uri)
+        LocalRequest::new(self, method, uri, id)
     }
 
     // Generates the public API methods, which call the private methods above.

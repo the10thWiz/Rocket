@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::request::RequestId;
 use crate::{Request, http::Method, local::asynchronous};
 use crate::http::uri::Origin;
 
@@ -35,10 +36,10 @@ pub struct LocalRequest<'c> {
 
 impl<'c> LocalRequest<'c> {
     #[inline]
-    pub(crate) fn new<'u: 'c, U>(client: &'c Client, method: Method, uri: U) -> Self
+    pub(crate) fn new<'u: 'c, U>(client: &'c Client, method: Method, uri: U, id: RequestId) -> Self
         where U: TryInto<Origin<'u>> + fmt::Display
     {
-        let inner = asynchronous::LocalRequest::new(client.inner(), method, uri);
+        let inner = asynchronous::LocalRequest::new(client.inner(), method, uri, id);
         Self { inner, client }
     }
 

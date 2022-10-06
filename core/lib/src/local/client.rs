@@ -220,7 +220,7 @@ macro_rules! pub_client_impl {
     ) -> LocalRequest<'c>
         where U: TryInto<Origin<'u>> + fmt::Display
     {
-        self._req(method, uri)
+        self._req(method, uri, self.rocket().next_id())
     }
 
     #[cfg(test)]

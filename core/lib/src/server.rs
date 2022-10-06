@@ -13,7 +13,7 @@ use crate::form::Form;
 use crate::outcome::Outcome;
 use crate::error::{Error, ErrorKind};
 use crate::ext::{AsyncReadExt, CancellableListener, CancellableIo};
-use crate::request::ConnectionMeta;
+use crate::request::{ConnectionMeta, CURRENT_REQUEST};
 
 use crate::http::{hyper, Method, Status, Header};
 use crate::http::private::{TcpListener, Listener, Connection, Incoming};
@@ -71,10 +71,11 @@ async fn hyper_service_fn(
     // sends the response metadata (and a body channel) prior.
     let (tx, rx) = oneshot::channel();
 
-    tokio::spawn(async move {
+    let id = rocket.next_id();
+    tokio::spawn(CURRENT_REQUEST.scope(id, async move {
         // Convert a Hyper request into a Rocket request.
         let (h_parts, mut h_body) = hyp_req.into_parts();
-        match Request::from_hyp(&rocket, &h_parts, Some(conn)) {
+        match Request::from_hyp(&rocket, &h_parts, Some(conn), id) {
             Ok(mut req) => {
                 // Convert into Rocket `Data`, dispatch request, write response.
                 let mut data = Data::from(&mut h_body);
@@ -91,7 +92,7 @@ async fn hyper_service_fn(
                 rocket.send_response(response, tx).await;
             }
         }
-    });
+    }));
 
     // Receive the response written to `tx` by the task above.
     rx.await.map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))

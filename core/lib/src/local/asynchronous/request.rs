@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::request::RequestId;
 use crate::{Request, Data};
 use crate::http::{Status, Method};
 use crate::http::uri::Origin;
@@ -39,7 +40,7 @@ pub struct LocalRequest<'c> {
 }
 
 impl<'c> LocalRequest<'c> {
-    pub(crate) fn new<'u: 'c, U>(client: &'c Client, method: Method, uri: U) -> Self
+    pub(crate) fn new<'u: 'c, U>(client: &'c Client, method: Method, uri: U, id: RequestId) -> Self
         where U: TryInto<Origin<'u>> + fmt::Display
     {
         // Try to parse `uri` into an `Origin`, storing whether it's good.
@@ -48,7 +49,7 @@ impl<'c> LocalRequest<'c> {
 
         // Create a request. We'll handle bad URIs later, in `_dispatch`.
         let origin = try_origin.clone().unwrap_or_else(|bad| bad);
-        let mut request = Request::new(client.rocket(), method, origin);
+        let mut request = Request::new(client.rocket(), method, origin, id);
 
         // Add any cookies we know about.
         if client.tracked {

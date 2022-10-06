@@ -19,6 +19,8 @@ use crate::http::uncased::UncasedStr;
 use crate::http::private::Certificates;
 use crate::http::uri::{fmt::Path, Origin, Segments, Host, Authority};
 
+use super::RequestId;
+
 /// The type of an incoming web request.
 ///
 /// This should be used sparingly in Rocket applications. In particular, it
@@ -31,6 +33,7 @@ pub struct Request<'r> {
     headers: HeaderMap<'r>,
     pub(crate) connection: ConnectionMeta,
     pub(crate) state: RequestState<'r>,
+    pub(crate) id: RequestId,
 }
 
 /// Information derived from an incoming connection, if any.
@@ -60,6 +63,7 @@ impl Request<'_> {
             headers: self.headers.clone(),
             connection: self.connection.clone(),
             state: self.state.clone(),
+            id: self.id,
         }
     }
 }
@@ -84,7 +88,8 @@ impl<'r> Request<'r> {
     pub(crate) fn new<'s: 'r>(
         rocket: &'r Rocket<Orbit>,
         method: Method,
-        uri: Origin<'s>
+        uri: Origin<'s>,
+        id: RequestId,
     ) -> Request<'r> {
         Request {
             uri,
@@ -102,8 +107,19 @@ impl<'r> Request<'r> {
                 content_type: Storage::new(),
                 cache: Arc::new(<Container![Send + Sync]>::new()),
                 host: None,
-            }
+            },
+            id,
         }
+    }
+
+    /// Retrieve the unique [`RequestId`](super::RequestId) assigned to this request.
+    ///
+    /// This is preferable to [`current_request`](super::current_request) since it avoids a lookup
+    /// in tokio's task local cache. This method also returns the id directly, since it's guarnteed
+    /// to exist
+    #[inline(always)]
+    pub fn request_id(&self) -> RequestId {
+        self.id
     }
 
     /// Retrieve the method from `self`.
@@ -968,6 +984,7 @@ impl<'r> Request<'r> {
         rocket: &'r Rocket<Orbit>,
         hyper: &'r hyper::request::Parts,
         connection: Option<ConnectionMeta>,
+        id: RequestId,
     ) -> Result<Request<'r>, BadRequest<'r>> {
         // Keep track of parsing errors; emit a `BadRequest` if any exist.
         let mut errors = vec![];
@@ -1001,7 +1018,7 @@ impl<'r> Request<'r> {
             });
 
         // Construct the request object; fill in metadata and headers next.
-        let mut request = Request::new(rocket, method, uri);
+        let mut request = Request::new(rocket, method, uri, id);
 
         // Set the passed in connection metadata.
         if let Some(connection) = connection {

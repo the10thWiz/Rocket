@@ -1,10 +1,10 @@
 //! Rocket's logging infrastructure.
 
-use std::fmt;
+use std::fmt::{self, Display};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde::{de, Serialize, Serializer, Deserialize, Deserializer};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use yansi::Paint;
 
 /// Reexport the `log` crate as `private`.
@@ -89,12 +89,24 @@ fn is_launch_record(record: &log::Metadata<'_>) -> bool {
     record.target().contains("rocket::launch")
 }
 
+struct OptionalFmt<T: Display>(Option<T>);
+
+impl<T: Display> Display for OptionalFmt<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(inner) = &self.0 {
+            write!(f, "{inner}")
+        } else {
+            Ok(())
+        }
+    }
+}
+
 impl log::Log for RocketLogger {
     #[inline(always)]
     fn enabled(&self, record: &log::Metadata<'_>) -> bool {
         match log::max_level().to_level() {
             Some(max) => record.level() <= max || is_launch_record(record),
-            None => false
+            None => false,
         }
     }
 
@@ -112,6 +124,9 @@ impl log::Log for RocketLogger {
             return;
         }
 
+        if let Some(id) = crate::request::current_request() {
+            write_out!("{} ", Paint::white(id));
+        }
         // In Rocket, we abuse targets with suffix "_" to indicate indentation.
         let indented = record.target().ends_with('_');
         if indented {
@@ -134,8 +149,14 @@ impl log::Log for RocketLogger {
                     Paint::yellow("Warning:").bold(),
                     Paint::yellow(record.args()).wrap());
             }
-            log::Level::Info => write_out!("{}\n", Paint::blue(record.args()).wrap()),
-            log::Level::Trace => write_out!("{}\n", Paint::magenta(record.args()).wrap()),
+            log::Level::Info => write_out!(
+                "{}\n",
+                Paint::blue(record.args()).wrap()
+            ),
+            log::Level::Trace => write_out!(
+                "{}\n",
+                Paint::magenta(record.args()).wrap()
+            ),
             log::Level::Warn => write_out!("{}\n", Paint::yellow(record.args()).wrap()),
             log::Level::Error => write_out!("{}\n", Paint::red(record.args()).wrap()),
             log::Level::Debug => {
@@ -192,7 +213,7 @@ impl From<LogLevel> for log::LevelFilter {
             LogLevel::Critical => log::LevelFilter::Warn,
             LogLevel::Normal => log::LevelFilter::Info,
             LogLevel::Debug => log::LevelFilter::Trace,
-            LogLevel::Off => log::LevelFilter::Off
+            LogLevel::Off => log::LevelFilter::Off,
         }
     }
 }
@@ -217,7 +238,7 @@ impl FromStr for LogLevel {
             "normal" => LogLevel::Normal,
             "debug" => LogLevel::Debug,
             "off" => LogLevel::Off,
-            _ => return Err("a log level (off, debug, normal, critical)")
+            _ => return Err("a log level (off, debug, normal, critical)"),
         };
 
         Ok(level)
@@ -239,17 +260,25 @@ impl Serialize for LogLevel {
 impl<'de> Deserialize<'de> for LogLevel {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         let string = String::deserialize(de)?;
-        LogLevel::from_str(&string).map_err(|_| de::Error::invalid_value(
-            de::Unexpected::Str(&string),
-            &figment::error::OneOf( &["critical", "normal", "debug", "off"])
-        ))
+        LogLevel::from_str(&string).map_err(|_| {
+            de::Error::invalid_value(
+                de::Unexpected::Str(&string),
+                &figment::error::OneOf(&["critical", "normal", "debug", "off"]),
+            )
+        })
     }
 }
 
 impl PaintExt for Paint<&str> {
     /// Paint::masked(), but hidden on Windows due to broken output. See #1122.
     fn emoji(_item: &str) -> Paint<&str> {
-        #[cfg(windows)] { Paint::masked("") }
-        #[cfg(not(windows))] { Paint::masked(_item) }
+        #[cfg(windows)]
+        {
+            Paint::masked("")
+        }
+        #[cfg(not(windows))]
+        {
+            Paint::masked(_item)
+        }
     }
 }

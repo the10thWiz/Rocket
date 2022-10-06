@@ -6,6 +6,7 @@ use yansi::Paint;
 use either::Either;
 use figment::{Figment, Provider};
 
+use crate::request::RequestId;
 use crate::{Catcher, Config, Route, Shutdown, sentinel, shield::Shield};
 use crate::router::Router;
 use crate::trip_wire::TripWire;
@@ -736,6 +737,10 @@ impl Rocket<Orbit> {
     /// ```
     pub fn shutdown(&self) -> Shutdown {
         self.shutdown.clone()
+    }
+
+    pub(crate) fn next_id(&self) -> RequestId {
+        self.router.next_id()
     }
 }
 
