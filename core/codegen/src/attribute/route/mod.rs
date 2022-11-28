@@ -504,7 +504,7 @@ fn monomorphized_function(route: &Route) -> TokenStream {
         .map(|o| allowed_origins_guard(o, route.attr.method.is_websocket()))
         .or_else(|| {
             if route.attr.method.is_websocket() {
-                Some(quote! { todo!("Cookies must be disabled") })
+                Some(quote! { (); }) //todo!("Cookies must be disabled"); })
             } else {
                 None
             }

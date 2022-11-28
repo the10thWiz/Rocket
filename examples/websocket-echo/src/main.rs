@@ -1,7 +1,8 @@
-#[macro_use] extern crate rocket;
+#[macro_use]
+extern crate rocket;
 
+use rocket::response::content::RawHtml;
 use rocket::websocket::Channel;
-use rocket::response::content::Html;
 #[message("/echo", data = "<data>", rank = 2)]
 async fn echo(data: &str, websocket: &Channel<'_>) {
     websocket.send(data).await;
@@ -25,8 +26,8 @@ mod auth_routes {
 }
 
 #[get("/")]
-fn index() -> Html<&'static str> {
-    Html(r#"<!DOCTYPE html>
+fn index() -> RawHtml<&'static str> {
+    RawHtml(r#"<!DOCTYPE html>
 <html lang="en">
     <head>
         <title>WebSocket Echo Server</title>
