@@ -192,16 +192,16 @@ macro_rules! pub_response_impl {
     #[doc = $doc_prelude]
     /// # Client::_test_with(|r| r.mount("/", routes![index]), |_, _, response| {
     /// let response: LocalResponse = response;
-    /// assert!(response.routed_by::<index>());
+    /// assert!(response.was_routed_by::<index>());
     /// # });
     /// ```
     ///
     /// # Other Route types
     ///
     /// [`FileServer`](crate::fs::FileServer) implementes `RouteType`, so a route that should
-    /// return a static file can be checked against it. Libraries which provide a Route type should
+    /// return a static file can be checked against it. Libraries which provide custom Routes should
     /// implement `RouteType`, see [`RouteType`](crate::route::RouteType) for more information.
-    pub fn routed_by<T: crate::route::RouteType>(&self) -> bool {
+    pub fn was_routed_by<T: crate::route::RouteType>(&self) -> bool {
         if let Some(route_type) = self._request().route().map(|r| r.route_type).flatten() {
             route_type == std::any::TypeId::of::<T>()
         } else {
@@ -220,14 +220,14 @@ macro_rules! pub_response_impl {
     #[doc = $doc_prelude]
     /// # Client::_test_with(|r| r.register("/", catchers![default_404]), |_, _, response| {
     /// let response: LocalResponse = response;
-    /// assert!(response.caught_by::<default_404>());
+    /// assert!(response.was_caught_by::<default_404>());
     /// # });
     /// ```
     ///
     /// # Rocket's default catcher
     ///
     /// The default catcher has a `CatcherType` of [`DefaultCatcher`](crate::catcher::DefaultCatcher)
-    pub fn caught_by<T: crate::catcher::CatcherType>(&self) -> bool {
+    pub fn was_caught_by<T: crate::catcher::CatcherType>(&self) -> bool {
         if let Some(catcher_type) = self._request().catcher().map(|r| r.catcher_type).flatten() {
             catcher_type == std::any::TypeId::of::<T>()
         } else {
