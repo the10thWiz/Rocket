@@ -19,6 +19,9 @@ use crate::http::uncased::UncasedStr;
 use crate::http::private::Certificates;
 use crate::http::uri::{fmt::Path, Origin, Segments, Host, Authority};
 
+#[cfg(test)]
+use parking_lot::Mutex;
+
 /// The type of an incoming web request.
 ///
 /// This should be used sparingly in Rocket applications. In particular, it
@@ -51,6 +54,8 @@ pub(crate) struct RequestState<'r> {
     pub content_type: InitCell<Option<ContentType>>,
     pub cache: Arc<TypeMap![Send + Sync]>,
     pub host: Option<Host<'r>>,
+    #[cfg(test)]
+    pub route_path: Arc<Mutex<Vec<&'r Route>>>,
 }
 
 impl Request<'_> {
@@ -76,6 +81,8 @@ impl RequestState<'_> {
             content_type: self.content_type.clone(),
             cache: self.cache.clone(),
             host: self.host.clone(),
+            #[cfg(test)]
+            route_path: self.route_path.clone(),
         }
     }
 }
@@ -105,6 +112,8 @@ impl<'r> Request<'r> {
                 content_type: InitCell::new(),
                 cache: Arc::new(<TypeMap![Send + Sync]>::new()),
                 host: None,
+                #[cfg(test)]
+                route_path: Arc::new(Mutex::new(vec![])),
             }
         }
     }
@@ -989,7 +998,21 @@ impl<'r> Request<'r> {
     /// was `route`. Use during routing when attempting a given route.
     #[inline(always)]
     pub(crate) fn set_route(&self, route: Option<&'r Route>) {
-        self.state.route.store(route, Ordering::Release)
+        self.state.route.store(route, Ordering::Release);
+        #[cfg(test)]
+        if let Some(route) = route {
+            self.state.route_path.lock().push(route);
+        }
+    }
+
+    /// Compute a value using the route path of this request
+    ///
+    /// This doesn't simply return a refernce, since the reference is held behind a Arc<Mutex>.
+    /// This method is only intended to be used internally, and is therefore NOT pub.
+    #[inline(always)]
+    #[cfg(test)]
+    pub(crate) fn route_path<R>(&self, operation: impl FnOnce(&[&'r Route]) -> R) -> R {
+        operation(self.state.route_path.lock().as_ref())
     }
 
     /// Set `self`'s parameters given that the route used to reach this request
