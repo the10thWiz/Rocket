@@ -76,8 +76,10 @@ impl Sealed for Host<'static> {}
 impl UniqueProperty for MediaType {
     fn collides(&self, self_route: &Route, other_route: &Route) -> Option<bool> {
         match (self_route.method.allows_request_body(), other_route.method.allows_request_body()) {
-            (Some(true), Some(true)) => other_route.get_unique_prop().map(|other| self.collides_with(other)),
-            _ => Some(true),
+            (Some(true), Some(true)) => other_route
+                .get_unique_prop()
+                .map(|other| self.collides_with(other)),
+            _ => None, // Does not differentiate routes
         }
     }
 
@@ -101,25 +103,15 @@ pub(crate) fn dyn_box_any(b: &Box<dyn UniqueProperty>) -> &dyn Any {
     let any = b.as_any();
     assert_eq!(b.type_id(), any.type_id());
     any
-    // <Box<dyn UniqueProperty> as AsRef<dyn UniqueProperty>>::as_ref(b).as_any()
-    // todo!()
 }
 
 /// A set of properties is unambiguous iff there is at least one property shared by both sets, with
 /// a different value.
 pub(crate) fn collides(a: &Route, b: &Route) -> bool {
     for prop_a in &a.unique_properties {
-        for prop_b in &b.unique_properties {
-            // Check that they have the same type_id, which prevents checking other properties (and potentially
-            // avoids the need to check the reverse)
-            dbg!((prop_a.type_id(), prop_b.type_id(), prop_a.type_id() == prop_b.type_id()));
-            dbg!(prop_a.collides(a, b));
-            // `prop_b.as_ref()` is needed to ensure we do not convert `Box<dyn _>` into `&dyn Any`, but rather
-            // get the inner type
-            // assert_eq!(std::any::TypeId::of::<MediaType>(), dyn_box_any(prop_b).type_id());
-            if dyn_box_any(prop_a).type_id() == dyn_box_any(prop_b).type_id() && prop_a.collides(a, b) == Some(false) {
-                return false;
-            }
+        // TODO: we should consider checking the inverse, i.e., does b collide with a
+        if prop_a.collides(a, b) == Some(false) {
+            return false;
         }
     }
     true
