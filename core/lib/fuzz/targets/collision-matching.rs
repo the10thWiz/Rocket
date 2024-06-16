@@ -60,7 +60,8 @@ impl<'c, 'a: 'c> ArbitraryRequestData<'a> {
 impl<'a> ArbitraryRouteData<'a> {
     fn into_route(self) -> Route {
         let mut r = Route::ranked(0, self.method.0, &self.uri.0.to_string(), dummy_handler);
-        r.format = self.format.map(|f| f.0);
+        if let Some(f) = self.format { r.add_unique_prop(f.0); }
+        // r.format = self.format.map(|f| f.0);
         r
     }
 }

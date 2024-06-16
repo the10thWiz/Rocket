@@ -3,7 +3,7 @@ use std::collections::hash_set::HashSet;
 use criterion::{criterion_group, Criterion};
 
 use rocket::{route, config, Request, Data, Route, Config};
-use rocket::http::{Method, RawStr, ContentType, Accept, Status};
+use rocket::http::{Method, RawStr, ContentType, Accept, Status, MediaType};
 use rocket::local::blocking::{Client, LocalRequest};
 
 fn dummy_handler<'r>(req: &'r Request, _: Data<'r>) -> route::BoxFuture<'r> {
@@ -22,7 +22,7 @@ fn parse_routes_table(table: &str) -> Vec<Route> {
             match component {
                 c if c.starts_with('[') => rank = c.trim_matches(&['[', ']'][..]).parse().ok(),
                 c if c.starts_with('(') => name = Some(c.trim_matches(&['(', ')'][..])),
-                c => format = c.parse().ok(),
+                c => format = c.parse::<MediaType>().ok(),
             }
         }
 
@@ -31,7 +31,7 @@ fn parse_routes_table(table: &str) -> Vec<Route> {
             route.rank = rank;
         }
 
-        route.format = format;
+        if let Some(format) = format { route.add_unique_prop(format); }
         route.name = name.map(|s| s.to_string().into());
         routes.push(route);
     }
@@ -61,7 +61,7 @@ fn generate_matching_requests<'c>(client: &'c Client, routes: &[Route]) -> Vec<L
 
         let uri = format!("/{}?{}", path, query);
         let mut req = client.req(route.method, uri);
-        if let Some(ref format) = route.format {
+        if let Some(format) = route.get_unique_prop::<MediaType>() {
             if let Some(true) = route.method.allows_request_body() {
                 req.add_header(ContentType::from(format.clone()));
             } else {

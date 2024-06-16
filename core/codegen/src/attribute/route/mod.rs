@@ -342,7 +342,7 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
     let method = &route.attr.method;
     let uri = route.attr.uri.to_string();
     let rank = Optional(route.attr.rank);
-    let format = Optional(route.attr.format.as_ref());
+    let format = route.attr.format.as_ref().map(|f| quote! {Box::new(#f)});
 
     Ok(quote! {
         #handler_fn
@@ -375,9 +375,10 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
                     method: #method,
                     uri: #uri,
                     handler: monomorphized_function,
-                    format: #format,
+                    // format: #format,
                     rank: #rank,
                     sentinels: #sentinels,
+                    unique_properties: vec![#format]
                 }
             }
 

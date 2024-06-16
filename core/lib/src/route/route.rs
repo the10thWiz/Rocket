@@ -302,14 +302,14 @@ impl Route {
         self
     }
 
-    pub(crate) fn add_unique_prop<T: UniqueProperty>(&mut self, prop: T) -> &mut Self {
+    pub fn add_unique_prop<T: UniqueProperty>(&mut self, prop: T) -> &mut Self {
         // Panic if we already have a unique_property with this type
         assert!(self.get_unique_prop::<T>().is_none());
         self.unique_properties.push(Box::new(prop));
         self
     }
 
-    pub(crate) fn get_unique_prop<T: Any>(&self) -> Option<&T> {
+    pub fn get_unique_prop<T: Any>(&self) -> Option<&T> {
         for prop in &self.unique_properties {
             if let Some(val) = dyn_box_any(prop).downcast_ref() {
                 return Some(val);
@@ -407,12 +407,12 @@ pub struct StaticInfo {
     pub method: Method,
     /// The route's URi, without the base mount point.
     pub uri: &'static str,
-    /// The route's format, if any.
-    pub format: Option<MediaType>,
     /// The route's handler, i.e, the annotated function.
     pub handler: for<'r> fn(&'r crate::Request<'_>, crate::Data<'r>) -> BoxFuture<'r>,
     /// The route's rank, if any.
     pub rank: Option<isize>,
+    /// The list of unique properties to use when routing this route
+    pub unique_properties: Vec<Box<dyn UniqueProperty>>,
     /// Route-derived sentinels, if any.
     /// This isn't `&'static [SentryInfo]` because `type_name()` isn't `const`.
     pub sentinels: Vec<Sentry>,
@@ -429,12 +429,9 @@ impl From<StaticInfo> for Route {
             method: info.method,
             handler: Box::new(info.handler),
             rank: info.rank.unwrap_or_else(|| uri.default_rank()),
-            // format: info.format.clone(),
             sentinels: info.sentinels.into_iter().collect(),
             uri,
-            unique_properties: [
-                info.format.map(|f| Box::new(f) as Box<dyn UniqueProperty>)
-            ].into_iter().filter_map(|v| v).collect(),
+            unique_properties: info.unique_properties,
         }
     }
 }
