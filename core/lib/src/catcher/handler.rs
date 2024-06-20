@@ -1,6 +1,8 @@
 use crate::{Request, Response};
 use crate::http::Status;
 
+use super::ErasedErrorRef;
+
 /// Type alias for the return type of a [`Catcher`](crate::Catcher)'s
 /// [`Handler::handle()`].
 pub type Result<'r> = std::result::Result<Response<'r>, crate::http::Status>;
@@ -29,7 +31,7 @@ pub type BoxFuture<'r, T = Result<'r>> = futures::future::BoxFuture<'r, T>;
 /// and used as follows:
 ///
 /// ```rust,no_run
-/// use rocket::{Request, Catcher, catcher};
+/// use rocket::{Request, Catcher, catcher::{self, ErasedErrorRef}};
 /// use rocket::response::{Response, Responder};
 /// use rocket::http::Status;
 ///
@@ -45,7 +47,7 @@ pub type BoxFuture<'r, T = Result<'r>> = futures::future::BoxFuture<'r, T>;
 ///
 /// #[rocket::async_trait]
 /// impl catcher::Handler for CustomHandler {
-///     async fn handle<'r>(&self, status: Status, req: &'r Request<'_>) -> catcher::Result<'r> {
+///     async fn handle<'r>(&self, status: Status, req: &'r Request<'_>, _e: &ErasedErrorRef<'r>) -> catcher::Result<'r> {
 ///         let inner = match self.0 {
 ///             Kind::Simple => "simple".respond_to(req)?,
 ///             Kind::Intermediate => "intermediate".respond_to(req)?,
@@ -97,30 +99,32 @@ pub trait Handler: Cloneable + Send + Sync + 'static {
     /// Nevertheless, failure is allowed, both for convenience and necessity. If
     /// an error handler fails, Rocket's default `500` catcher is invoked. If it
     /// succeeds, the returned `Response` is used to respond to the client.
-    async fn handle<'r>(&self, status: Status, req: &'r Request<'_>) -> Result<'r>;
+    async fn handle<'r>(&self, status: Status, req: &'r Request<'_>, error: &ErasedErrorRef<'r>) -> Result<'r>;
 }
 
 // We write this manually to avoid double-boxing.
 impl<F: Clone + Sync + Send + 'static> Handler for F
-    where for<'x> F: Fn(Status, &'x Request<'_>) -> BoxFuture<'x>,
+    where for<'x> F: Fn(Status, &'x Request<'_>, &ErasedErrorRef<'x>) -> BoxFuture<'x>,
 {
-    fn handle<'r, 'life0, 'life1, 'async_trait>(
+    fn handle<'r, 'life0, 'life1, 'life2, 'async_trait>(
         &'life0 self,
         status: Status,
         req: &'r Request<'life1>,
+        error: &'life2 ErasedErrorRef<'r>,
     ) -> BoxFuture<'r>
         where 'r: 'async_trait,
               'life0: 'async_trait,
               'life1: 'async_trait,
+              'life2: 'async_trait,
               Self: 'async_trait,
     {
-        self(status, req)
+        self(status, req, error)
     }
 }
 
 // Used in tests! Do not use, please.
 #[doc(hidden)]
-pub fn dummy_handler<'r>(_: Status, _: &'r Request<'_>) -> BoxFuture<'r> {
+pub fn dummy_handler<'r>(_: Status, _: &'r Request<'_>, _: &ErasedErrorRef<'r>) -> BoxFuture<'r> {
    Box::pin(async move { Ok(Response::new()) })
 }
 

@@ -86,6 +86,7 @@
 //! a type of `Option<S>`. If an `Outcome` is a `Forward`, the `Option` will be
 //! `None`.
 
+use crate::catcher::default_error_type;
 use crate::{route, request, response};
 use crate::data::{self, Data, FromData};
 use crate::http::Status;
@@ -796,7 +797,7 @@ impl<'r, 'o: 'r> IntoOutcome<route::Outcome<'r>> for response::Result<'o> {
     fn or_error(self, _: ()) -> route::Outcome<'r> {
         match self {
             Ok(val) => Success(val),
-            Err(status) => Error(status),
+            Err(status) => Error((status, default_error_type())),
         }
     }
 

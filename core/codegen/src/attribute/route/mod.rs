@@ -125,7 +125,7 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 fn request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, display_hack, FromRequest, Outcome
+        __req, __data, _request, display_hack, FromRequest, Outcome, ErrorResolver, ErrorDefault
     );
 
     quote_spanned! { ty.span() =>
@@ -150,11 +150,13 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
                     target: concat!("rocket::codegen::route::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
-                    reason = %#display_hack!(__e),
+                    reason = %#display_hack!(&__e),
                     "request guard failed"
                 );
 
-                return #Outcome::Error(__c);
+                #[allow(unused)]
+                use #ErrorDefault;
+                return #Outcome::Error((__c, #ErrorResolver::new(__e).cast()));
             }
         };
     }
@@ -219,7 +221,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => __req, __data, display_hack, FromData, Outcome);
+    define_spanned_export!(ty.span() => __req, __data, display_hack, FromData, Outcome, ErrorResolver, ErrorDefault);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
@@ -243,11 +245,13 @@ fn data_guard_decl(guard: &Guard) -> TokenStream {
                     target: concat!("rocket::codegen::route::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
-                    reason = %#display_hack!(__e),
+                    reason = %#display_hack!(&__e),
                     "data guard failed"
                 );
 
-                return #Outcome::Error(__c);
+                #[allow(unused)]
+                use #ErrorDefault;
+                return #Outcome::Error((__c, #ErrorResolver::new(__e).cast()));
             }
         };
     }

@@ -1,5 +1,6 @@
 use futures::future::{FutureExt, Future};
 
+use crate::catcher::{default_error_type, ErasedError, ErasedErrorRef};
 use crate::trace::Trace;
 use crate::util::Formatter;
 use crate::data::IoHandler;
@@ -108,12 +109,12 @@ impl Rocket<Orbit> {
                 request._set_method(Method::Get);
                 match self.route(request, data).await {
                     Outcome::Success(response) => response,
-                    Outcome::Error(status) => self.dispatch_error(status, request).await,
-                    Outcome::Forward((_, status)) => self.dispatch_error(status, request).await,
+                    Outcome::Error((status, error)) => self.dispatch_error(status, request, error).await,
+                    Outcome::Forward((_, status)) => self.dispatch_error(status, request, default_error_type()).await,
                 }
             }
-            Outcome::Forward((_, status)) => self.dispatch_error(status, request).await,
-            Outcome::Error(status) => self.dispatch_error(status, request).await,
+            Outcome::Forward((_, status)) => self.dispatch_error(status, request, default_error_type()).await,
+            Outcome::Error((status, error)) => self.dispatch_error(status, request, error).await,
         };
 
         // Set the cookies. Note that error responses will only include cookies
@@ -204,7 +205,7 @@ impl Rocket<Orbit> {
 
             let name = route.name.as_deref();
             let outcome = catch_handle(name, || route.handler.handle(request, data)).await
-                .unwrap_or(Outcome::Error(Status::InternalServerError));
+                .unwrap_or(Outcome::error(Status::InternalServerError));
 
             // Check if the request processing completed (Some) or if the
             // request needs to be forwarded. If it does, continue the loop
@@ -229,14 +230,15 @@ impl Rocket<Orbit> {
     pub(crate) async fn dispatch_error<'r, 's: 'r>(
         &'s self,
         mut status: Status,
-        req: &'r Request<'s>
+        req: &'r Request<'s>,
+        error: ErasedError<'r>,
     ) -> Response<'r> {
         // We may wish to relax this in the future.
         req.cookies().reset_delta();
 
         loop {
             // Dispatch to the `status` catcher.
-            match self.invoke_catcher(status, req).await {
+            match self.invoke_catcher(status, error.as_ref(), req).await {
                 Ok(r) => return r,
                 // If the catcher failed, try `500` catcher, unless this is it.
                 Err(e) if status.code != 500 => {
@@ -265,11 +267,12 @@ impl Rocket<Orbit> {
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,
+        error: &ErasedErrorRef<'r>,
         req: &'r Request<'s>
     ) -> Result<Response<'r>, Option<Status>> {
         if let Some(catcher) = self.router.catch(status, req) {
             catcher.trace_info();
-            catch_handle(catcher.name.as_deref(), || catcher.handler.handle(status, req)).await
+            catch_handle(catcher.name.as_deref(), || catcher.handler.handle(status, req, error)).await
                 .map(|result| result.map_err(Some))
                 .unwrap_or_else(|| Err(None))
         } else {

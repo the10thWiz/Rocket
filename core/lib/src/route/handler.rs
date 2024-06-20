@@ -1,10 +1,11 @@
+use crate::catcher::ErasedError;
 use crate::{Request, Data};
 use crate::response::{Response, Responder};
 use crate::http::Status;
 
 /// Type alias for the return type of a [`Route`](crate::Route)'s
 /// [`Handler::handle()`].
-pub type Outcome<'r> = crate::outcome::Outcome<Response<'r>, Status, (Data<'r>, Status)>;
+pub type Outcome<'r> = crate::outcome::Outcome<Response<'r>, (Status, ErasedError<'r>), (Data<'r>, Status)>;
 
 /// Type alias for the return type of a _raw_ [`Route`](crate::Route)'s
 /// [`Handler`].
@@ -187,7 +188,7 @@ impl<'r, 'o: 'r> Outcome<'o> {
     pub fn from<R: Responder<'r, 'o>>(req: &'r Request<'_>, responder: R) -> Outcome<'r> {
         match responder.respond_to(req) {
             Ok(response) => Outcome::Success(response),
-            Err(status) => Outcome::Error(status)
+            Err(status) => Outcome::Error((status, Box::new(()))),
         }
     }
 
@@ -213,12 +214,12 @@ impl<'r, 'o: 'r> Outcome<'o> {
         let responder = result.map_err(crate::response::Debug);
         match responder.respond_to(req) {
             Ok(response) => Outcome::Success(response),
-            Err(status) => Outcome::Error(status)
+            Err(status) => Outcome::Error((status, Box::new(()))),
         }
     }
 
     /// Return an `Outcome` of `Error` with the status code `code`. This is
-    /// equivalent to `Outcome::Error(code)`.
+    /// equivalent to `Outcome::error_val(code, ())`.
     ///
     /// This method exists to be used during manual routing.
     ///
@@ -234,7 +235,27 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// ```
     #[inline(always)]
     pub fn error(code: Status) -> Outcome<'r> {
-        Outcome::Error(code)
+        Outcome::Error((code, Box::new(())))
+    }
+    /// Return an `Outcome` of `Error` with the status code `code`. This adds
+    /// the 
+    ///
+    /// This method exists to be used during manual routing.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use rocket::{Request, Data, route};
+    /// use rocket::http::Status;
+    ///
+    /// fn bad_req_route<'r>(_: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
+    ///     route::Outcome::error_val(Status::BadRequest, "Some data to go with")
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn error_val<T: 'r>(code: Status, val: T) -> Outcome<'r> {
+        use crate::catcher::resolution::{Resolve, DefaultTypeErase};
+        Outcome::Error((code, Resolve::new(val).cast()))
     }
 
     /// Return an `Outcome` of `Forward` with the data `data` and status

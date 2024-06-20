@@ -8,6 +8,8 @@ use crate::request::Request;
 use crate::http::{Status, ContentType, uri};
 use crate::catcher::{Handler, BoxFuture};
 
+use super::ErasedErrorRef;
+
 /// An error catching route.
 ///
 /// Catchers are routes that run when errors are produced by the application.
@@ -147,20 +149,20 @@ impl Catcher {
     ///
     /// ```rust
     /// use rocket::request::Request;
-    /// use rocket::catcher::{Catcher, BoxFuture};
+    /// use rocket::catcher::{Catcher, BoxFuture, ErasedErrorRef};
     /// use rocket::response::Responder;
     /// use rocket::http::Status;
     ///
-    /// fn handle_404<'r>(status: Status, req: &'r Request<'_>) -> BoxFuture<'r> {
+    /// fn handle_404<'r>(status: Status, req: &'r Request<'_>, _e: &ErasedErrorRef<'r>) -> BoxFuture<'r> {
     ///    let res = (status, format!("404: {}", req.uri()));
     ///    Box::pin(async move { res.respond_to(req) })
     /// }
     ///
-    /// fn handle_500<'r>(_: Status, req: &'r Request<'_>) -> BoxFuture<'r> {
+    /// fn handle_500<'r>(_: Status, req: &'r Request<'_>, _e: &ErasedErrorRef<'r>) -> BoxFuture<'r> {
     ///     Box::pin(async move{ "Whoops, we messed up!".respond_to(req) })
     /// }
     ///
-    /// fn handle_default<'r>(status: Status, req: &'r Request<'_>) -> BoxFuture<'r> {
+    /// fn handle_default<'r>(status: Status, req: &'r Request<'_>, _e: &ErasedErrorRef<'r>) -> BoxFuture<'r> {
     ///    let res = (status, format!("{}: {}", status, req.uri()));
     ///    Box::pin(async move { res.respond_to(req) })
     /// }
@@ -199,11 +201,11 @@ impl Catcher {
     ///
     /// ```rust
     /// use rocket::request::Request;
-    /// use rocket::catcher::{Catcher, BoxFuture};
+    /// use rocket::catcher::{Catcher, BoxFuture, ErasedErrorRef};
     /// use rocket::response::Responder;
     /// use rocket::http::Status;
     ///
-    /// fn handle_404<'r>(status: Status, req: &'r Request<'_>) -> BoxFuture<'r> {
+    /// fn handle_404<'r>(status: Status, req: &'r Request<'_>, _e: &ErasedErrorRef<'r>) -> BoxFuture<'r> {
     ///    let res = (status, format!("404: {}", req.uri()));
     ///    Box::pin(async move { res.respond_to(req) })
     /// }
@@ -225,12 +227,12 @@ impl Catcher {
     ///
     /// ```rust
     /// use rocket::request::Request;
-    /// use rocket::catcher::{Catcher, BoxFuture};
+    /// use rocket::catcher::{Catcher, BoxFuture, ErasedErrorRef};
     /// use rocket::response::Responder;
     /// use rocket::http::Status;
     /// # use rocket::uri;
     ///
-    /// fn handle_404<'r>(status: Status, req: &'r Request<'_>) -> BoxFuture<'r> {
+    /// fn handle_404<'r>(status: Status, req: &'r Request<'_>, _e: &ErasedErrorRef<'r>) -> BoxFuture<'r> {
     ///    let res = (status, format!("404: {}", req.uri()));
     ///    Box::pin(async move { res.respond_to(req) })
     /// }
@@ -279,11 +281,11 @@ impl Catcher {
     ///
     /// ```rust
     /// use rocket::request::Request;
-    /// use rocket::catcher::{Catcher, BoxFuture};
+    /// use rocket::catcher::{Catcher, BoxFuture, ErasedErrorRef};
     /// use rocket::response::Responder;
     /// use rocket::http::Status;
     ///
-    /// fn handle_404<'r>(status: Status, req: &'r Request<'_>) -> BoxFuture<'r> {
+    /// fn handle_404<'r>(status: Status, req: &'r Request<'_>, _e: &ErasedErrorRef<'r>) -> BoxFuture<'r> {
     ///    let res = (status, format!("404: {}", req.uri()));
     ///    Box::pin(async move { res.respond_to(req) })
     /// }
@@ -313,7 +315,7 @@ impl Catcher {
 
 impl Default for Catcher {
     fn default() -> Self {
-        fn handler<'r>(s: Status, req: &'r Request<'_>) -> BoxFuture<'r> {
+        fn handler<'r>(s: Status, req: &'r Request<'_>, _e: &ErasedErrorRef<'r>) -> BoxFuture<'r> {
             Box::pin(async move { Ok(default_handler(s, req)) })
         }
 
@@ -331,7 +333,7 @@ pub struct StaticInfo {
     /// The catcher's status code.
     pub code: Option<u16>,
     /// The catcher's handler, i.e, the annotated function.
-    pub handler: for<'r> fn(Status, &'r Request<'_>) -> BoxFuture<'r>,
+    pub handler: for<'r> fn(Status, &'r Request<'_>, &ErasedErrorRef<'r>) -> BoxFuture<'r>,
     /// The file, line, and column where the catcher was defined.
     pub location: (&'static str, u32, u32),
 }
@@ -418,7 +420,7 @@ macro_rules! default_handler_fn {
 
         pub(crate) fn default_handler<'r>(
             status: Status,
-            req: &'r Request<'_>
+            req: &'r Request<'_>,
         ) -> Response<'r> {
             let preferred = req.accept().map(|a| a.preferred());
             let (mime, text) = if preferred.map_or(false, |a| a.is_json()) {

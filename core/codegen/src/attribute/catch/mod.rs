@@ -34,15 +34,25 @@ pub fn _catch(
         .map(|ty| ty.span())
         .unwrap_or_else(Span::call_site);
 
+    // TODO: how to handle request?
+    //   - Right now: (), (&Req), (Status, &Req) allowed
+    //   - New: (), (&E), (&Req, &E), (Status, &Req, &E)
     // Set the `req` and `status` spans to that of their respective function
     // arguments for a more correct `wrong type` error span. `rev` to be cute.
-    let codegen_args = &[__req, __status];
+    let codegen_args = &[__req, __status, __error];
     let inputs = catch.function.sig.inputs.iter().rev()
         .zip(codegen_args.iter())
         .map(|(fn_arg, codegen_arg)| match fn_arg {
             syn::FnArg::Receiver(_) => codegen_arg.respanned(fn_arg.span()),
             syn::FnArg::Typed(a) => codegen_arg.respanned(a.ty.span())
         }).rev();
+    let make_error = if let Some(arg) = catch.function.sig.inputs.iter().rev().next() {
+        quote_spanned!(arg.span() => 
+            // let 
+        )
+    } else {
+        quote! {}
+    };
 
     // We append `.await` to the function call if this is `async`.
     let dot_await = catch.function.sig.asyncness
@@ -68,9 +78,11 @@ pub fn _catch(
             fn into_info(self) -> #_catcher::StaticInfo {
                 fn monomorphized_function<'__r>(
                     #__status: #Status,
-                    #__req: &'__r #Request<'_>
+                    #__req: &'__r #Request<'_>,
+                    __error_init: &#ErasedErrorRef<'__r>,
                 ) -> #_catcher::BoxFuture<'__r> {
                     #_Box::pin(async move {
+                        #make_error
                         let __response = #catcher_response;
                         #Response::build()
                             .status(#__status)
