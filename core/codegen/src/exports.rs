@@ -102,9 +102,8 @@ define_exported_paths! {
     Route => ::rocket::Route,
     Catcher => ::rocket::Catcher,
     Status => ::rocket::http::Status,
-    ErrorResolver => ::rocket::catcher::resolution::Resolve,
-    ErrorDefault => ::rocket::catcher::resolution::DefaultTypeErase,
-    ErasedErrorRef => ::rocket::catcher::ErasedErrorRef,
+    resolve_error => ::rocket::catcher::resolve_typed_catcher,
+    ErasedError => ::rocket::catcher::ErasedError,
 }
 
 macro_rules! define_spanned_export {

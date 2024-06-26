@@ -1,4 +1,6 @@
-use transient::{Any, CanRecoverFrom, Co, Transient, Downcast};
+use transient::{Any, CanRecoverFrom, Co, Downcast};
+#[doc(inline)]
+pub use transient::{Static, Transient};
 
 pub type ErasedError<'r> = Box<dyn Any<Co<'r>> + Send + Sync + 'r>;
 pub type ErasedErrorRef<'r> = dyn Any<Co<'r>> + Send + Sync + 'r;
@@ -13,19 +15,23 @@ pub fn downcast<'a, 'r, T: Transient + 'r>(v: &'a ErasedErrorRef<'r>) -> Option<
     v.downcast_ref()
 }
 
-// /// Chosen not to expose this macro, since it's pretty short and sweet
-// #[doc(hidden)]
-// #[macro_export]
-// macro_rules! resolve_typed_catcher {
-//     ($T:expr) => ({
-//         #[allow(unused_imports)]
-//         use $crate::catcher::types::Resolve;
-//
-//         Resolve::new($T).cast()
-//     })
-// }
+/// Upcasts a value to `ErasedError`, falling back to a default if it doesn't implement
+/// `Transient`
+#[doc(hidden)]
+#[macro_export]
+macro_rules! resolve_typed_catcher {
+    ($T:expr) => ({
+        #[allow(unused_imports)]
+        use $crate::catcher::resolution::{Resolve, DefaultTypeErase};
 
-// pub use resolve_typed_catcher;
+        Resolve::new($T).cast()
+    });
+    () => ({
+        $crate::catcher::default_error_type()
+    });
+}
+
+pub use resolve_typed_catcher;
 
 pub mod resolution {
     use std::marker::PhantomData;

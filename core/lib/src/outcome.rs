@@ -805,7 +805,7 @@ impl<'r, 'o: 'r> IntoOutcome<route::Outcome<'r>> for response::Result<'o> {
     fn or_forward(self, (data, forward): (Data<'r>, Status)) -> route::Outcome<'r> {
         match self {
             Ok(val) => Success(val),
-            Err(_) => Forward((data, forward))
+            Err(_) => Forward((data, forward, default_error_type()))
         }
     }
 }

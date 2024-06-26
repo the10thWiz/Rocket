@@ -4,11 +4,31 @@
 
 use rocket::{Rocket, Request, Build};
 use rocket::response::{content, status};
-use rocket::http::Status;
+use rocket::http::{Status, uri::error::PathError};
+
+// Custom impl so I can implement Static (or Transient) ---
+// We should upstream implementations for most common error types
+// in transient itself
+use rocket::catcher::{Static};
+use std::num::ParseIntError;
+
+#[derive(Debug)]
+struct IntErr(ParseIntError);
+impl Static for IntErr {}
+
+struct I8(i8);
+use rocket::request::FromParam;
+impl FromParam<'_> for I8 {
+    type Error = IntErr;
+    fn from_param(param: &str) -> Result<Self, Self::Error> {
+        param.parse::<i8>().map(Self).map_err(IntErr)
+    }
+}
+// ------------------------------
 
 #[get("/hello/<name>/<age>")]
-fn hello(name: &str, age: i8) -> String {
-    format!("Hello, {} year old named {}!", age, name)
+fn hello(name: &str, age: I8) -> String {
+    format!("Hello, {} year old named {}!", age.0, name)
 }
 
 #[get("/<code>")]
@@ -25,10 +45,23 @@ fn general_not_found() -> content::RawHtml<&'static str> {
 }
 
 #[catch(404)]
-fn hello_not_found(req: &Request<'_>) -> content::RawHtml<String> {
+fn hello_not_found(s: Status, req: &Request<'_>) -> content::RawHtml<String> {
     content::RawHtml(format!("\
         <p>Sorry, but '{}' is not a valid path!</p>\
         <p>Try visiting /hello/&lt;name&gt;/&lt;age&gt; instead.</p>",
+        req.uri()))
+}
+
+// Demonstrates a downcast error from `hello`
+// NOTE: right now, the error must be the first parameter, and all three params must
+// be present. I'm thinking about adding a param to the macro to indicate which (and whether)
+// param is a downcast error.
+#[catch(422)]
+fn param_error(e: &IntErr, s: Status, req: &Request<'_>) -> content::RawHtml<String> {
+    content::RawHtml(format!("\
+        <p>Sorry, but '{}' is not a valid path!</p>\
+        <p>Try visiting /hello/&lt;name&gt;/&lt;age&gt; instead.</p>\
+        <p>Error: {e:?}</p>",
         req.uri()))
 }
 
@@ -53,7 +86,7 @@ fn rocket() -> Rocket<Build> {
         // .mount("/", routes![unmanaged]) // uncomment this to get a sentinel error
         .mount("/", routes![hello, forced_error])
         .register("/", catchers![general_not_found, default_catcher])
-        .register("/hello", catchers![hello_not_found])
+        .register("/hello", catchers![hello_not_found, param_error])
         .register("/hello/Sergio", catchers![sergio_error])
 }
 

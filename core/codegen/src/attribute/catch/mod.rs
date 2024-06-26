@@ -23,7 +23,7 @@ pub fn _catch(
     let deprecated = catch.function.attrs.iter().find(|a| a.path().is_ident("deprecated"));
 
     // Determine the number of parameters that will be passed in.
-    if catch.function.sig.inputs.len() > 2 {
+    if catch.function.sig.inputs.len() > 3 {
         return Err(catch.function.sig.paren_token.span.join()
             .error("invalid number of arguments: must be zero, one, or two")
             .help("catchers optionally take `&Request` or `Status, &Request`"));
@@ -36,7 +36,6 @@ pub fn _catch(
 
     // TODO: how to handle request?
     //   - Right now: (), (&Req), (Status, &Req) allowed
-    //   - New: (), (&E), (&Req, &E), (Status, &Req, &E)
     // Set the `req` and `status` spans to that of their respective function
     // arguments for a more correct `wrong type` error span. `rev` to be cute.
     let codegen_args = &[__req, __status, __error];
@@ -46,9 +45,13 @@ pub fn _catch(
             syn::FnArg::Receiver(_) => codegen_arg.respanned(fn_arg.span()),
             syn::FnArg::Typed(a) => codegen_arg.respanned(a.ty.span())
         }).rev();
-    let make_error = if let Some(arg) = catch.function.sig.inputs.iter().rev().next() {
+    let make_error = if catch.function.sig.inputs.len() >= 3 {
+        let arg = catch.function.sig.inputs.first().unwrap();
         quote_spanned!(arg.span() => 
-            // let 
+            let #__error = match ::rocket::catcher::downcast(__error_init.as_ref()) {
+                Some(v) => v,
+                None => return #_Result::Err((#__status, __error_init)),
+            };
         )
     } else {
         quote! {}
@@ -60,7 +63,7 @@ pub fn _catch(
 
     let catcher_response = quote_spanned!(return_type_span => {
         let ___responder = #user_catcher_fn_name(#(#inputs),*) #dot_await;
-        #_response::Responder::respond_to(___responder, #__req)?
+        #_response::Responder::respond_to(___responder, #__req).map_err(|s| (s, __error_init))?
     });
 
     // Generate the catcher, keeping the user's input around.
@@ -79,15 +82,17 @@ pub fn _catch(
                 fn monomorphized_function<'__r>(
                     #__status: #Status,
                     #__req: &'__r #Request<'_>,
-                    __error_init: &#ErasedErrorRef<'__r>,
+                    __error_init: #ErasedError<'__r>,
                 ) -> #_catcher::BoxFuture<'__r> {
                     #_Box::pin(async move {
                         #make_error
                         let __response = #catcher_response;
-                        #Response::build()
-                            .status(#__status)
-                            .merge(__response)
-                            .ok()
+                        #_Result::Ok(
+                            #Response::build()
+                                .status(#__status)
+                                .merge(__response)
+                                .finalize()
+                        )
                     })
                 }
 

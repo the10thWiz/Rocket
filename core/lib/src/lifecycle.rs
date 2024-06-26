@@ -1,6 +1,6 @@
 use futures::future::{FutureExt, Future};
 
-use crate::catcher::{default_error_type, ErasedError, ErasedErrorRef};
+use crate::catcher::{default_error_type, ErasedError};
 use crate::trace::Trace;
 use crate::util::Formatter;
 use crate::data::IoHandler;
@@ -102,7 +102,7 @@ impl Rocket<Orbit> {
         // Route the request and run the user's handlers.
         let mut response = match self.route(request, data).await {
             Outcome::Success(response) => response,
-            Outcome::Forward((data, _)) if request.method() == Method::Head => {
+            Outcome::Forward((data, _, _)) if request.method() == Method::Head => {
                 tracing::Span::current().record("autohandled", true);
 
                 // Dispatch the request again with Method `GET`.
@@ -110,10 +110,10 @@ impl Rocket<Orbit> {
                 match self.route(request, data).await {
                     Outcome::Success(response) => response,
                     Outcome::Error((status, error)) => self.dispatch_error(status, request, error).await,
-                    Outcome::Forward((_, status)) => self.dispatch_error(status, request, default_error_type()).await,
+                    Outcome::Forward((_, status, error)) => self.dispatch_error(status, request, error).await,
                 }
             }
-            Outcome::Forward((_, status)) => self.dispatch_error(status, request, default_error_type()).await,
+            Outcome::Forward((_, status, error)) => self.dispatch_error(status, request, error).await,
             Outcome::Error((status, error)) => self.dispatch_error(status, request, error).await,
         };
 
@@ -198,6 +198,7 @@ impl Rocket<Orbit> {
         // Go through all matching routes until we fail or succeed or run out of
         // routes to try, in which case we forward with the last status.
         let mut status = Status::NotFound;
+        let mut error = default_error_type();
         for route in self.router.route(request) {
             // Retrieve and set the requests parameters.
             route.trace_info();
@@ -212,11 +213,11 @@ impl Rocket<Orbit> {
             outcome.trace_info();
             match outcome {
                 o@Outcome::Success(_) | o@Outcome::Error(_) => return o,
-                Outcome::Forward(forwarded) => (data, status) = forwarded,
+                Outcome::Forward(forwarded) => (data, status, error) = forwarded,
             }
         }
 
-        Outcome::Forward((data, status))
+        Outcome::Forward((data, status, error))
     }
 
     // Invokes the catcher for `status`. Returns the response on success.
@@ -231,22 +232,23 @@ impl Rocket<Orbit> {
         &'s self,
         mut status: Status,
         req: &'r Request<'s>,
-        error: ErasedError<'r>,
+        mut error: ErasedError<'r>,
     ) -> Response<'r> {
         // We may wish to relax this in the future.
         req.cookies().reset_delta();
 
         loop {
             // Dispatch to the `status` catcher.
-            match self.invoke_catcher(status, error.as_ref(), req).await {
+            match self.invoke_catcher(status, error, req).await {
                 Ok(r) => return r,
                 // If the catcher failed, try `500` catcher, unless this is it.
-                Err(e) if status.code != 500 => {
+                Err((e, err)) if status.code != 500 => {
+                    error = err;
                     warn!(status = e.map(|r| r.code), "catcher failed: trying 500 catcher");
                     status = Status::InternalServerError;
                 }
                 // The 500 catcher failed. There's no recourse. Use default.
-                Err(e) => {
+                Err((e, _)) => {
                     error!(status = e.map(|r| r.code), "500 catcher failed");
                     return catcher::default_handler(Status::InternalServerError, req);
                 }
@@ -267,14 +269,14 @@ impl Rocket<Orbit> {
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,
-        error: &ErasedErrorRef<'r>,
+        error: ErasedError<'r>,
         req: &'r Request<'s>
-    ) -> Result<Response<'r>, Option<Status>> {
+    ) -> Result<Response<'r>, (Option<Status>, ErasedError<'r>)> {
         if let Some(catcher) = self.router.catch(status, req) {
             catcher.trace_info();
             catch_handle(catcher.name.as_deref(), || catcher.handler.handle(status, req, error)).await
-                .map(|result| result.map_err(Some))
-                .unwrap_or_else(|| Err(None))
+                .map(|result| result.map_err(|(s, e)| (Some(s), e)))
+                .unwrap_or_else(|| Err((None, default_error_type())))
         } else {
             info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
                 "no registered catcher: using Rocket default");

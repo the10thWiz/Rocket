@@ -1,7 +1,8 @@
 use devise::ext::SpanDiagnosticExt;
-use devise::{MetaItem, Spanned, Result, FromMeta, Diagnostic};
+use devise::{Diagnostic, FromMeta, MetaItem, Result, SpanWrapped, Spanned};
 use proc_macro2::TokenStream;
 
+use crate::attribute::param::Dynamic;
 use crate::{http, http_codegen};
 
 /// This structure represents the parsed `catch` attribute and associated items.
@@ -10,6 +11,7 @@ pub struct Attribute {
     pub status: Option<http::Status>,
     /// The function that was decorated with the `catch` attribute.
     pub function: syn::ItemFn,
+    pub error: Option<SpanWrapped<Dynamic>>,
 }
 
 /// We generate a full parser for the meta-item for great error messages.
@@ -17,6 +19,7 @@ pub struct Attribute {
 struct Meta {
     #[meta(naked)]
     code: Code,
+    // error: Option<SpanWrapped<Dynamic>>,
 }
 
 /// `Some` if there's a code, `None` if it's `default`.
@@ -49,10 +52,10 @@ impl Attribute {
 
         let attr: MetaItem = syn::parse2(quote!(catch(#args)))?;
         let status = Meta::from_meta(&attr)
-            .map(|meta| meta.code.0)
+            .map(|meta| meta)
             .map_err(|diag| diag.help("`#[catch]` expects a status code int or `default`: \
                         `#[catch(404)]` or `#[catch(default)]`"))?;
 
-        Ok(Attribute { status, function })
+        Ok(Attribute { status: status.code.0, function, error: status.error })
     }
 }

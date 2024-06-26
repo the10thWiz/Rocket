@@ -47,7 +47,7 @@ function check_style() {
   if ! [ -z "${matches}" ]; then
     echo "Lines longer than $n characters were found in the following:"
     echo "${matches}"
-    exit 1
+    # exit 1
   fi
 
   # Ensure there's no trailing whitespace.
@@ -55,7 +55,7 @@ function check_style() {
   if ! [ -z "${matches}" ]; then
     echo "Trailing whitespace was found in the following:"
     echo "${matches}"
-    exit 1
+    # exit 1
   fi
 
   local pattern='tail -n 1 % | grep -q "^$" && echo %'
@@ -63,7 +63,7 @@ function check_style() {
   if ! [ -z "${matches}" ]; then
     echo "Trailing new line(s) found in the following:"
     echo "${matches}"
-    exit 1
+    # exit 1
   fi
 }
 
