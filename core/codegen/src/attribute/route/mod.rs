@@ -113,6 +113,11 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
                             "{_err}"
                         ); } }
                 );
+                ::rocket::trace::info!(
+                    target: concat!("rocket::codegen::route::", module_path!()),
+                    error_type = ::std::any::type_name_of_val(&__error),
+                    "Forwarding error"
+                );
 
                 return #Outcome::Forward((#__data, #Status::UnprocessableEntity, #resolve_error!(__e)));
             }
@@ -151,6 +156,7 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
                     reason = %#display_hack!(&__e),
+                    error_type = ::std::any::type_name_of_val(&__e),
                     "request guard failed"
                 );
 
@@ -174,8 +180,8 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
             target: concat!("rocket::codegen::route::", module_path!()),
             parameter = #name,
             type_name = stringify!(#ty),
-            error_ty = std::any::type_name_of_val(&__error),
             reason = %#display_hack!(&__error),
+            error_type = ::std::any::type_name_of_val(&__error),
             "path guard forwarding"
         );
 
@@ -245,6 +251,7 @@ fn data_guard_decl(guard: &Guard) -> TokenStream {
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
                     reason = %#display_hack!(&__e),
+                    error_type = ::std::any::type_name_of_val(&__error),
                     "data guard failed"
                 );
 
