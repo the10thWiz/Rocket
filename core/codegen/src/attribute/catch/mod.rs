@@ -1,12 +1,23 @@
 mod parse;
 
 use devise::ext::SpanDiagnosticExt;
-use devise::{Spanned, Result};
+use devise::{Diagnostic, Level, Result, Spanned};
 use proc_macro2::{TokenStream, Span};
 
 use crate::http_codegen::Optional;
 use crate::syn_ext::ReturnTypeExt;
 use crate::exports::*;
+
+fn arg_ty(arg: &syn::FnArg) -> Result<&syn::Type> {
+    match arg {
+        syn::FnArg::Receiver(_) => Err(Diagnostic::spanned(
+            arg.span(),
+            Level::Error,
+            "Catcher cannot have self as a parameter"
+        )),
+        syn::FnArg::Typed(syn::PatType {ty, ..})=> Ok(ty.as_ref()),
+    }
+}
 
 pub fn _catch(
     args: proc_macro::TokenStream,
@@ -45,16 +56,17 @@ pub fn _catch(
             syn::FnArg::Receiver(_) => codegen_arg.respanned(fn_arg.span()),
             syn::FnArg::Typed(a) => codegen_arg.respanned(a.ty.span())
         }).rev();
-    let make_error = if catch.function.sig.inputs.len() >= 3 {
+    let (make_error, error_type) = if catch.function.sig.inputs.len() >= 3 {
         let arg = catch.function.sig.inputs.first().unwrap();
-        quote_spanned!(arg.span() => 
+        let ty = arg_ty(arg)?;
+        (quote_spanned!(arg.span() =>
             let #__error = match ::rocket::catcher::downcast(__error_init.as_ref()) {
                 Some(v) => v,
                 None => return #_Result::Err((#__status, __error_init)),
             };
-        )
+        ), quote! {Some((#_catcher::TypeId::of::<#ty>(), ::std::any::type_name::<#ty>()))})
     } else {
-        quote! {}
+        (quote! {}, quote! {None})
     };
 
     // We append `.await` to the function call if this is `async`.
@@ -99,6 +111,7 @@ pub fn _catch(
                 #_catcher::StaticInfo {
                     name: ::core::stringify!(#user_catcher_fn_name),
                     code: #status_code,
+                    error_type: #error_type,
                     handler: monomorphized_function,
                     location: (::core::file!(), ::core::line!(), ::core::column!()),
                 }

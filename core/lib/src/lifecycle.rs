@@ -109,12 +109,16 @@ impl Rocket<Orbit> {
                 request._set_method(Method::Get);
                 match self.route(request, data).await {
                     Outcome::Success(response) => response,
-                    Outcome::Error((status, error)) => self.dispatch_error(status, request, error).await,
-                    Outcome::Forward((_, status, error)) => self.dispatch_error(status, request, error).await,
+                    Outcome::Error((status, error))
+                        => self.dispatch_error(status, request, error).await,
+                    Outcome::Forward((_, status, error))
+                        => self.dispatch_error(status, request, error).await,
                 }
             }
-            Outcome::Forward((_, status, error)) => self.dispatch_error(status, request, error).await,
-            Outcome::Error((status, error)) => self.dispatch_error(status, request, error).await,
+            Outcome::Forward((_, status, error))
+                => self.dispatch_error(status, request, error).await,
+            Outcome::Error((status, error))
+                => self.dispatch_error(status, request, error).await,
         };
 
         // Set the cookies. Note that error responses will only include cookies
@@ -274,7 +278,10 @@ impl Rocket<Orbit> {
     ) -> Result<Response<'r>, (Option<Status>, ErasedError<'r>)> {
         if let Some(catcher) = self.router.catch(status, req) {
             catcher.trace_info();
-            catch_handle(catcher.name.as_deref(), || catcher.handler.handle(status, req, error)).await
+            catch_handle(
+                catcher.name.as_deref(),
+                || catcher.handler.handle(status, req, error)
+            ).await
                 .map(|result| result.map_err(|(s, e)| (Some(s), e)))
                 .unwrap_or_else(|| Err((None, default_error_type())))
         } else {

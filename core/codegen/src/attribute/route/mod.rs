@@ -115,11 +115,15 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
                 );
                 ::rocket::trace::info!(
                     target: concat!("rocket::codegen::route::", module_path!()),
-                    error_type = ::std::any::type_name_of_val(&__error),
+                    error_type = ::std::any::type_name_of_val(&__e),
                     "Forwarding error"
                 );
 
-                return #Outcome::Forward((#__data, #Status::UnprocessableEntity, #resolve_error!(__e)));
+                return #Outcome::Forward((
+                    #__data,
+                    #Status::UnprocessableEntity,
+                    #resolve_error!(__e)
+                ));
             }
 
             (#(#ident.unwrap()),*)
@@ -207,7 +211,11 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
                         #i
                     );
 
-                    return #Outcome::Forward((#__data, #Status::InternalServerError, #resolve_error!()));
+                    return #Outcome::Forward((
+                        #__data,
+                        #Status::InternalServerError,
+                        #resolve_error!()
+                    ));
                 }
             }
         },
@@ -226,7 +234,8 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => __req, __data, display_hack, FromData, Outcome, resolve_error);
+    define_spanned_export!(ty.span() =>
+        __req, __data, display_hack, FromData, Outcome, resolve_error);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
@@ -251,7 +260,7 @@ fn data_guard_decl(guard: &Guard) -> TokenStream {
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
                     reason = %#display_hack!(&__e),
-                    error_type = ::std::any::type_name_of_val(&__error),
+                    error_type = ::std::any::type_name_of_val(&__e),
                     "data guard failed"
                 );
 

@@ -31,7 +31,7 @@ pub type BoxFuture<'r, T = Result<'r>> = futures::future::BoxFuture<'r, T>;
 /// and used as follows:
 ///
 /// ```rust,no_run
-/// use rocket::{Request, Catcher, catcher::{self, ErasedErrorRef}};
+/// use rocket::{Request, Catcher, catcher::{self, ErasedError}};
 /// use rocket::response::{Response, Responder};
 /// use rocket::http::Status;
 ///
@@ -47,11 +47,13 @@ pub type BoxFuture<'r, T = Result<'r>> = futures::future::BoxFuture<'r, T>;
 ///
 /// #[rocket::async_trait]
 /// impl catcher::Handler for CustomHandler {
-///     async fn handle<'r>(&self, status: Status, req: &'r Request<'_>, _e: &ErasedErrorRef<'r>) -> catcher::Result<'r> {
+///     async fn handle<'r>(&self, status: Status, req: &'r Request<'_>, _e: ErasedError<'r>)
+///         -> catcher::Result<'r>
+///     {
 ///         let inner = match self.0 {
-///             Kind::Simple => "simple".respond_to(req)?,
-///             Kind::Intermediate => "intermediate".respond_to(req)?,
-///             Kind::Complex => "complex".respond_to(req)?,
+///             Kind::Simple => "simple".respond_to(req).map_err(|e| (e, _e))?,
+///             Kind::Intermediate => "intermediate".respond_to(req).map_err(|e| (e, _e))?,
+///             Kind::Complex => "complex".respond_to(req).map_err(|e| (e, _e))?,
 ///         };
 ///
 ///         Response::build_from(inner).status(status).ok()
@@ -99,7 +101,8 @@ pub trait Handler: Cloneable + Send + Sync + 'static {
     /// Nevertheless, failure is allowed, both for convenience and necessity. If
     /// an error handler fails, Rocket's default `500` catcher is invoked. If it
     /// succeeds, the returned `Response` is used to respond to the client.
-    async fn handle<'r>(&self, status: Status, req: &'r Request<'_>, error: ErasedError<'r>) -> Result<'r>;
+    async fn handle<'r>(&self, status: Status, req: &'r Request<'_>, error: ErasedError<'r>)
+        -> Result<'r>;
 }
 
 // We write this manually to avoid double-boxing.

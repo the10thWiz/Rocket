@@ -1,6 +1,6 @@
 use transient::{Any, CanRecoverFrom, Co, Downcast};
 #[doc(inline)]
-pub use transient::{Static, Transient};
+pub use transient::{Static, Transient, TypeId};
 
 pub type ErasedError<'r> = Box<dyn Any<Co<'r>> + Send + Sync + 'r>;
 pub type ErasedErrorRef<'r> = dyn Any<Co<'r>> + Send + Sync + 'r;

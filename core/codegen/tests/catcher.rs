@@ -58,3 +58,23 @@ fn test_status_param() {
         assert_eq!(response.into_string().unwrap(), code.to_string());
     }
 }
+
+#[catch(404)]
+fn bad_req_untyped(_: Status, _: &Request<'_>) -> &'static str { "404" }
+#[catch(404)]
+fn bad_req_string(_: &String, _: Status, _: &Request<'_>) -> &'static str { "404 String" }
+#[catch(404)]
+fn bad_req_tuple(_: &(), _: Status, _: &Request<'_>) -> &'static str { "404 ()" }
+
+#[test]
+fn test_typed_catchers() {
+    fn rocket() -> Rocket<Build> {
+        rocket::build()
+            .register("/", catchers![bad_req_untyped, bad_req_string, bad_req_tuple])
+    }
+
+    // Assert the catchers do not collide. They are only differentiated by their error type.
+    let client = Client::debug(rocket()).unwrap();
+    let response = client.get("/").dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}

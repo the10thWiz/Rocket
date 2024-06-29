@@ -56,6 +56,6 @@ impl Attribute {
             .map_err(|diag| diag.help("`#[catch]` expects a status code int or `default`: \
                         `#[catch(404)]` or `#[catch(default)]`"))?;
 
-        Ok(Attribute { status: status.code.0, function, error: status.error })
+        Ok(Attribute { status: status.code.0, function, error: None })
     }
 }

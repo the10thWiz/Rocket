@@ -7,7 +7,11 @@ use crate::http::Status;
 
 /// Type alias for the return type of a [`Route`](crate::Route)'s
 /// [`Handler::handle()`].
-pub type Outcome<'r> = crate::outcome::Outcome<Response<'r>, (Status, ErasedError<'r>), (Data<'r>, Status, ErasedError<'r>)>;
+pub type Outcome<'r> = crate::outcome::Outcome<
+    Response<'r>,
+    (Status, ErasedError<'r>),
+    (Data<'r>, Status, ErasedError<'r>)
+>;
 
 /// Type alias for the return type of a _raw_ [`Route`](crate::Route)'s
 /// [`Handler`].
@@ -240,7 +244,7 @@ impl<'r, 'o: 'r> Outcome<'o> {
         Outcome::Error((code, Box::new(())))
     }
     /// Return an `Outcome` of `Error` with the status code `code`. This adds
-    /// the 
+    /// the value for typed catchers.
     ///
     /// This method exists to be used during manual routing.
     ///
@@ -295,7 +299,9 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn forward_val<T: Any<Co<'r>> + Send + Sync + 'r>(data: Data<'r>, status: Status, val: T) -> Outcome<'r> {
+    pub fn forward_val<T: Any<Co<'r>> + Send + Sync + 'r>(data: Data<'r>, status: Status, val: T)
+        -> Outcome<'r>
+    {
         Outcome::Forward((data, status, Box::new(val)))
     }
 }
