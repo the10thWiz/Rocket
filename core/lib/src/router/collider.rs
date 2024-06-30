@@ -210,7 +210,7 @@ fn formats_collide(route: &Route, other: &Route) -> bool {
 }
 
 fn types_collide(catcher: &Catcher, other: &Catcher) -> bool {
-    catcher.error_type.as_ref().map(|(i, _)| i) == other.error_type.as_ref().map(|(i, _)| i) 
+    catcher.error_type.as_ref().map(|(i, _)| i) == other.error_type.as_ref().map(|(i, _)| i)
 }
 
 #[cfg(test)]
