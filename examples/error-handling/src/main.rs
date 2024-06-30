@@ -4,7 +4,7 @@
 
 use rocket::{Rocket, Request, Build};
 use rocket::response::{content, status};
-use rocket::http::{Status, uri::error::PathError};
+use rocket::http::Status;
 
 // Custom impl so I can implement Static (or Transient) ---
 // We should upstream implementations for most common error types
@@ -13,6 +13,7 @@ use rocket::catcher::{Static};
 use std::num::ParseIntError;
 
 #[derive(Debug)]
+#[allow(unused)]
 struct IntErr(ParseIntError);
 impl Static for IntErr {}
 
@@ -45,7 +46,7 @@ fn general_not_found() -> content::RawHtml<&'static str> {
 }
 
 #[catch(404)]
-fn hello_not_found(s: Status, req: &Request<'_>) -> content::RawHtml<String> {
+fn hello_not_found(req: &Request<'_>) -> content::RawHtml<String> {
     content::RawHtml(format!("\
         <p>Sorry, but '{}' is not a valid path!</p>\
         <p>Try visiting /hello/&lt;name&gt;/&lt;age&gt; instead.</p>",
@@ -57,7 +58,7 @@ fn hello_not_found(s: Status, req: &Request<'_>) -> content::RawHtml<String> {
 // be present. I'm thinking about adding a param to the macro to indicate which (and whether)
 // param is a downcast error.
 #[catch(422)]
-fn param_error(e: &IntErr, s: Status, req: &Request<'_>) -> content::RawHtml<String> {
+fn param_error(e: &IntErr, _s: Status, req: &Request<'_>) -> content::RawHtml<String> {
     content::RawHtml(format!("\
         <p>Sorry, but '{}' is not a valid path!</p>\
         <p>Try visiting /hello/&lt;name&gt;/&lt;age&gt; instead.</p>\

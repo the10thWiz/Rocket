@@ -8,14 +8,21 @@ use crate::http_codegen::Optional;
 use crate::syn_ext::ReturnTypeExt;
 use crate::exports::*;
 
-fn arg_ty(arg: &syn::FnArg) -> Result<&syn::Type> {
+fn error_arg_ty(arg: &syn::FnArg) -> Result<&syn::Type> {
     match arg {
         syn::FnArg::Receiver(_) => Err(Diagnostic::spanned(
             arg.span(),
             Level::Error,
-            "Catcher cannot have self as a parameter"
+            "Catcher cannot have self as a parameter",
         )),
-        syn::FnArg::Typed(syn::PatType {ty, ..})=> Ok(ty.as_ref()),
+        syn::FnArg::Typed(syn::PatType { ty, .. }) => match ty.as_ref() {
+            syn::Type::Reference(syn::TypeReference { elem, .. }) => Ok(elem.as_ref()),
+            _ => Err(Diagnostic::spanned(
+                ty.span(),
+                Level::Error,
+                "Error type must be a reference",
+            )),
+        },
     }
 }
 
@@ -58,9 +65,9 @@ pub fn _catch(
         }).rev();
     let (make_error, error_type) = if catch.function.sig.inputs.len() >= 3 {
         let arg = catch.function.sig.inputs.first().unwrap();
-        let ty = arg_ty(arg)?;
+        let ty = error_arg_ty(arg)?;
         (quote_spanned!(arg.span() =>
-            let #__error = match ::rocket::catcher::downcast(__error_init.as_ref()) {
+            let #__error: &#ty = match ::rocket::catcher::downcast(__error_init.as_ref()) {
                 Some(v) => v,
                 None => return #_Result::Err((#__status, __error_init)),
             };

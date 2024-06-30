@@ -86,7 +86,9 @@
 //! a type of `Option<S>`. If an `Outcome` is a `Forward`, the `Option` will be
 //! `None`.
 
-use crate::catcher::default_error_type;
+use transient::{CanTranscendTo, Co, Transient};
+
+use crate::catcher::{default_error_type, ErasedError};
 use crate::{route, request, response};
 use crate::data::{self, Data, FromData};
 use crate::http::Status;
@@ -806,6 +808,36 @@ impl<'r, 'o: 'r> IntoOutcome<route::Outcome<'r>> for response::Result<'o> {
         match self {
             Ok(val) => Success(val),
             Err(_) => Forward((data, forward, default_error_type()))
+        }
+    }
+}
+
+type RoutedOutcome<'r, T> = Outcome<
+    T,
+    (Status, ErasedError<'r>),
+    (Data<'r>, Status, ErasedError<'r>)
+>;
+
+impl<'r, T, E: Transient> IntoOutcome<RoutedOutcome<'r, T>> for Option<Result<T, E>>
+    where E::Transience: CanTranscendTo<Co<'r>>,
+        E: Send + Sync + 'r,
+{
+    type Error = Status;
+    type Forward = (Data<'r>, Status);
+
+    fn or_error(self, error: Self::Error) -> RoutedOutcome<'r, T> {
+        match self {
+            Some(Ok(v)) => Outcome::Success(v),
+            Some(Err(e)) => Outcome::Error((error, Box::new(e))),
+            None => Outcome::Error((error, default_error_type())),
+        }
+    }
+
+    fn or_forward(self, forward: Self::Forward) -> RoutedOutcome<'r, T> {
+        match self {
+            Some(Ok(v)) => Outcome::Success(v),
+            Some(Err(e)) => Outcome::Forward((forward.0, forward.1, Box::new(e))),
+            None => Outcome::Forward((forward.0, forward.1, default_error_type())),
         }
     }
 }
