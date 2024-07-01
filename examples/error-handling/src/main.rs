@@ -57,7 +57,9 @@ fn hello_not_found(req: &Request<'_>) -> content::RawHtml<String> {
 // NOTE: right now, the error must be the first parameter, and all three params must
 // be present. I'm thinking about adding a param to the macro to indicate which (and whether)
 // param is a downcast error.
-#[catch(422)]
+
+// `error` and `status` type. All other params must be `FromRequest`?
+#[catch(422, error = "<e>" /*, status = "<_s>"*/)]
 fn param_error(e: &IntErr, _s: Status, req: &Request<'_>) -> content::RawHtml<String> {
     content::RawHtml(format!("\
         <p>Sorry, but '{}' is not a valid path!</p>\
