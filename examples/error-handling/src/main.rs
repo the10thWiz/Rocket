@@ -2,9 +2,9 @@
 
 #[cfg(test)] mod tests;
 
-use rocket::{Rocket, Request, Build};
+use rocket::{Rocket, Build};
 use rocket::response::{content, status};
-use rocket::http::Status;
+use rocket::http::{Status, uri::Origin};
 
 // Custom impl so I can implement Static (or Transient) ---
 // We should upstream implementations for most common error types
@@ -46,11 +46,11 @@ fn general_not_found() -> content::RawHtml<&'static str> {
 }
 
 #[catch(404)]
-fn hello_not_found(req: &Request<'_>) -> content::RawHtml<String> {
+fn hello_not_found(uri: &Origin<'_>) -> content::RawHtml<String> {
     content::RawHtml(format!("\
         <p>Sorry, but '{}' is not a valid path!</p>\
         <p>Try visiting /hello/&lt;name&gt;/&lt;age&gt; instead.</p>",
-        req.uri()))
+        uri))
 }
 
 // Demonstrates a downcast error from `hello`
@@ -58,14 +58,14 @@ fn hello_not_found(req: &Request<'_>) -> content::RawHtml<String> {
 // be present. I'm thinking about adding a param to the macro to indicate which (and whether)
 // param is a downcast error.
 
-// `error` and `status` type. All other params must be `FromRequest`?
+// `error` and `status` type. All other params must be `FromOrigin`?
 #[catch(422, error = "<e>" /*, status = "<_s>"*/)]
-fn param_error(e: &IntErr, _s: Status, req: &Request<'_>) -> content::RawHtml<String> {
+fn param_error(e: &IntErr, uri: &Origin<'_>) -> content::RawHtml<String> {
     content::RawHtml(format!("\
         <p>Sorry, but '{}' is not a valid path!</p>\
         <p>Try visiting /hello/&lt;name&gt;/&lt;age&gt; instead.</p>\
         <p>Error: {e:?}</p>",
-        req.uri()))
+        uri))
 }
 
 #[catch(default)]
@@ -73,9 +73,9 @@ fn sergio_error() -> &'static str {
     "I...don't know what to say."
 }
 
-#[catch(default)]
-fn default_catcher(status: Status, req: &Request<'_>) -> status::Custom<String> {
-    let msg = format!("{} ({})", status, req.uri());
+#[catch(default, status = "<status>")]
+fn default_catcher(status: Status, uri: &Origin<'_>) -> status::Custom<String> {
+    let msg = format!("{} ({})", status, uri);
     status::Custom(status, msg)
 }
 

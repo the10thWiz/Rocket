@@ -1,28 +1,64 @@
 mod parse;
 
-use devise::ext::SpanDiagnosticExt;
-use devise::{Diagnostic, Level, Result, Spanned};
+use devise::{Result, Spanned};
 use proc_macro2::{TokenStream, Span};
 
 use crate::http_codegen::Optional;
-use crate::syn_ext::ReturnTypeExt;
+use crate::syn_ext::{IdentExt, ReturnTypeExt};
 use crate::exports::*;
 
-fn error_arg_ty(arg: &syn::FnArg) -> Result<&syn::Type> {
-    match arg {
-        syn::FnArg::Receiver(_) => Err(Diagnostic::spanned(
-            arg.span(),
-            Level::Error,
-            "Catcher cannot have self as a parameter",
-        )),
-        syn::FnArg::Typed(syn::PatType { ty, .. }) => match ty.as_ref() {
-            syn::Type::Reference(syn::TypeReference { elem, .. }) => Ok(elem.as_ref()),
-            _ => Err(Diagnostic::spanned(
-                ty.span(),
-                Level::Error,
-                "Error type must be a reference",
-            )),
-        },
+use self::parse::ErrorGuard;
+
+use super::param::Guard;
+
+fn error_type(guard: &ErrorGuard) -> TokenStream {
+    let ty = &guard.ty;
+    quote! {
+        (#_catcher::TypeId::of::<#ty>(), ::std::any::type_name::<#ty>())
+    }
+}
+
+fn error_guard_decl(guard: &ErrorGuard) -> TokenStream {
+    let (ident, ty) = (guard.ident.rocketized(), &guard.ty);
+    quote_spanned! { ty.span() =>
+        let #ident: &#ty = match #_catcher::downcast(__error_init.as_ref()) {
+            Some(v) => v,
+            None => return #_Result::Err((#__status, __error_init)),
+        };
+    }
+}
+
+fn request_guard_decl(guard: &Guard) -> TokenStream {
+    let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
+    quote_spanned! { ty.span() =>
+        let #ident: #ty = match <#ty as #FromRequest>::from_request(#__req).await {
+            #Outcome::Success(__v) => __v,
+            #Outcome::Forward(__e) => {
+                ::rocket::trace::info!(
+                    name: "forward",
+                    target: concat!("rocket::codegen::catch::", module_path!()),
+                    parameter = stringify!(#ident),
+                    type_name = stringify!(#ty),
+                    status = __e.code,
+                    "request guard forwarding; trying next catcher"
+                );
+
+                return #_Err((#__status, __error_init));
+            },
+            #[allow(unreachable_code)]
+            #Outcome::Error((__c, __e)) => {
+                ::rocket::trace::info!(
+                    name: "failure",
+                    target: concat!("rocket::codegen::catch::", module_path!()),
+                    parameter = stringify!(#ident),
+                    type_name = stringify!(#ty),
+                    reason = %#display_hack!(&__e),
+                    "request guard failed; forwarding to 500 handler"
+                );
+
+                return #_Err((#Status::InternalServerError, __error_init));
+            }
+        };
     }
 }
 
@@ -31,7 +67,7 @@ pub fn _catch(
     input: proc_macro::TokenStream
 ) -> Result<TokenStream> {
     // Parse and validate all of the user's input.
-    let catch = parse::Attribute::parse(args.into(), input)?;
+    let catch = parse::Attribute::parse(args.into(), input.into())?;
 
     // Gather everything we'll need to generate the catcher.
     let user_catcher_fn = &catch.function;
@@ -40,48 +76,27 @@ pub fn _catch(
     let status_code = Optional(catch.status.map(|s| s.code));
     let deprecated = catch.function.attrs.iter().find(|a| a.path().is_ident("deprecated"));
 
-    // Determine the number of parameters that will be passed in.
-    if catch.function.sig.inputs.len() > 3 {
-        return Err(catch.function.sig.paren_token.span.join()
-            .error("invalid number of arguments: must be zero, one, or two")
-            .help("catchers optionally take `&Request` or `Status, &Request`"));
-    }
-
     // This ensures that "Responder not implemented" points to the return type.
     let return_type_span = catch.function.sig.output.ty()
         .map(|ty| ty.span())
         .unwrap_or_else(Span::call_site);
 
-    // TODO: how to handle request?
-    //   - Right now: (), (&Req), (Status, &Req) allowed
-    // Set the `req` and `status` spans to that of their respective function
-    // arguments for a more correct `wrong type` error span. `rev` to be cute.
-    let codegen_args = &[__req, __status, __error];
-    let inputs = catch.function.sig.inputs.iter().rev()
-        .zip(codegen_args.iter())
-        .map(|(fn_arg, codegen_arg)| match fn_arg {
-            syn::FnArg::Receiver(_) => codegen_arg.respanned(fn_arg.span()),
-            syn::FnArg::Typed(a) => codegen_arg.respanned(a.ty.span())
-        }).rev();
-    let (make_error, error_type) = if catch.function.sig.inputs.len() >= 3 {
-        let arg = catch.function.sig.inputs.first().unwrap();
-        let ty = error_arg_ty(arg)?;
-        (quote_spanned!(arg.span() =>
-            let #__error: &#ty = match ::rocket::catcher::downcast(__error_init.as_ref()) {
-                Some(v) => v,
-                None => return #_Result::Err((#__status, __error_init)),
-            };
-        ), quote! {Some((#_catcher::TypeId::of::<#ty>(), ::std::any::type_name::<#ty>()))})
-    } else {
-        (quote! {}, quote! {None})
-    };
+    let status_guard = catch.status_guard.as_ref().map(|(_, s)| {
+        let ident = s.rocketized();
+        quote! { let #ident = #__status; }
+    });
+    let error_guard = catch.error_guard.as_ref().map(error_guard_decl);
+    let error_type = Optional(catch.error_guard.as_ref().map(error_type));
+    let request_guards = catch.request_guards.iter().map(request_guard_decl);
+    let parameter_names = catch.arguments.map.values()
+        .map(|(ident, _)| ident.rocketized());
 
     // We append `.await` to the function call if this is `async`.
     let dot_await = catch.function.sig.asyncness
         .map(|a| quote_spanned!(a.span() => .await));
 
     let catcher_response = quote_spanned!(return_type_span => {
-        let ___responder = #user_catcher_fn_name(#(#inputs),*) #dot_await;
+        let ___responder = #user_catcher_fn_name(#(#parameter_names),*) #dot_await;
         #_response::Responder::respond_to(___responder, #__req).map_err(|s| (s, __error_init))?
     });
 
@@ -104,7 +119,9 @@ pub fn _catch(
                     __error_init: #ErasedError<'__r>,
                 ) -> #_catcher::BoxFuture<'__r> {
                     #_Box::pin(async move {
-                        #make_error
+                        #error_guard
+                        #status_guard
+                        #(#request_guards)*
                         let __response = #catcher_response;
                         #_Result::Ok(
                             #Response::build()
