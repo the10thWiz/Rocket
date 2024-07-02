@@ -1,6 +1,6 @@
 use devise::{Spanned, SpanWrapped, Result, FromMeta};
 use devise::ext::{SpanDiagnosticExt, TypeExt};
-use indexmap::{IndexSet, IndexMap};
+use indexmap::IndexSet;
 use proc_macro2::Span;
 
 use crate::attribute::suppress::Lint;

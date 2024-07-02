@@ -76,8 +76,7 @@ use super::ErasedError;
 /// ```rust,no_run
 /// #[macro_use] extern crate rocket;
 ///
-/// use rocket::Request;
-/// use rocket::http::Status;
+/// use rocket::http::{Status, uri::Origin};
 ///
 /// #[catch(500)]
 /// fn internal_error() -> &'static str {
@@ -85,13 +84,13 @@ use super::ErasedError;
 /// }
 ///
 /// #[catch(404)]
-/// fn not_found(req: &Request) -> String {
-///     format!("I couldn't find '{}'. Try something else?", req.uri())
+/// fn not_found(uri: &Origin) -> String {
+///     format!("I couldn't find '{}'. Try something else?", uri)
 /// }
 ///
-/// #[catch(default)]
-/// fn default(status: Status, req: &Request) -> String {
-///     format!("{} ({})", status, req.uri())
+/// #[catch(default, status = "<status>")]
+/// fn default(status: Status, uri: &Origin) -> String {
+///     format!("{} ({})", status, uri)
 /// }
 ///
 /// #[launch]
@@ -99,13 +98,6 @@ use super::ErasedError;
 ///     rocket::build().register("/", catchers![internal_error, not_found, default])
 /// }
 /// ```
-///
-/// A function decorated with `#[catch]` may take zero, one, or two arguments.
-/// It's type signature must be one of the following, where `R:`[`Responder`]:
-///
-///   * `fn() -> R`
-///   * `fn(`[`&Request`]`) -> R`
-///   * `fn(`[`Status`]`, `[`&Request`]`) -> R`
 ///
 /// See the [`catch`] documentation for full details.
 ///
