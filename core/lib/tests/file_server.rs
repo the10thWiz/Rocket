@@ -16,25 +16,25 @@ fn rocket() -> Rocket<Build> {
         .mount("/default", FileServer::new(&root))
         .mount(
             "/no_index",
-            FileServer::empty()
+            FileServer::identity()
                 .filter(|f, _| f.is_visible())
                 .rewrite(Prefix::checked(&root))
         )
         .mount(
             "/dots",
-            FileServer::empty()
+            FileServer::identity()
                 .rewrite(Prefix::checked(&root))
         )
         .mount(
             "/index",
-            FileServer::empty()
+            FileServer::identity()
                 .filter(|f, _| f.is_visible())
                 .rewrite(Prefix::checked(&root))
                 .rewrite(DirIndex::unconditional("index.html"))
         )
         .mount(
             "/try_index",
-            FileServer::empty()
+            FileServer::identity()
                 .filter(|f, _| f.is_visible())
                 .rewrite(Prefix::checked(&root))
                 .rewrite(DirIndex::if_exists("index.html"))
@@ -42,20 +42,20 @@ fn rocket() -> Rocket<Build> {
         )
         .mount(
             "/both",
-            FileServer::empty()
+            FileServer::identity()
                 .rewrite(Prefix::checked(&root))
                 .rewrite(DirIndex::unconditional("index.html"))
         )
         .mount(
             "/redir",
-            FileServer::empty()
+            FileServer::identity()
                 .filter(|f, _| f.is_visible())
                 .rewrite(Prefix::checked(&root))
                 .rewrite(TrailingDirs)
         )
         .mount(
             "/redir_index",
-            FileServer::empty()
+            FileServer::identity()
                 .filter(|f, _| f.is_visible())
                 .rewrite(Prefix::checked(&root))
                 .rewrite(TrailingDirs)
@@ -63,13 +63,13 @@ fn rocket() -> Rocket<Build> {
         )
         .mount(
             "/index_file",
-            FileServer::empty()
+            FileServer::identity()
                 .filter(|f, _| f.is_visible())
                 .rewrite(File::checked(root.join("other/hello.txt")))
         )
         .mount(
             "/missing_root",
-            FileServer::empty()
+            FileServer::identity()
                 .filter(|f, _| f.is_visible())
                 .rewrite(File::new(root.join("no_file")))
         )

@@ -5,25 +5,20 @@ use crate::Request;
 use crate::http::{ext::IntoOwned, HeaderMap};
 use crate::response::Redirect;
 
-/// Trait used to implement [`FileServer`] customization.
+/// A file server [`Rewrite`] rewriter.
 ///
-/// A [`FileServer`] is a sequence of `Rewriter`s which transform the incoming
-/// request path into a [`Rewrite`] or `None`.
-///
-/// If the final rewrite is `None` or a nonexistent path or a directory,
-/// [`FileServer`] responds with [`Status::NotFound`]. Otherwise it responds
-/// with the file contents, if [`Rewrite::File`] is specified, or a redirect, if
+/// A [`FileServer`] is a sequence of [`Rewriter`]s which transform the incoming
+/// request path into a [`Rewrite`] or `None`. The first rewriter is called with
+/// the request path as a [`Rewrite::File`]. Each `Rewriter` thereafter is
+/// called in-turn with the previously returned [`Rewrite`], and the value
+/// returned from the last `Rewriter` is used to respond to the request. If the
+/// final rewrite is `None` or a nonexistent path or a directory, [`FileServer`]
+/// responds with [`Status::NotFound`]. Otherwise it responds with the file
+/// contents, if [`Rewrite::File`] is specified, or a redirect, if
 /// [`Rewrite::Redirect`] is specified.
 ///
-/// # Creating a [`FileServer`]
-///
-/// The primary way to create a [`FileServer`] is via [`FileServer::new()`] which
-/// creates a new [`FileServer`] with a default set of `Rewriter`s: a filter for
-/// dotfiles, a root path to apply as a prefix, an index file rewriter, and a
-/// rewriter to normalize directories to always include a trailing slash.
-///
 /// [`FileServer`]: super::FileServer
-/// [`FileServer::new()`]: super::FileServer::new
+/// [`Status::NotFound`]: crate::http::Status::NotFound
 pub trait Rewriter: Send + Sync + 'static {
     /// Alter the [`Rewrite`] as needed.
     fn rewrite<'r>(&self, opt: Option<Rewrite<'r>>, req: &'r Request<'_>) -> Option<Rewrite<'r>>;
@@ -109,7 +104,7 @@ impl<'r> File<'r> {
 /// use rocket::fs::FileServer;
 /// use rocket::fs::rewrite::Prefix;
 ///
-/// FileServer::empty()
+/// FileServer::identity()
 ///    .filter(|f, _| f.is_visible())
 ///    .rewrite(Prefix::checked("static"));
 /// ```
@@ -160,7 +155,7 @@ impl Rewriter for PathBuf {
 /// use rocket::fs::FileServer;
 /// use rocket::fs::rewrite::{Prefix, TrailingDirs};
 ///
-/// FileServer::empty()
+/// FileServer::identity()
 ///     .filter(|f, _| f.is_visible())
 ///     .rewrite(TrailingDirs);
 /// ```
@@ -190,7 +185,7 @@ impl Rewriter for TrailingDirs {
 /// use rocket::fs::FileServer;
 /// use rocket::fs::rewrite::DirIndex;
 ///
-/// FileServer::new_without_index("static")
+/// FileServer::without_index("static")
 ///     .rewrite(DirIndex::if_exists("index.htm"))
 ///     .rewrite(DirIndex::unconditional("index.html"));
 /// ```
@@ -233,21 +228,9 @@ impl<'r> From<File<'r>> for Rewrite<'r> {
     }
 }
 
-impl<'r> From<File<'r>> for Option<Rewrite<'r>> {
-    fn from(value: File<'r>) -> Self {
-        Some(Rewrite::File(value))
-    }
-}
-
 impl<'r> From<Redirect> for Rewrite<'r> {
     fn from(value: Redirect) -> Self {
         Self::Redirect(value)
-    }
-}
-
-impl<'r> From<Redirect> for Option<Rewrite<'r>> {
-    fn from(value: Redirect) -> Self {
-        Some(Rewrite::Redirect(value))
     }
 }
 
