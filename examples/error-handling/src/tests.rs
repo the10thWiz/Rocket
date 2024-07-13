@@ -1,6 +1,5 @@
 use rocket::local::blocking::Client;
 use rocket::http::Status;
-use super::{I8, IntErr};
 
 #[test]
 fn test_hello() {
@@ -11,7 +10,7 @@ fn test_hello() {
     let response = client.get(uri).dispatch();
 
     assert_eq!(response.status(), Status::Ok);
-    assert_eq!(response.into_string().unwrap(), super::hello(name, I8(age)));
+    assert_eq!(response.into_string().unwrap(), super::hello(name, age));
 }
 
 #[test]
@@ -50,7 +49,7 @@ fn test_hello_invalid_age() {
     for path in &["Ford/-129", "Trillian/128"] {
         let request = client.get(format!("/hello/{}", path));
         let expected = super::param_error(
-            &IntErr(path.split_once("/").unwrap().1.parse::<i8>().unwrap_err()),
+            &path.split_once("/").unwrap().1.parse::<i8>().unwrap_err(),
             request.uri()
         );
         let response = request.dispatch();

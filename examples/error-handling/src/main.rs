@@ -5,31 +5,11 @@
 use rocket::{Rocket, Build};
 use rocket::response::{content, status};
 use rocket::http::{Status, uri::Origin};
-
-// Custom impl so I can implement Static (or Transient) ---
-// We should upstream implementations for most common error types
-// in transient itself
-use rocket::catcher::{Static};
 use std::num::ParseIntError;
 
-#[derive(Debug)]
-#[allow(unused)]
-struct IntErr(ParseIntError);
-impl Static for IntErr {}
-
-struct I8(i8);
-use rocket::request::FromParam;
-impl FromParam<'_> for I8 {
-    type Error = IntErr;
-    fn from_param(param: &str) -> Result<Self, Self::Error> {
-        param.parse::<i8>().map(Self).map_err(IntErr)
-    }
-}
-// ------------------------------
-
 #[get("/hello/<name>/<age>")]
-fn hello(name: &str, age: I8) -> String {
-    format!("Hello, {} year old named {}!", age.0, name)
+fn hello(name: &str, age: i8) -> String {
+    format!("Hello, {} year old named {}!", age, name)
 }
 
 #[get("/<code>")]
@@ -60,7 +40,7 @@ fn hello_not_found(uri: &Origin<'_>) -> content::RawHtml<String> {
 
 // `error` and `status` type. All other params must be `FromOrigin`?
 #[catch(422, error = "<e>" /*, status = "<_s>"*/)]
-fn param_error(e: &IntErr, uri: &Origin<'_>) -> content::RawHtml<String> {
+fn param_error(e: &ParseIntError, uri: &Origin<'_>) -> content::RawHtml<String> {
     content::RawHtml(format!("\
         <p>Sorry, but '{}' is not a valid path!</p>\
         <p>Try visiting /hello/&lt;name&gt;/&lt;age&gt; instead.</p>\
