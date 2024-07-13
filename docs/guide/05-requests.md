@@ -1988,12 +1988,12 @@ scope, and type. Catchers are similar to routes except in that:
   2. Catchers are declared with the `catch` attribute.
   3. Catchers are _registered_ with [`register()`] instead of [`mount()`].
   4. Any modifications to cookies are cleared before a catcher is invoked.
-  // 5. Error catchers cannot invoke guards.
   6. Error catchers should not fail to produce a response.
   7. Catchers are scoped to a path prefix.
 
 To declare a catcher for a given status code, use the [`catch`] attribute, which
-takes a single integer corresponding to the HTTP status code to catch. For
+takes a single integer corresponding to the HTTP status code to catch as the first
+arguement. For
 instance, to declare a catcher for `404 Not Found` errors, you'd write:
 
 ```rust
@@ -2004,7 +2004,8 @@ instance, to declare a catcher for `404 Not Found` errors, you'd write:
 fn not_found() { /* .. */ }
 ```
 
-TODO: See the catcher documentation
+Cathers can include Request Guards, although forwards and errors work differently.
+Forwards try the next catcher in the chain, while Errors trigger a `500` response.
 
 ```rust
 # #[macro_use] extern crate rocket;
@@ -2030,6 +2031,42 @@ looks like:
 
 fn main() {
     rocket::build().register("/", catchers![not_found]);
+}
+```
+
+### Additional parameters.
+
+Catchers provide two special parameters: `status` and `error`. `status` provides
+access to the status code, which is primarily useful for [default catchers](#default-catchers).
+`error` provides access the error values returned by a [`FromRequest`], [`FromData`] or [`FromParam`].
+It only provides access to the most recent error, so if a route forwards, and another route is
+attempted, only the error produced by the most recent attempt can be extracted. The `error` type
+must implement [`Transient`], a non-static re-implementation of [`std::and::Any`]. (Almost) All errror
+types returned by built-in guards implement [`Transient`], and can therefore be extracted. See
+[the `Transient` derive](@api/master/rocket/catcher/derive.Transient.html) for more information
+on implementing [`Transient`] for custom error types.
+
+[`Transient`]: @api/master/rocket/catcher/trait.Transient.html
+[`std::any::Any`]: https://doc.rust-lang.org/1.78.0/core/any/trait.Any.html
+
+* The form::Errors type does not (yet) implement Transient
+
+The function arguement must be a reference to the error type expected. See the 
+[error handling example](@git/master/examples/error-handling)
+for a full application, including the route that generates the error.
+
+```rust
+# #[macro_use] extern crate rocket;
+
+use rocket::Request;
+use std::num::ParseIntError;
+
+#[catch(default, error = "<error>")]
+fn default_catcher(error: &ParseIntError) { /* .. */ }
+
+#[launch]
+fn rocket() -> _ {
+    rocket::build().register("/", catchers![default_catcher])
 }
 ```
 
