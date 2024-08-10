@@ -1,6 +1,7 @@
-#[macro_use] extern crate rocket;
+#[macro_use]
+extern crate rocket;
 
-use rocket::{Rocket, Build, build, fairing::AdHoc, Orbit};
+use rocket::{build, fairing::AdHoc, Build, Orbit, Rocket};
 
 struct AsyncDropInAsync;
 
@@ -17,10 +18,12 @@ impl Drop for AsyncDropInAsync {
 fn rocket() -> Rocket<Build> {
     build().manage(AsyncDropInAsync).attach(AdHoc::on_liftoff(
         "Shutdown immediately",
-        |rocket: &Rocket<Orbit>| Box::pin(async {
-            rocket.shutdown().notify();
-        }
-    )))
+        |rocket: &Rocket<Orbit>| {
+            Box::pin(async {
+                rocket.shutdown().notify();
+            })
+        },
+    ))
 }
 
 mod launch {
@@ -35,9 +38,14 @@ mod launch {
 }
 
 mod main {
+    use rocket::tokio::net::TcpListener;
+
     #[rocket::main]
     async fn main() {
-        super::rocket().launch().await.unwrap();
+        super::rocket()
+            .try_launch_on(TcpListener::bind("localhost:8001"))
+            .await
+            .unwrap();
     }
     #[test]
     fn test_main() {
@@ -45,6 +53,11 @@ mod main {
     }
     #[test]
     fn test_execute() {
-        rocket::execute(super::rocket().launch()).unwrap();
+        rocket::execute(async {
+            super::rocket()
+                .try_launch_on(TcpListener::bind("localhost:8002"))
+                .await
+                .unwrap();
+        });
     }
 }
