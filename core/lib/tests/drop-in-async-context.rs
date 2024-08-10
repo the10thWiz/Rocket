@@ -1,7 +1,8 @@
 #[macro_use]
 extern crate rocket;
 
-use rocket::{build, fairing::AdHoc, Build, Orbit, Rocket};
+use figment::Figment;
+use rocket::{custom, fairing::AdHoc, Build, Orbit, Rocket, config::SecretKey};
 
 struct AsyncDropInAsync;
 
@@ -16,7 +17,10 @@ impl Drop for AsyncDropInAsync {
 }
 
 fn rocket() -> Rocket<Build> {
-    build().manage(AsyncDropInAsync).attach(AdHoc::on_liftoff(
+    let mut config = rocket::Config::default();
+    config.secret_key = SecretKey::generate().unwrap();
+    let figment = Figment::from(config);
+    custom(figment).manage(AsyncDropInAsync).attach(AdHoc::on_liftoff(
         "Shutdown immediately",
         |rocket: &Rocket<Orbit>| {
             Box::pin(async {
