@@ -1,8 +1,8 @@
 #[macro_use]
 extern crate rocket;
 
-use figment::Figment;
-use rocket::{custom, fairing::AdHoc, Build, Orbit, Rocket, config::SecretKey};
+use rocket::figment::{providers::{Format as _, Toml}, Figment};
+use rocket::{custom, fairing::AdHoc, Build, Orbit, Rocket};
 
 struct AsyncDropInAsync;
 
@@ -18,8 +18,13 @@ impl Drop for AsyncDropInAsync {
 
 fn rocket() -> Rocket<Build> {
     let mut config = rocket::Config::default();
-    config.secret_key = SecretKey::generate().unwrap();
-    let figment = Figment::from(config);
+    #[cfg(feature = "secrets")]
+    { config.secret_key = rocket::config::SecretKey::generate().unwrap(); }
+    let figment = Figment::from(config).merge(Toml::string(r#"
+[default]
+address = "tcp:127.0.0.1:0"
+port = 0
+"#).nested());
     custom(figment).manage(AsyncDropInAsync).attach(AdHoc::on_liftoff(
         "Shutdown immediately",
         |rocket: &Rocket<Orbit>| {
@@ -42,12 +47,10 @@ mod launch {
 }
 
 mod main {
-    use rocket::tokio::net::TcpListener;
-
     #[rocket::main]
     async fn main() {
         super::rocket()
-            .try_launch_on(TcpListener::bind("localhost:8001"))
+            .launch()
             .await
             .unwrap();
     }
@@ -59,7 +62,7 @@ mod main {
     fn test_execute() {
         rocket::execute(async {
             super::rocket()
-                .try_launch_on(TcpListener::bind("localhost:8002"))
+                .launch()
                 .await
                 .unwrap();
         });
