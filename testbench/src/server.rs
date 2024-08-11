@@ -152,6 +152,10 @@ impl Token {
     pub fn launch(self, rocket: Rocket<Build>) -> Launched {
         self.launch_with::<DefaultListener>(rocket)
     }
+
+    pub fn ignored(self) -> Launched {
+        Launched(())
+    }
 }
 
 impl Drop for Server {

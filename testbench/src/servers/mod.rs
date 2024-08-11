@@ -6,3 +6,4 @@ pub mod mtls;
 pub mod sni_resolver;
 pub mod tracing;
 pub mod tls;
+pub mod drop_in_async_context;
