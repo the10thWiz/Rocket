@@ -569,7 +569,8 @@ impl<S: Stream<Item = Event>> From<S> for EventStream<S> {
 }
 
 impl<'r, S: Stream<Item = Event> + Send + 'r> Responder<'r, 'r> for EventStream<S> {
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'r> {
+    type Error = std::convert::Infallible;
+    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'r, Self::Error> {
         Response::build()
             .header(ContentType::EventStream)
             .raw_header("Cache-Control", "no-cache")

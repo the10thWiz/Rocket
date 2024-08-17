@@ -75,17 +75,19 @@ impl<E> From<E> for Debug<E> {
 }
 
 impl<'r, E: std::fmt::Debug> Responder<'r, 'static> for Debug<E> {
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
+    type Error = std::convert::Infallible;
+    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
         let type_name = std::any::type_name::<E>();
         info!(type_name, value = ?self.0, "debug response (500)");
-        Err(Status::InternalServerError)
+        response::Outcome::Forward(Status::InternalServerError)
     }
 }
 
 /// Prints a warning with the error and forwards to the `500` error catcher.
 impl<'r> Responder<'r, 'static> for std::io::Error {
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
+    type Error = std::convert::Infallible;
+    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
         warn!("i/o error response: {self}");
-        Err(Status::InternalServerError)
+        response::Outcome::Forward(Status::InternalServerError)
     }
 }

@@ -142,7 +142,8 @@ impl<S: Stream> From<S> for ReaderStream<S> {
 impl<'r, S: Stream> Responder<'r, 'r> for ReaderStream<S>
     where S: Send + 'r, S::Item: AsyncRead + Send,
 {
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'r> {
+    type Error = std::convert::Infallible;
+    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'r, Self::Error> {
         Response::build()
             .streamed_body(self)
             .ok()

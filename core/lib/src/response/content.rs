@@ -31,6 +31,7 @@
 //! let response = content::RawHtml("<h1>Hello, world!</h1>");
 //! ```
 
+use crate::outcome::try_outcome;
 use crate::request::Request;
 use crate::response::{self, Response, Responder};
 use crate::http::ContentType;
@@ -58,7 +59,8 @@ macro_rules! ctrs {
             /// Sets the Content-Type of the response then delegates the
             /// remainder of the response to the wrapped responder.
             impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for $name<R> {
-                fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o> {
+                type Error = R::Error;
+                fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
                     (ContentType::$ct, self.0).respond_to(req)
                 }
             }
@@ -78,9 +80,10 @@ ctrs! {
 }
 
 impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for (ContentType, R) {
-    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o> {
+    type Error = R::Error;
+    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
         Response::build()
-            .merge(self.1.respond_to(req)?)
+            .merge(try_outcome!(self.1.respond_to(req)))
             .header(self.0)
             .ok()
     }

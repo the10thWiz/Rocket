@@ -151,7 +151,8 @@ impl Redirect {
 /// value used to create the `Responder` is an invalid URI, an error of
 /// `Status::InternalServerError` is returned.
 impl<'r> Responder<'r, 'static> for Redirect {
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
+    type Error = std::convert::Infallible;
+    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
         if let Some(uri) = self.1 {
             Response::build()
                 .status(self.0)
@@ -159,7 +160,7 @@ impl<'r> Responder<'r, 'static> for Redirect {
                 .ok()
         } else {
             error!("Invalid URI used for redirect.");
-            Err(Status::InternalServerError)
+            response::Outcome::Forward(Status::InternalServerError)
         }
     }
 }

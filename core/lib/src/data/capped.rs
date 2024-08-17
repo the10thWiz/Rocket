@@ -205,7 +205,8 @@ use crate::response::{self, Responder};
 use crate::request::Request;
 
 impl<'r, 'o: 'r, T: Responder<'r, 'o>> Responder<'r, 'o> for Capped<T> {
-    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
+    type Error = T::Error;
+    fn respond_to(self, request: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
         self.value.respond_to(request)
     }
 }

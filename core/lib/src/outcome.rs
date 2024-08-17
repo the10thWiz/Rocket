@@ -88,7 +88,6 @@
 
 use transient::{CanTranscendTo, Co, Transient};
 
-use crate::catcher::{default_error_type, ErasedError};
 use crate::{route, request, response};
 use crate::data::{self, Data, FromData};
 use crate::http::Status;
@@ -614,6 +613,16 @@ impl<S, E, F> Outcome<S, E, F> {
             Outcome::Forward(v) => Err(v),
         }
     }
+
+    /// Converts `Outcome<S, E, F>` to `Option<S>` by dropping error
+    /// and forward variants, and returning `None`
+    #[inline]
+    pub fn ok(self) -> Option<S> {
+        match self {
+            Self::Success(v) => Some(v),
+            _ => None,
+        }
+    }
 }
 
 impl<'a, S: Send + 'a, E: Send + 'a, F: Send + 'a> Outcome<S, E, F> {
@@ -791,53 +800,53 @@ impl<S, E> IntoOutcome<request::Outcome<S, E>> for Result<S, E> {
     }
 }
 
-impl<'r, 'o: 'r> IntoOutcome<route::Outcome<'r>> for response::Result<'o> {
-    type Error = ();
-    type Forward = (Data<'r>, Status);
+// impl<'r, 'o: 'r> IntoOutcome<route::Outcome<'r>> for response::Result<'o> {
+//     type Error = ();
+//     type Forward = (Data<'r>, Status);
 
-    #[inline]
-    fn or_error(self, _: ()) -> route::Outcome<'r> {
-        match self {
-            Ok(val) => Success(val),
-            Err(status) => Error((status, default_error_type())),
-        }
-    }
+//     #[inline]
+//     fn or_error(self, _: ()) -> route::Outcome<'r> {
+//         match self {
+//             Ok(val) => Success(val),
+//             Err(status) => Error((status, default_error_type())),
+//         }
+//     }
 
-    #[inline]
-    fn or_forward(self, (data, forward): (Data<'r>, Status)) -> route::Outcome<'r> {
-        match self {
-            Ok(val) => Success(val),
-            Err(_) => Forward((data, forward, default_error_type()))
-        }
-    }
-}
+//     #[inline]
+//     fn or_forward(self, (data, forward): (Data<'r>, Status)) -> route::Outcome<'r> {
+//         match self {
+//             Ok(val) => Success(val),
+//             Err(_) => Forward((data, forward, default_error_type()))
+//         }
+//     }
+// }
 
-type RoutedOutcome<'r, T> = Outcome<
-    T,
-    (Status, ErasedError<'r>),
-    (Data<'r>, Status, ErasedError<'r>)
->;
+// type RoutedOutcome<'r, T> = Outcome<
+//     T,
+//     (Status, ErasedError<'r>),
+//     (Data<'r>, Status, ErasedError<'r>)
+// >;
 
-impl<'r, T, E: Transient> IntoOutcome<RoutedOutcome<'r, T>> for Option<Result<T, E>>
-    where E::Transience: CanTranscendTo<Co<'r>>,
-        E: Send + Sync + 'r,
-{
-    type Error = Status;
-    type Forward = (Data<'r>, Status);
+// impl<'r, T, E: Transient> IntoOutcome<RoutedOutcome<'r, T>> for Option<Result<T, E>>
+//     where E::Transience: CanTranscendTo<Co<'r>>,
+//         E: Send + Sync + 'r,
+// {
+//     type Error = Status;
+//     type Forward = (Data<'r>, Status);
 
-    fn or_error(self, error: Self::Error) -> RoutedOutcome<'r, T> {
-        match self {
-            Some(Ok(v)) => Outcome::Success(v),
-            Some(Err(e)) => Outcome::Error((error, Box::new(e))),
-            None => Outcome::Error((error, default_error_type())),
-        }
-    }
+//     fn or_error(self, error: Self::Error) -> RoutedOutcome<'r, T> {
+//         match self {
+//             Some(Ok(v)) => Outcome::Success(v),
+//             Some(Err(e)) => Outcome::Error((error, Box::new(e))),
+//             None => Outcome::Error((error, default_error_type())),
+//         }
+//     }
 
-    fn or_forward(self, forward: Self::Forward) -> RoutedOutcome<'r, T> {
-        match self {
-            Some(Ok(v)) => Outcome::Success(v),
-            Some(Err(e)) => Outcome::Forward((forward.0, forward.1, Box::new(e))),
-            None => Outcome::Forward((forward.0, forward.1, default_error_type())),
-        }
-    }
-}
+//     fn or_forward(self, forward: Self::Forward) -> RoutedOutcome<'r, T> {
+//         match self {
+//             Some(Ok(v)) => Outcome::Success(v),
+//             Some(Err(e)) => Outcome::Forward((forward.0, forward.1, Box::new(e))),
+//             None => Outcome::Forward((forward.0, forward.1, default_error_type())),
+//         }
+//     }
+// }

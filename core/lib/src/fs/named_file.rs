@@ -4,8 +4,9 @@ use std::ops::{Deref, DerefMut};
 
 use tokio::fs::{File, OpenOptions};
 
+use crate::outcome::try_outcome;
 use crate::request::Request;
-use crate::response::{self, Responder};
+use crate::response::{self, Responder, Outcome};
 use crate::http::ContentType;
 
 /// A [`Responder`] that sends file data with a Content-Type based on its
@@ -152,15 +153,16 @@ impl NamedFile {
 /// you would like to stream a file with a different Content-Type than that
 /// implied by its extension, use a [`File`] directly.
 impl<'r> Responder<'r, 'static> for NamedFile {
-    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static> {
-        let mut response = self.1.respond_to(req)?;
+    type Error = std::convert::Infallible;
+    fn respond_to(self, req: &'r Request<'_>) -> Outcome<'static, Self::Error> {
+        let mut response = try_outcome!(self.1.respond_to(req));
         if let Some(ext) = self.0.extension() {
             if let Some(ct) = ContentType::from_extension(&ext.to_string_lossy()) {
                 response.set_header(ct);
             }
         }
 
-        Ok(response)
+        Outcome::Success(response)
     }
 }
 

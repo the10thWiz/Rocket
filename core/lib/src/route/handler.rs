@@ -1,16 +1,14 @@
-use transient::{Any, Co};
-
-use crate::catcher::{default_error_type, ErasedError};
+use crate::catcher::Error;
 use crate::{Request, Data};
-use crate::response::{Response, Responder};
+use crate::response::{self, Response, Responder};
 use crate::http::Status;
 
 /// Type alias for the return type of a [`Route`](crate::Route)'s
 /// [`Handler::handle()`].
 pub type Outcome<'r> = crate::outcome::Outcome<
     Response<'r>,
-    (Status, ErasedError<'r>),
-    (Data<'r>, Status, ErasedError<'r>)
+    (Status, Option<Box<dyn Error<'r>>>),
+    (Data<'r>, Status, Option<Box<dyn Error<'r>>>)
 >;
 
 /// Type alias for the return type of a _raw_ [`Route`](crate::Route)'s
@@ -177,6 +175,7 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
 impl<'r, 'o: 'r> Outcome<'o> {
     /// Return the `Outcome` of response to `req` from `responder`.
     ///
+    // TODO: docs
     /// If the responder returns `Ok`, an outcome of `Success` is returned with
     /// the response. If the responder returns `Err`, an outcome of `Error` is
     /// returned with the status code.
@@ -193,36 +192,38 @@ impl<'r, 'o: 'r> Outcome<'o> {
     #[inline]
     pub fn from<R: Responder<'r, 'o>>(req: &'r Request<'_>, responder: R) -> Outcome<'r> {
         match responder.respond_to(req) {
-            Ok(response) => Outcome::Success(response),
-            Err(status) => Outcome::Error((status, Box::new(()))),
+            response::Outcome::Success(response) => Outcome::Success(response),
+            response::Outcome::Error(error) => Outcome::Error((error.status(), Some(Box::new(error)))),
+            response::Outcome::Forward(status) => Outcome::Error((status, None)),
         }
     }
 
-    /// Return the `Outcome` of response to `req` from `responder`.
-    ///
-    /// If the responder returns `Ok`, an outcome of `Success` is returned with
-    /// the response. If the responder returns `Err`, an outcome of `Error` is
-    /// returned with the status code.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use rocket::{Request, Data, route};
-    ///
-    /// fn str_responder<'r>(req: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
-    ///     route::Outcome::from(req, "Hello, world!")
-    /// }
-    /// ```
-    #[inline]
-    pub fn try_from<R, E>(req: &'r Request<'_>, result: Result<R, E>) -> Outcome<'r>
-        where R: Responder<'r, 'o>, E: std::fmt::Debug
-    {
-        let responder = result.map_err(crate::response::Debug);
-        match responder.respond_to(req) {
-            Ok(response) => Outcome::Success(response),
-            Err(status) => Outcome::Error((status, Box::new(()))),
-        }
-    }
+    // TODO: does this still make sense
+    // /// Return the `Outcome` of response to `req` from `responder`.
+    // ///
+    // /// If the responder returns `Ok`, an outcome of `Success` is returned with
+    // /// the response. If the responder returns `Err`, an outcome of `Error` is
+    // /// returned with the status code.
+    // ///
+    // /// # Example
+    // ///
+    // /// ```rust
+    // /// use rocket::{Request, Data, route};
+    // ///
+    // /// fn str_responder<'r>(req: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
+    // ///     route::Outcome::from(req, "Hello, world!")
+    // /// }
+    // /// ```
+    // #[inline]
+    // pub fn try_from<R, E>(req: &'r Request<'_>, result: Result<R, E>) -> Outcome<'r>
+    //     where R: Responder<'r, 'o>, E: std::fmt::Debug
+    // {
+    //     let responder = result.map_err(crate::response::Debug);
+    //     match responder.respond_to(req) {
+    //         Ok(response) => Outcome::Success(response),
+    //         Err(status) => Outcome::Error((status, Box::new(()))),
+    //     }
+    // }
 
     /// Return an `Outcome` of `Error` with the status code `code`. This is
     /// equivalent to `Outcome::error_val(code, ())`.
@@ -241,7 +242,7 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// ```
     #[inline(always)]
     pub fn error(code: Status) -> Outcome<'r> {
-        Outcome::Error((code, Box::new(())))
+        Outcome::Error((code, None))
     }
     /// Return an `Outcome` of `Error` with the status code `code`. This adds
     /// the value for typed catchers.
@@ -259,8 +260,8 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn error_val<T: Any<Co<'r>> + Send + Sync + 'r>(code: Status, val: T) -> Outcome<'r> {
-        Outcome::Error((code, Box::new(val)))
+    pub fn error_val<T: Error<'r>>(code: Status, val: T) -> Outcome<'r> {
+        Outcome::Error((code, Some(Box::new(val))))
     }
 
     /// Return an `Outcome` of `Forward` with the data `data` and status
@@ -280,7 +281,7 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// ```
     #[inline(always)]
     pub fn forward(data: Data<'r>, status: Status) -> Outcome<'r> {
-        Outcome::Forward((data, status, default_error_type()))
+        Outcome::Forward((data, status, None))
     }
 
     /// Return an `Outcome` of `Forward` with the data `data`, status
@@ -299,10 +300,10 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn forward_val<T: Any<Co<'r>> + Send + Sync + 'r>(data: Data<'r>, status: Status, val: T)
+    pub fn forward_val<T: Error<'r>>(data: Data<'r>, status: Status, val: T)
         -> Outcome<'r>
     {
-        Outcome::Forward((data, status, Box::new(val)))
+        Outcome::Forward((data, status, Some(Box::new(val))))
     }
 }
 

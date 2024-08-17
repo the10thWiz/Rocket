@@ -9,6 +9,8 @@ use crate::http::uncased::{Uncased, AsUncased};
 use crate::data::IoHandler;
 use crate::response::Body;
 
+use super::Outcome;
+
 /// Builder for the [`Response`] type.
 ///
 /// Building a [`Response`] can be a low-level ordeal; this structure presents a
@@ -432,17 +434,17 @@ impl<'r> Builder<'r> {
     /// # Example
     ///
     /// ```rust
-    /// use rocket::Response;
+    /// use rocket::response::{Response, Outcome};
     ///
-    /// let response: Result<Response, ()> = Response::build()
+    /// let response: Outcome<Response, ()> = Response::build()
     ///     // build the response
     ///     .ok();
     ///
-    /// assert!(response.is_ok());
+    /// assert!(response.is_success());
     /// ```
     #[inline(always)]
-    pub fn ok<E>(&mut self) -> Result<Response<'r>, E> {
-        Ok(self.finalize())
+    pub fn ok<E>(&mut self) -> Outcome<'r, E> {
+        Outcome::Success(self.finalize())
     }
 }
 

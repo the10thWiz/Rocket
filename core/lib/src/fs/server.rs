@@ -205,7 +205,7 @@ impl Handler for FileServer {
 
             if segments.is_empty() {
                 let file = NamedFile::open(&self.root).await;
-                return file.respond_to(req).or_forward((data, Status::NotFound));
+                return file.respond_to(req).ok().or_forward((data, Status::NotFound, None));
             } else {
                 return Outcome::forward(data, Status::NotFound);
             }
@@ -227,7 +227,8 @@ impl Handler for FileServer {
 
                     return Redirect::permanent(normal)
                         .respond_to(req)
-                        .or_forward((data, Status::InternalServerError));
+                        .ok()
+                        .or_forward((data, Status::InternalServerError, None));
                 }
 
                 if !options.contains(Options::Index) {
@@ -235,11 +236,11 @@ impl Handler for FileServer {
                 }
 
                 let index = NamedFile::open(p.join("index.html")).await;
-                index.respond_to(req).or_forward((data, Status::NotFound))
+                index.respond_to(req).ok().or_forward((data, Status::NotFound, None))
             },
             Some(p) => {
                 let file = NamedFile::open(p).await;
-                file.respond_to(req).or_forward((data, Status::NotFound))
+                file.respond_to(req).ok().or_forward((data, Status::NotFound, None))
             }
             None => Outcome::forward(data, Status::NotFound),
         }
