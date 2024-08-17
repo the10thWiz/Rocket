@@ -1,6 +1,6 @@
 use futures::future::{FutureExt, Future};
 
-use crate::catcher::{default_error_type, ErasedError};
+use crate::catcher::Error;
 use crate::trace::Trace;
 use crate::util::Formatter;
 use crate::data::IoHandler;
@@ -202,7 +202,7 @@ impl Rocket<Orbit> {
         // Go through all matching routes until we fail or succeed or run out of
         // routes to try, in which case we forward with the last status.
         let mut status = Status::NotFound;
-        let mut error = default_error_type();
+        let mut error = None;
         for route in self.router.route(request) {
             // Retrieve and set the requests parameters.
             route.trace_info();
@@ -236,7 +236,7 @@ impl Rocket<Orbit> {
         &'s self,
         mut status: Status,
         req: &'r Request<'s>,
-        mut error: ErasedError<'r>,
+        mut error: Option<Box<dyn Error<'r>>>,
     ) -> Response<'r> {
         // We may wish to relax this in the future.
         req.cookies().reset_delta();
@@ -273,9 +273,9 @@ impl Rocket<Orbit> {
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,
-        error: ErasedError<'r>,
+        error: Option<Box<dyn Error<'r>>>,
         req: &'r Request<'s>
-    ) -> Result<Response<'r>, (Option<Status>, ErasedError<'r>)> {
+    ) -> Result<Response<'r>, (Option<Status>, Option<Box<dyn Error<'r>>>)> {
         if let Some(catcher) = self.router.catch(status, req) {
             catcher.trace_info();
             catch_handle(
@@ -283,7 +283,7 @@ impl Rocket<Orbit> {
                 || catcher.handler.handle(status, req, error)
             ).await
                 .map(|result| result.map_err(|(s, e)| (Some(s), e)))
-                .unwrap_or_else(|| Err((None, default_error_type())))
+                .unwrap_or_else(|| Err((None, None)))
         } else {
             info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
                 "no registered catcher: using Rocket default");

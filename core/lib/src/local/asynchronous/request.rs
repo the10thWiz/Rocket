@@ -1,6 +1,5 @@
 use std::fmt;
 
-use crate::catcher::default_error_type;
 use crate::{Request, Data};
 use crate::http::{Status, Method};
 use crate::http::uri::Origin;
@@ -87,7 +86,7 @@ impl<'c> LocalRequest<'c> {
             if self.inner().uri() == invalid {
                 error!("invalid request URI: {:?}", invalid.path());
                 return LocalResponse::new(self.request, move |req| {
-                    rocket.dispatch_error(Status::BadRequest, req, default_error_type())
+                    rocket.dispatch_error(Status::BadRequest, req, None)
                 }).await
             }
         }
