@@ -9,9 +9,8 @@ use hyper_util::server::conn::auto::Builder;
 use futures::{Future, TryFutureExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::catcher::default_error_type;
 use crate::{Ignite, Orbit, Request, Rocket};
-use crate::request::ConnectionMeta;
+use crate::request::{ConnectionMeta, RequestErrors};
 use crate::erased::{ErasedRequest, ErasedResponse, ErasedIoHandler};
 use crate::listener::{Listener, Connection, BouncedExt, CancellableExt};
 use crate::error::log_server_error;
@@ -49,7 +48,7 @@ impl Rocket<Orbit> {
                     return rocket.dispatch_error(
                         Status::BadRequest,
                         request,
-                        default_error_type()
+                        Some(Box::new(RequestErrors::new(&request.errors)))
                     ).await;
                 }
 

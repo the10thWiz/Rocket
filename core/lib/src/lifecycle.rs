@@ -1,13 +1,13 @@
 use futures::future::{FutureExt, Future};
 
-use crate::catcher::Error;
+use crate::catcher::TypedError;
 use crate::trace::Trace;
 use crate::util::Formatter;
 use crate::data::IoHandler;
 use crate::http::{Method, Status, Header};
 use crate::outcome::Outcome;
 use crate::form::Form;
-use crate::{route, catcher, Rocket, Orbit, Request, Response, Data};
+use crate::{catcher, route, Catcher, Data, Orbit, Request, Response, Rocket};
 
 // A token returned to force the execution of one method before another.
 pub(crate) struct RequestToken;
@@ -236,7 +236,7 @@ impl Rocket<Orbit> {
         &'s self,
         mut status: Status,
         req: &'r Request<'s>,
-        mut error: Option<Box<dyn Error<'r>>>,
+        mut error: Option<Box<dyn TypedError<'r> + 'r>>,
     ) -> Response<'r> {
         // We may wish to relax this in the future.
         req.cookies().reset_delta();
@@ -246,13 +246,13 @@ impl Rocket<Orbit> {
             match self.invoke_catcher(status, error, req).await {
                 Ok(r) => return r,
                 // If the catcher failed, try `500` catcher, unless this is it.
-                Err((e, err)) if status.code != 500 => {
-                    error = err;
+                Err(e) if status.code != 500 => {
+                    error = None;
                     warn!(status = e.map(|r| r.code), "catcher failed: trying 500 catcher");
                     status = Status::InternalServerError;
                 }
                 // The 500 catcher failed. There's no recourse. Use default.
-                Err((e, _)) => {
+                Err(e) => {
                     error!(status = e.map(|r| r.code), "500 catcher failed");
                     return catcher::default_handler(Status::InternalServerError, req);
                 }
@@ -273,21 +273,56 @@ impl Rocket<Orbit> {
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,
-        error: Option<Box<dyn Error<'r>>>,
+        error: Option<Box<dyn TypedError<'r> + 'r>>,
         req: &'r Request<'s>
-    ) -> Result<Response<'r>, (Option<Status>, Option<Box<dyn Error<'r>>>)> {
-        if let Some(catcher) = self.router.catch(status, req) {
-            catcher.trace_info();
-            catch_handle(
-                catcher.name.as_deref(),
-                || catcher.handler.handle(status, req, error)
-            ).await
-                .map(|result| result.map_err(|(s, e)| (Some(s), e)))
-                .unwrap_or_else(|| Err((None, None)))
+    ) -> Result<Response<'r>, Option<Status>> {
+        let error_ty = error.as_ref().map(|e| e.as_any().type_id());
+        println!("Catching {:?}", error.as_ref().map(|e| e.name()));
+        if let Some(catcher) = self.router.catch(status, req, error_ty) {
+            self.invoke_specific_catcher(catcher, status, error.as_ref().map(|e| e.as_ref()), req).await
+        } else if let Some(source) = error.as_ref().and_then(|e| e.source()) {
+            println!("Catching {:?}", source.name());
+            let error_ty = source.as_any().type_id();
+            if let Some(catcher) = self.router.catch(status, req, Some(error_ty)) {
+                self.invoke_specific_catcher(catcher, status, error.as_ref().and_then(|e| e.source()), req).await
+            } else {
+                info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
+                    "no registered catcher: using Rocket default");
+                Ok(catcher::default_handler(status, req))
+            }
         } else {
             info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
                 "no registered catcher: using Rocket default");
             Ok(catcher::default_handler(status, req))
         }
+        // if let Some(catcher) = self.router.catch(status, req, error.as_ref().map(|t| t.as_any().type_id())) {
+        //     catcher.trace_info();
+        //     catch_handle(
+        //         catcher.name.as_deref(),
+        //         || catcher.handler.handle(status, req, error)
+        //     ).await
+        //         .map(|result| result.map_err(|(s, e)| (Some(s), e)))
+        //         .unwrap_or_else(|| Err((None, None)))
+        // } else {
+        //     info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
+        //         "no registered catcher: using Rocket default");
+        //     Ok(catcher::default_handler(status, req))
+        // }
+    }
+
+    async fn invoke_specific_catcher<'s, 'r: 's>(
+        &'s self,
+        catcher: &Catcher,
+        status: Status,
+        error: Option<&'r (dyn TypedError<'r> + 'r)>,
+        req: &'r Request<'s>
+    ) -> Result<Response<'r>, Option<Status>> {
+        catcher.trace_info();
+        catch_handle(
+            catcher.name.as_deref(),
+            || catcher.handler.handle(status, req, error)
+        ).await
+            .map(|result| result.map_err(Some))
+            .unwrap_or_else(|| Err(None))
     }
 }

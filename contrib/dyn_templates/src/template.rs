@@ -265,19 +265,21 @@ impl Template {
 /// extension and a fixed-size body containing the rendered template. If
 /// rendering fails, an `Err` of `Status::InternalServerError` is returned.
 impl<'r> Responder<'r, 'static> for Template {
-    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static> {
-        let ctxt = req.rocket()
-            .state::<ContextManager>()
-            .ok_or_else(|| {
-                error!(
-                    "uninitialized template context: missing `Template::fairing()`.\n\
-                    To use templates, you must attach `Template::fairing()`."
-                );
+    type Error = std::convert::Infallible;
+    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+        if let Some(ctxt) = req.rocket().state::<ContextManager>() {
+            match self.finalize(&ctxt.context()) {
+                Ok(v) => v.respond_to(req),
+                Err(s) => response::Outcome::Forward(s),
+            }
+        } else {
+            error!(
+                "uninitialized template context: missing `Template::fairing()`.\n\
+                To use templates, you must attach `Template::fairing()`."
+            );
 
-                Status::InternalServerError
-            })?;
-
-        self.finalize(&ctxt.context())?.respond_to(req)
+            response::Outcome::Forward(Status::InternalServerError)
+        }
     }
 }
 

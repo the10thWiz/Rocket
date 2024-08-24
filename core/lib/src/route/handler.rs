@@ -1,4 +1,4 @@
-use crate::catcher::Error;
+use crate::catcher::TypedError;
 use crate::{Request, Data};
 use crate::response::{self, Response, Responder};
 use crate::http::Status;
@@ -7,8 +7,8 @@ use crate::http::Status;
 /// [`Handler::handle()`].
 pub type Outcome<'r> = crate::outcome::Outcome<
     Response<'r>,
-    (Status, Option<Box<dyn Error<'r>>>),
-    (Data<'r>, Status, Option<Box<dyn Error<'r>>>)
+    (Status, Option<Box<dyn TypedError<'r>>>),
+    (Data<'r>, Status, Option<Box<dyn TypedError<'r>>>)
 >;
 
 /// Type alias for the return type of a _raw_ [`Route`](crate::Route)'s
@@ -193,7 +193,10 @@ impl<'r, 'o: 'r> Outcome<'o> {
     pub fn from<R: Responder<'r, 'o>>(req: &'r Request<'_>, responder: R) -> Outcome<'r> {
         match responder.respond_to(req) {
             response::Outcome::Success(response) => Outcome::Success(response),
-            response::Outcome::Error(error) => Outcome::Error((error.status(), Some(Box::new(error)))),
+            response::Outcome::Error(error) => {
+                crate::trace::info!(type_name = std::any::type_name_of_val(&error), "Typed error to catch");
+                Outcome::Error((error.status(), Some(Box::new(error))))
+            },
             response::Outcome::Forward(status) => Outcome::Error((status, None)),
         }
     }
@@ -260,7 +263,7 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn error_val<T: Error<'r>>(code: Status, val: T) -> Outcome<'r> {
+    pub fn error_val<T: TypedError<'r>>(code: Status, val: T) -> Outcome<'r> {
         Outcome::Error((code, Some(Box::new(val))))
     }
 
@@ -300,7 +303,7 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn forward_val<T: Error<'r>>(data: Data<'r>, status: Status, val: T)
+    pub fn forward_val<T: TypedError<'r>>(data: Data<'r>, status: Status, val: T)
         -> Outcome<'r>
     {
         Outcome::Forward((data, status, Some(Box::new(val))))

@@ -8,14 +8,16 @@ use std::net::IpAddr;
 use state::{TypeMap, InitCell};
 use futures::future::BoxFuture;
 use ref_swap::OptionRefSwap;
+use transient::Transient;
 
+use crate::catcher::TypedError;
 use crate::{Rocket, Route, Orbit};
 use crate::request::{FromParam, FromSegments, FromRequest, Outcome, AtomicMethod};
 use crate::form::{self, ValueField, FromForm};
 use crate::data::Limits;
 
 use crate::http::ProxyProto;
-use crate::http::{Method, Header, HeaderMap, ContentType, Accept, MediaType, CookieJar, Cookie};
+use crate::http::{Method, Header, HeaderMap, ContentType, Accept, MediaType, CookieJar, Cookie, Status};
 use crate::http::uri::{fmt::Path, Origin, Segments, Host, Authority};
 use crate::listener::{Certificates, Endpoint};
 
@@ -1175,6 +1177,23 @@ impl<'r> Request<'r> {
     }
 }
 
+#[derive(Debug, Clone, Copy, Transient)]
+pub struct RequestErrors<'r> {
+    errors: &'r [RequestError],
+}
+
+impl<'r> RequestErrors<'r> {
+    pub(crate) fn new(errors: &'r [RequestError]) -> Self {
+        Self { errors }
+    }
+}
+
+impl<'r> TypedError<'r> for RequestErrors<'r> {
+    fn status(&self) -> Status {
+        Status::BadRequest
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum RequestError {
     InvalidUri(hyper::Uri),
@@ -1194,8 +1213,8 @@ impl fmt::Debug for Request<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("Request")
             .field("method", &self.method())
-            .field("uri", &self.uri())
-            .field("headers", &self.headers())
+            .field("uri", self.uri())
+            .field("headers", self.headers())
             .field("remote", &self.remote())
             .field("cookies", &self.cookies())
             .finish()

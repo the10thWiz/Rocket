@@ -8,9 +8,7 @@ use crate::http::ext::IntoOwned;
 use crate::response::Response;
 use crate::request::Request;
 use crate::http::{Status, ContentType, uri};
-use crate::catcher::{Handler, BoxFuture};
-
-use super::ErasedError;
+use crate::catcher::{BoxFuture, TypedError, Handler};
 
 /// An error catching route.
 ///
@@ -324,7 +322,7 @@ impl Catcher {
 
 impl Default for Catcher {
     fn default() -> Self {
-        fn handler<'r>(s: Status, req: &'r Request<'_>, _e: ErasedError<'r>) -> BoxFuture<'r> {
+        fn handler<'r>(s: Status, req: &'r Request<'_>, _e: Option<&(dyn TypedError<'r> + 'r)>) -> BoxFuture<'r> {
             Box::pin(async move { Ok(default_handler(s, req)) })
         }
 
@@ -344,7 +342,7 @@ pub struct StaticInfo {
     /// The catcher's error type.
     pub error_type: Option<(TypeId, &'static str)>,
     /// The catcher's handler, i.e, the annotated function.
-    pub handler: for<'r> fn(Status, &'r Request<'_>, ErasedError<'r>) -> BoxFuture<'r>,
+    pub handler: for<'r> fn(Status, &'r Request<'_>, Option<&'r (dyn TypedError<'r> + 'r)>) -> BoxFuture<'r>,
     /// The file, line, and column where the catcher was defined.
     pub location: (&'static str, u32, u32),
 }

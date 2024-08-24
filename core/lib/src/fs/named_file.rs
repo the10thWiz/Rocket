@@ -6,7 +6,7 @@ use tokio::fs::{File, OpenOptions};
 
 use crate::outcome::try_outcome;
 use crate::request::Request;
-use crate::response::{self, Responder, Outcome};
+use crate::response::{Responder, Outcome};
 use crate::http::ContentType;
 
 /// A [`Responder`] that sends file data with a Content-Type based on its

@@ -86,9 +86,7 @@
 //! a type of `Option<S>`. If an `Outcome` is a `Forward`, the `Option` will be
 //! `None`.
 
-use transient::{CanTranscendTo, Co, Transient};
-
-use crate::{route, request, response};
+use crate::request;
 use crate::data::{self, Data, FromData};
 use crate::http::Status;
 
@@ -623,6 +621,20 @@ impl<S, E, F> Outcome<S, E, F> {
             _ => None,
         }
     }
+}
+
+impl<S, F> Outcome<S, std::convert::Infallible, F> {
+    /// Convenience function to convert the error type from `Infallible`
+    /// to any other type. This is trivially possible, since `Infallible`
+    /// cannot be constructed, so this cannot be an Error variant
+    pub(crate) fn map_err_type<T>(self) -> Outcome<S, T, F> {
+        match self {
+            Self::Success(v) => Outcome::Success(v),
+            Self::Forward(v) => Outcome::Forward(v),
+            Self::Error(e) => match e {},
+        }
+    }
+
 }
 
 impl<'a, S: Send + 'a, E: Send + 'a, F: Send + 'a> Outcome<S, E, F> {

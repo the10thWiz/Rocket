@@ -86,6 +86,7 @@ define_exported_paths! {
     _Vec => ::std::vec::Vec,
     _Cow => ::std::borrow::Cow,
     _ExitCode => ::std::process::ExitCode,
+    _trace => ::rocket::trace,
     display_hack => ::rocket::error::display_hack,
     BorrowMut => ::std::borrow::BorrowMut,
     Outcome => ::rocket::outcome::Outcome,
@@ -103,7 +104,7 @@ define_exported_paths! {
     Catcher => ::rocket::Catcher,
     Status => ::rocket::http::Status,
     resolve_error => ::rocket::catcher::resolve_typed_catcher,
-    ErasedError => ::rocket::catcher::ErasedError,
+    TypedError => ::rocket::catcher::TypedError,
 }
 
 macro_rules! define_spanned_export {

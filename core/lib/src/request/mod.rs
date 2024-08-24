@@ -8,7 +8,7 @@ mod atomic_method;
 #[cfg(test)]
 mod tests;
 
-pub use self::request::Request;
+pub use self::request::{Request, RequestErrors};
 pub use self::from_request::{FromRequest, Outcome};
 pub use self::from_param::{FromParam, FromSegments};
 

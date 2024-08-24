@@ -5,8 +5,9 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use either::Either;
+use transient::{CanTranscendTo, Inv, Transient};
 
-use crate::catcher::Error;
+use crate::catcher::TypedError;
 use crate::http::{Status, ContentType, StatusClass};
 use crate::response::{self, Response};
 use crate::request::Request;
@@ -300,7 +301,7 @@ use super::Outcome;
 /// # fn person() -> Person { Person::new("Bob", 29) }
 /// ```
 pub trait Responder<'r, 'o: 'r> {
-    type Error: Error<'r>;
+    type Error: TypedError<'r> + Transient;
 
     /// Returns `Ok` if a `Response` could be generated successfully. Otherwise,
     /// returns an `Err` with a failing `Status`.
@@ -456,7 +457,9 @@ impl<'r> Responder<'r, 'static> for Box<[u8]> {
 ///     Content::Text("hello".to_string())
 /// }
 /// ```
-impl<'r, 'o: 'r, T: Responder<'r, 'o> + Sized> Responder<'r, 'o> for Box<T> {
+impl<'r, 'o: 'r, T: Responder<'r, 'o> + Sized> Responder<'r, 'o> for Box<T>
+    where <T::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
+{
     type Error = T::Error;
     fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
         let inner = *self;
@@ -490,7 +493,12 @@ impl<'r> Responder<'r, 'static> for () {
 
 /// Responds with the inner `Responder` in `Cow`.
 impl<'r, 'o: 'r, R: ?Sized + ToOwned> Responder<'r, 'o> for std::borrow::Cow<'o, R>
-    where &'o R: Responder<'r, 'o> + 'o, <R as ToOwned>::Owned: Responder<'r, 'o> + 'r
+    where &'o R: Responder<'r, 'o> + 'o,
+          <&'o R as Responder<'r, 'o>>::Error: Transient,
+          <<&'o R as Responder<'r, 'o>>::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
+          <R as ToOwned>::Owned: Responder<'r, 'o> + 'r,
+          <<R as ToOwned>::Owned as Responder<'r, 'o>>::Error: Transient,
+          <<<R as ToOwned>::Owned as Responder<'r, 'o>>::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
 {
     type Error = Either<
         <&'o R as Responder<'r, 'o>>::Error,
@@ -524,7 +532,11 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Option<R> {
 /// Responds with the wrapped `Responder` in `self`, whether it is `Ok` or
 /// `Err`.
 impl<'r, 'o: 'r, T, E> Responder<'r, 'o> for Result<T, E>
-    where T: Responder<'r, 'o>, E: fmt::Debug + 'r
+    where T: Responder<'r, 'o>,
+          T::Error: Transient,
+          <T::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
+          E: fmt::Debug + TypedError<'r> + Transient + 'r,
+          E::Transience: CanTranscendTo<Inv<'r>>,
 {
     type Error = Either<T::Error, E>;
     fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
@@ -537,8 +549,12 @@ impl<'r, 'o: 'r, T, E> Responder<'r, 'o> for Result<T, E>
 
 /// Responds with the wrapped `Responder` in `self`, whether it is `Left` or
 /// `Right`.
-impl<'r, 'o: 'r, 't: 'o, 'e: 'o, T, E> Responder<'r, 'o> for either::Either<T, E>
-    where T: Responder<'r, 't>, E: Responder<'r, 'e>
+impl<'r, 'o: 'r, T, E> Responder<'r, 'o> for either::Either<T, E>
+    where T: Responder<'r, 'o>,
+          T::Error: Transient,
+          <T::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
+          E: Responder<'r, 'o>,
+          <E::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
 {
     type Error = Either<T::Error, E::Error>;
     fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {

@@ -21,9 +21,9 @@ fn error_type(guard: &ErrorGuard) -> TokenStream {
 fn error_guard_decl(guard: &ErrorGuard) -> TokenStream {
     let (ident, ty) = (guard.ident.rocketized(), &guard.ty);
     quote_spanned! { ty.span() =>
-        let #ident: &#ty = match #_catcher::downcast(__error_init.as_ref()) {
+        let #ident: &#ty = match #_catcher::downcast(__error_init) {
             Some(v) => v,
-            None => return #_Result::Err((#__status, __error_init)),
+            None => return #_Result::Err(#__status),
         };
     }
 }
@@ -43,7 +43,7 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
                     "request guard forwarding; trying next catcher"
                 );
 
-                return #_Err((#__status, __error_init));
+                return #_Err(#__status);
             },
             #[allow(unreachable_code)]
             #Outcome::Error((__c, __e)) => {
@@ -56,7 +56,7 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
                     "request guard failed; forwarding to 500 handler"
                 );
 
-                return #_Err((#Status::InternalServerError, __error_init));
+                return #_Err(#Status::InternalServerError);
             }
         };
     }
@@ -97,7 +97,11 @@ pub fn _catch(
 
     let catcher_response = quote_spanned!(return_type_span => {
         let ___responder = #user_catcher_fn_name(#(#parameter_names),*) #dot_await;
-        #_response::Responder::respond_to(___responder, #__req).map_err(|s| (s, __error_init))?
+        match #_response::Responder::respond_to(___responder, #__req) {
+            #Outcome::Success(v) => v,
+            // If the responder fails, we drop any typed error, and convert to 500
+            #Outcome::Error(_) | #Outcome::Forward(_) => return Err(#Status::InternalServerError),
+        }
     });
 
     // Generate the catcher, keeping the user's input around.
@@ -116,7 +120,7 @@ pub fn _catch(
                 fn monomorphized_function<'__r>(
                     #__status: #Status,
                     #__req: &'__r #Request<'_>,
-                    __error_init: #ErasedError<'__r>,
+                    __error_init: #_Option<&'__r (dyn #TypedError<'__r> + '__r)>,
                 ) -> #_catcher::BoxFuture<'__r> {
                     #_Box::pin(async move {
                         #error_guard

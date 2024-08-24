@@ -7,3 +7,4 @@ publish = false
 
 [dependencies]
 rocket = { path = "../../core/lib" }
+transient = { path = "/home/matthew/transient" }

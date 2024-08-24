@@ -1,5 +1,5 @@
 use either::Either;
-use transient::{Any, CanRecoverFrom, Inv, Downcast, Transience};
+use transient::{Any, CanRecoverFrom, CanTranscendTo, Downcast, Inv, Transience};
 use crate::{http::Status, Request, Response};
 #[doc(inline)]
 pub use transient::{Static, Transient, TypeId};
@@ -14,13 +14,13 @@ pub trait AsAny<Tr: Transience>: Any<Tr> + Sealed {
 
 use sealed::Sealed;
 mod sealed {
-    use transient::{Any, Inv, TypeId};
+    use transient::{Any, Inv, Transient, TypeId};
 
     use super::AsAny;
 
     pub trait Sealed {}
     impl<'r, T: Any<Inv<'r>>> Sealed for T { }
-    impl<'r, T: Any<Inv<'r>>> AsAny<Inv<'r>> for T {
+    impl<'r, T: Any<Inv<'r>> + Transient> AsAny<Inv<'r>> for T {
         fn as_any(&self) -> &dyn Any<Inv<'r>> {
             self
         }
@@ -34,7 +34,7 @@ mod sealed {
 /// FromParam, FromRequest, FromForm, FromData, or Responder) implements
 /// this trait, it can be caught by a typed catcher. (TODO) This trait
 /// can be derived.
-pub trait Error<'r>: AsAny<Inv<'r>> + Send + Sync + 'r {
+pub trait TypedError<'r>: AsAny<Inv<'r>> + Send + Sync + 'r {
     /// Generates a default response for this type (or forwards to a default catcher)
     #[allow(unused_variables)]
     fn respond_to(&self, request: &'r Request<'_>) -> Result<Response<'r>, Status> {
@@ -49,14 +49,40 @@ pub trait Error<'r>: AsAny<Inv<'r>> + Send + Sync + 'r {
     /// # Warning
     /// A typed catcher will not attempt to follow the source of an error
     /// more than once.
-    fn source(&self) -> Option<&dyn Error<'r>> { None }
+    fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> { None }
 
     /// Status code
     fn status(&self) -> Status { Status::InternalServerError }
 }
 
-impl<'r> Error<'r> for std::convert::Infallible {  }
-impl<'r, L: Error<'r>, R: Error<'r>> Error<'r> for Either<L, R> {
+impl<'r> TypedError<'r> for std::convert::Infallible {  }
+
+impl<'r> TypedError<'r> for std::io::Error {
+    fn status(&self) -> Status {
+        match self.kind() {
+            std::io::ErrorKind::NotFound => Status::NotFound,
+            _ => Status::InternalServerError,
+        }
+    }
+}
+
+impl<'r> TypedError<'r> for std::num::ParseIntError {}
+impl<'r> TypedError<'r> for std::num::ParseFloatError {}
+
+#[cfg(feature = "json")]
+impl<'r> TypedError<'r> for serde_json::Error {}
+
+#[cfg(feature = "msgpack")]
+impl<'r> TypedError<'r> for rmp_serde::encode::Error {}
+#[cfg(feature = "msgpack")]
+impl<'r> TypedError<'r> for rmp_serde::decode::Error {}
+
+impl<'r, L, R> TypedError<'r> for Either<L, R>
+    where L: TypedError<'r> + Transient,
+          L::Transience: CanTranscendTo<Inv<'r>>,
+          R: TypedError<'r> + Transient,
+          R::Transience: CanTranscendTo<Inv<'r>>,
+{
     fn respond_to(&self, request: &'r Request<'_>) -> Result<Response<'r>, Status> {
         match self {
             Self::Left(v) => v.respond_to(request),
@@ -66,10 +92,11 @@ impl<'r, L: Error<'r>, R: Error<'r>> Error<'r> for Either<L, R> {
 
     fn name(&self) -> &'static str { std::any::type_name::<Self>() }
 
-    fn source(&self) -> Option<&dyn Error<'r>> { 
+    fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> { 
+        println!("Downcasting either");
         match self {
-            Self::Left(v) => v.source(),
-            Self::Right(v) => v.source(),
+            Self::Left(v) => Some(v),
+            Self::Right(v) => Some(v),
         }
     }
 
@@ -81,9 +108,14 @@ impl<'r, L: Error<'r>, R: Error<'r>> Error<'r> for Either<L, R> {
     }
 }
 
-pub fn downcast<'a, 'r, T: Transient + 'r>(v: &'a dyn Error<'r>) -> Option<&'a T>
+pub fn downcast<'r, T: Transient + 'r>(v: Option<&'r dyn TypedError<'r>>) -> Option<&'r T>
     where T::Transience: CanRecoverFrom<Inv<'r>>
 {
+    // if v.is_none() {
+    //     crate::trace::error!("No value to downcast from");
+    // }
+    let v = v?;
+    // crate::trace::error!("Downcasting error from {}", v.name());
     v.as_any().downcast_ref()
 }
 
@@ -94,9 +126,13 @@ pub fn downcast<'a, 'r, T: Transient + 'r>(v: &'a dyn Error<'r>) -> Option<&'a T
 macro_rules! resolve_typed_catcher {
     ($T:expr) => ({
         #[allow(unused_imports)]
-        use $crate::catcher::resolution::{Resolve, DefaultTypeErase};
+        use $crate::catcher::resolution::{Resolve, DefaultTypeErase, ResolvedTypedError};
 
-        Resolve::new($T).cast()
+        let inner = Resolve::new($T).cast();
+        ResolvedTypedError {
+            name: inner.as_ref().map(|e| e.name()),
+            val: inner,
+        }
     });
 }
 
@@ -130,56 +166,27 @@ pub mod resolution {
     pub trait DefaultTypeErase<'r>: Sized {
         const SPECIALIZED: bool = false;
 
-        fn cast(self) -> Option<Box<dyn Error<'r>>> { None }
+        fn cast(self) -> Option<Box<dyn TypedError<'r>>> { None }
     }
 
     impl<'r, T: 'r> DefaultTypeErase<'r> for Resolve<'r, T> {}
 
     /// "Specialized" "implementation" of `Transient` for `T: Transient`. This is
     /// what Rust will resolve `Resolve<T>::item` to when `T: Transient`.
-    impl<'r, T: Error<'r> + Transient> Resolve<'r, T>
+    impl<'r, T: TypedError<'r> + Transient> Resolve<'r, T>
         where T::Transience: CanTranscendTo<Inv<'r>>
     {
         pub const SPECIALIZED: bool = true;
 
-        pub fn cast(self) -> Option<Box<dyn Error<'r>>> { Some(Box::new(self.0))}
+        pub fn cast(self) -> Option<Box<dyn TypedError<'r>>> { Some(Box::new(self.0))}
+    }
+
+    /// Wrapper type to hold the return type of `resolve_typed_catcher`.
+    #[doc(hidden)]
+    pub struct ResolvedTypedError<'r> {
+        /// The return value from `TypedError::name()`, if Some
+        pub name: Option<&'static str>,
+        /// The upcast error, if it supports it
+        pub val: Option<Box<dyn TypedError<'r> + 'r>>,
     }
 }
-
-// #[cfg(test)]
-// mod test {
-//     // use std::any::TypeId;
-
-//     use transient::{Transient, TypeId};
-
-//     use super::resolution::{Resolve, DefaultTypeErase};
-
-//     struct NotAny;
-//     #[derive(Transient)]
-//     struct YesAny;
-
-//     // #[test]
-//     // fn check_can_determine() {
-//     //     let not_any = Resolve::new(NotAny).cast();
-//     //     assert_eq!(not_any.type_id(), TypeId::of::<()>());
-
-//     //     let yes_any = Resolve::new(YesAny).cast();
-//     //     assert_ne!(yes_any.type_id(), TypeId::of::<()>());
-//     // }
-
-//     // struct HasSentinel<T>(T);
-
-//     // #[test]
-//     // fn parent_works() {
-//     //     let child = resolve!(YesASentinel, HasSentinel<YesASentinel>);
-//     //     assert!(child.type_name.ends_with("YesASentinel"));
-//     //     assert_eq!(child.parent.unwrap(), TypeId::of::<HasSentinel<YesASentinel>>());
-//     //     assert!(child.specialized);
-
-//     //     let not_a_direct_sentinel = resolve!(HasSentinel<YesASentinel>);
-//     //     assert!(not_a_direct_sentinel.type_name.contains("HasSentinel"));
-//     //     assert!(not_a_direct_sentinel.type_name.contains("YesASentinel"));
-//     //     assert!(not_a_direct_sentinel.parent.is_none());
-//     //     assert!(!not_a_direct_sentinel.specialized);
-//     // }
-// }

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use transient::TypeId;
+
 use crate::request::Request;
 use crate::http::{Method, Status};
 
@@ -52,20 +54,16 @@ impl Router {
     }
 
     // For many catchers, using aho-corasick or similar should be much faster.
-    pub fn catch<'r>(&self, status: Status, req: &'r Request<'r>) -> Option<&Catcher> {
+    pub fn catch<'r>(&self, status: Status, req: &'r Request<'r>, error_ty: Option<TypeId>) -> Option<&Catcher> {
         // Note that catchers are presorted by descending base length.
-        let explicit = self.catchers.get(&Some(status.code))
-            .and_then(|c| c.iter().find(|c| c.matches(status, req)));
+        self.catchers.get(&Some(status.code))
+            .and_then(|c| c.iter().find(|c| c.matches(status, req, error_ty)))
+    }
 
-        let default = self.catchers.get(&None)
-            .and_then(|c| c.iter().find(|c| c.matches(status, req)));
-
-        match (explicit, default) {
-            (None, None) => None,
-            (None, c@Some(_)) | (c@Some(_), None) => c,
-            (Some(a), Some(b)) if a.rank <= b.rank => Some(a),
-            (Some(_), Some(b)) => Some(b),
-        }
+    pub fn catch_any<'r>(&self, status: Status, req: &'r Request<'r>, error_ty: Option<TypeId>) -> Option<&Catcher> {
+        // Note that catchers are presorted by descending base length.
+        self.catchers.get(&None)
+            .and_then(|c| c.iter().find(|c| c.matches(status, req, error_ty)))
     }
 
     fn collisions<'a, I, T>(&self, items: I) -> impl Iterator<Item = (T, T)> + 'a
@@ -555,10 +553,10 @@ mod test {
         router
     }
 
-    fn catcher<'a>(router: &'a Router, status: Status, uri: &str) -> Option<&'a Catcher> {
+    fn catcher<'a>(router: &'a Router, status: Status, uri: &str, error_ty: Option<TypeId>) -> Option<&'a Catcher> {
         let client = Client::debug_with(vec![]).expect("client");
         let request = client.get(Origin::parse(uri).unwrap());
-        router.catch(status, &request)
+        router.catch(status, &request, error_ty)
     }
 
     macro_rules! assert_catcher_routing {
@@ -574,7 +572,8 @@ mod test {
             let router = router_with_catchers(&catchers);
             for (req, expected) in requests.iter().zip(expected.iter()) {
                 let req_status = Status::from_code(req.0).expect("valid status");
-                let catcher = catcher(&router, req_status, req.1).expect("some catcher");
+                // TODO: write test cases for typed variant
+                let catcher = catcher(&router, req_status, req.1, None).expect("some catcher");
                 assert_eq!(catcher.code, expected.0,
                     "\nmatched {:?}, expected {:?} for req {:?}", catcher, expected, req);
 

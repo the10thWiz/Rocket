@@ -1,11 +1,10 @@
 use crate::{Request, Response};
+use crate::catcher::TypedError;
 use crate::http::Status;
-
-use super::ErasedError;
 
 /// Type alias for the return type of a [`Catcher`](crate::Catcher)'s
 /// [`Handler::handle()`].
-pub type Result<'r> = std::result::Result<Response<'r>, (crate::http::Status, ErasedError<'r>)>;
+pub type Result<'r> = std::result::Result<Response<'r>, crate::http::Status>;
 
 /// Type alias for the return type of a _raw_ [`Catcher`](crate::Catcher)'s
 /// [`Handler`].
@@ -101,19 +100,19 @@ pub trait Handler: Cloneable + Send + Sync + 'static {
     /// Nevertheless, failure is allowed, both for convenience and necessity. If
     /// an error handler fails, Rocket's default `500` catcher is invoked. If it
     /// succeeds, the returned `Response` is used to respond to the client.
-    async fn handle<'r>(&self, status: Status, req: &'r Request<'_>, error: ErasedError<'r>)
+    async fn handle<'r>(&self, status: Status, req: &'r Request<'_>, error: Option<&'r (dyn TypedError<'r> + 'r)>)
         -> Result<'r>;
 }
 
 // We write this manually to avoid double-boxing.
 impl<F: Clone + Sync + Send + 'static> Handler for F
-    where for<'x> F: Fn(Status, &'x Request<'_>, ErasedError<'x>) -> BoxFuture<'x>,
+    where for<'x> F: Fn(Status, &'x Request<'_>, Option<&'x (dyn TypedError<'x> + 'x)>) -> BoxFuture<'x>,
 {
-    fn handle<'r, 'life0, 'life1, 'async_trait>(
+    fn handle<'r, 'life0, 'life1, 'life2, 'async_trait>(
         &'life0 self,
         status: Status,
         req: &'r Request<'life1>,
-        error: ErasedError<'r>,
+        error: Option<&'r (dyn TypedError<'r> + 'r)>,
     ) -> BoxFuture<'r>
         where 'r: 'async_trait,
               'life0: 'async_trait,
@@ -126,7 +125,7 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
 
 // Used in tests! Do not use, please.
 #[doc(hidden)]
-pub fn dummy_handler<'r>(_: Status, _: &'r Request<'_>, _: ErasedError<'r>) -> BoxFuture<'r> {
+pub fn dummy_handler<'r>(_: Status, _: &'r Request<'_>, _: Option<&(dyn TypedError<'r> + 'r)>) -> BoxFuture<'r> {
    Box::pin(async move { Ok(Response::new()) })
 }
 

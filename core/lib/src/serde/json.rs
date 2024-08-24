@@ -222,14 +222,17 @@ impl<'r, T: Deserialize<'r>> FromData<'r> for Json<T> {
 /// JSON and a fixed-size body with the serialized value. If serialization
 /// fails, an `Err` of `Status::InternalServerError` is returned.
 impl<'r, T: Serialize> Responder<'r, 'static> for Json<T> {
-    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static> {
-        let string = serde_json::to_string(&self.0)
-            .map_err(|e| {
+    type Error = serde_json::Error;
+    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+        let string = match serde_json::to_string(&self.0) {
+            Ok(v) => v,
+            Err(e) => {
                 error!("JSON serialize failure: {}", e);
-                Status::InternalServerError
-            })?;
+                return response::Outcome::Error(e);
+            }
+        };
 
-        content::RawJson(string).respond_to(req)
+        content::RawJson(string).respond_to(req).map_error(|e| match e {})
     }
 }
 
@@ -304,7 +307,8 @@ impl<'v, T: Deserialize<'v> + Send> form::FromFormField<'v> for Json<T> {
 /// Serializes the value into JSON. Returns a response with Content-Type JSON
 /// and a fixed-size body with the serialized value.
 impl<'r> Responder<'r, 'static> for Value {
-    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static> {
+    type Error = std::convert::Infallible;
+    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
         content::RawJson(self.to_string()).respond_to(req)
     }
 }

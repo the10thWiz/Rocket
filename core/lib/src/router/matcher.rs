@@ -1,3 +1,6 @@
+use transient::TypeId;
+
+use crate::catcher::TypedError;
 use crate::{Route, Request, Catcher};
 use crate::router::Collide;
 use crate::http::Status;
@@ -134,11 +137,21 @@ impl Catcher {
     /// let b_count = b.base().segments().filter(|s| !s.is_empty()).count();
     /// assert!(b_count > a_count);
     /// ```
-    pub fn matches(&self, status: Status, request: &Request<'_>) -> bool {
+    pub fn matches(&self, status: Status, request: &Request<'_>, error: Option<TypeId>) -> bool {
         self.code.map_or(true, |code| code == status.code)
+            && self.error_matches(error)
             && self.base().segments().prefix_of(request.uri().path().segments())
     }
+
+    fn error_matches(&self, error: Option<TypeId>) -> bool {
+        if let Some((ty, _)) = self.error_type {
+            error.map_or(false, |t| t == ty)
+        } else {
+            true
+        }
+    }
 }
+
 
 fn paths_match(route: &Route, req: &Request<'_>) -> bool {
     trace!(route.uri = %route.uri, request.uri = %req.uri());

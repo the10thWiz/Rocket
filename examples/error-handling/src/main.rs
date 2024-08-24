@@ -2,6 +2,8 @@
 
 #[cfg(test)] mod tests;
 
+use transient::Transient;
+
 use rocket::{Rocket, Build};
 use rocket::response::{content, status};
 use rocket::http::{Status, uri::Origin};
@@ -15,6 +17,22 @@ fn hello(name: &str, age: i8) -> String {
 #[get("/<code>")]
 fn forced_error(code: u16) -> Status {
     Status::new(code)
+}
+
+// TODO: Derive TypedError
+#[derive(Transient, Debug)]
+struct CustomError;
+
+impl<'r> rocket::catcher::TypedError<'r> for CustomError {  }
+
+#[get("/")]
+fn forced_custom_error() -> Result<(), CustomError> {
+    Err(CustomError)
+}
+
+#[catch(500, error = "<e>")]
+fn catch_custom(e: &CustomError) -> &'static str {
+    "You found the custom error!"
 }
 
 #[catch(404)]
@@ -67,8 +85,8 @@ fn rocket() -> Rocket<Build> {
     rocket::build()
         // .mount("/", routes![hello, hello]) // uncomment this to get an error
         // .mount("/", routes![unmanaged]) // uncomment this to get a sentinel error
-        .mount("/", routes![hello, forced_error])
-        .register("/", catchers![general_not_found, default_catcher])
+        .mount("/", routes![hello, forced_error, forced_custom_error])
+        .register("/", catchers![general_not_found, default_catcher, catch_custom])
         .register("/hello", catchers![hello_not_found, param_error])
         .register("/hello/Sergio", catchers![sergio_error])
 }

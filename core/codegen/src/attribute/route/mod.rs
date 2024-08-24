@@ -113,16 +113,17 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
                             "{_err}"
                         ); } }
                 );
+                let __e = #resolve_error!(__e);
                 ::rocket::trace::info!(
                     target: concat!("rocket::codegen::route::", module_path!()),
-                    error_type = ::std::any::type_name_of_val(&__e),
+                    error_type = __e.name(),
                     "Forwarding error"
                 );
 
                 return #Outcome::Forward((
                     #__data,
                     #Status::UnprocessableEntity,
-                    #resolve_error!(__e)
+                    __e.val
                 ));
             }
 
@@ -134,7 +135,7 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 fn request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, display_hack, FromRequest, Outcome, resolve_error
+        __req, __data, _request, display_hack, FromRequest, Outcome, resolve_error, _None
     );
 
     quote_spanned! { ty.span() =>
@@ -150,21 +151,22 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
                     "request guard forwarding"
                 );
 
-                return #Outcome::Forward((#__data, __e, #resolve_error!()));
+                return #Outcome::Forward((#__data, __e, #_None));
             },
             #[allow(unreachable_code)]
             #Outcome::Error((__c, __e)) => {
+                let __err = #resolve_error!(__e);
                 ::rocket::trace::info!(
                     name: "failure",
                     target: concat!("rocket::codegen::route::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
-                    reason = %#display_hack!(&__e),
-                    error_type = ::std::any::type_name_of_val(&__e),
+                    // reason = %#display_hack!(&__e),
+                    error_type = __err.name,
                     "request guard failed"
                 );
 
-                return #Outcome::Error((__c, #resolve_error!(__e)));
+                return #Outcome::Error((__c, __err.val));
             }
         };
     }
@@ -179,17 +181,18 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 
     // Returned when a dynamic parameter fails to parse.
     let parse_error = quote!({
+        let __err = #resolve_error!(__error);
         ::rocket::trace::info!(
             name: "forward",
             target: concat!("rocket::codegen::route::", module_path!()),
             parameter = #name,
             type_name = stringify!(#ty),
-            reason = %#display_hack!(&__error),
-            error_type = ::std::any::type_name_of_val(&__error),
+            // reason = %#display_hack!(&__error),
+            error_type = __err.name,
             "path guard forwarding"
         );
 
-        #Outcome::Forward((#__data, #Status::UnprocessableEntity, #resolve_error!(__error)))
+        #Outcome::Forward((#__data, #Status::UnprocessableEntity, __err.val))
     });
 
     // All dynamic parameters should be found if this function is being called;
@@ -214,7 +217,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
                     return #Outcome::Forward((
                         #__data,
                         #Status::InternalServerError,
-                        #resolve_error!()
+                        #_None
                     ));
                 }
             }
@@ -235,7 +238,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 fn data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, display_hack, FromData, Outcome, resolve_error);
+        __req, __data, display_hack, FromData, Outcome, resolve_error, _None);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
@@ -250,21 +253,22 @@ fn data_guard_decl(guard: &Guard) -> TokenStream {
                     "data guard forwarding"
                 );
 
-                return #Outcome::Forward((__d, __e, #resolve_error!()));
+                return #Outcome::Forward((__d, __e, #_None));
             }
             #[allow(unreachable_code)]
             #Outcome::Error((__c, __e)) => {
+                let __e = #resolve_error!(__e);
                 ::rocket::trace::info!(
                     name: "failure",
                     target: concat!("rocket::codegen::route::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
-                    reason = %#display_hack!(&__e),
-                    error_type = ::std::any::type_name_of_val(&__e),
+                    // reason = %#display_hack!(&__e),
+                    error_type = __e.name,
                     "data guard failed"
                 );
 
-                return #Outcome::Error((__c, #resolve_error!(__e)));
+                return #Outcome::Error((__c, __e.val));
             }
         };
     }
