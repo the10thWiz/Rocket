@@ -54,23 +54,34 @@ impl Router {
             .flat_map(move |routes| routes.iter().filter(move |r| r.matches(req)))
     }
 
+    // TODO: Catch order:
+    // There are four matches (ignoring uri base):
+    // - Error type & Status
+    // - Error type & any status
+    // - Any type & Status
+    // - Any type & any status
+    //
+    // What order should these be selected in?
+    // Master prefers longer paths over any other match. However, types could
+    // be considered more important
+    // - Error type, longest path, status
+    // - Any type, longest path, status
+    // !! There are actually more than 4 - b/c we need to check source()
+    // What we would want to do, is gather the catchers that match the source() x 5,
+    // and select the one with the longest path. If none exist, try without error.
+
     // For many catchers, using aho-corasick or similar should be much faster.
-    // TODO: document difference between catch, and catch_any
     pub fn catch<'r>(&self, status: Status, req: &'r Request<'r>, error: Option<TypeId>)
         -> Option<&Catcher>
     {
         // Note that catchers are presorted by descending base length.
         self.catchers.get(&Some(status.code))
             .and_then(|c| c.iter().find(|c| c.matches(status, req, error)))
-    }
-
-    // For many catchers, using aho-corasick or similar should be much faster.
-    pub fn catch_any<'r>(&self, status: Status, req: &'r Request<'r>, error: Option<TypeId>)
-        -> Option<&Catcher>
-    {
-        // Note that catchers are presorted by descending base length.
-        self.catchers.get(&None)
-            .and_then(|c| c.iter().find(|c| c.matches(status, req, error)))
+            .into_iter()
+            .chain(self.catchers.get(&None)
+                .and_then(|c| c.iter().find(|c| c.matches(status, req, error)))
+            )
+            .min_by_key(|c| c.rank)
     }
 
     fn collisions<'a, I, T>(&self, items: I) -> impl Iterator<Item = (T, T)> + 'a

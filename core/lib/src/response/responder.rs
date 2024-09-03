@@ -537,7 +537,7 @@ impl<'r, 'o: 'r, T, E> Responder<'r, 'o> for Result<T, E>
     where T: Responder<'r, 'o>,
           T::Error: Transient,
           <T::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
-          E: fmt::Debug + TypedError<'r> + Transient + 'r,
+          E: TypedError<'r> + Transient + 'r,
           E::Transience: CanTranscendTo<Inv<'r>>,
 {
     type Error = Either<T::Error, E>;

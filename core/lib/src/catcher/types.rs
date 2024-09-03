@@ -1,8 +1,8 @@
 use either::Either;
-use transient::{Any, CanRecoverFrom, CanTranscendTo, Downcast, Inv, Transience};
+use transient::{Any, CanRecoverFrom, CanTranscendTo, Downcast, Transience};
 use crate::{http::Status, Request, Response};
 #[doc(inline)]
-pub use transient::{Static, Transient, TypeId};
+pub use transient::{Static, Transient, TypeId, Inv};
 
 /// Polyfill for trait upcasting to [`Any`]
 pub trait AsAny<Tr: Transience>: Any<Tr> + Sealed {
@@ -57,6 +57,8 @@ pub trait TypedError<'r>: AsAny<Inv<'r>> + Send + Sync + 'r {
 
 impl<'r> TypedError<'r> for std::convert::Infallible {  }
 
+impl<'r> TypedError<'r> for () {  }
+
 impl<'r> TypedError<'r> for std::io::Error {
     fn status(&self) -> Status {
         match self.kind() {
@@ -104,6 +106,18 @@ impl<'r, L, R> TypedError<'r> for Either<L, R>
             Self::Left(v) => v.status(),
             Self::Right(v) => v.status(),
         }
+    }
+}
+
+// TODO: This cannot be used as a bound on an untyped catcher to get any error type.
+// This is mostly an implementation detail (and issue with double boxing) for
+// the responder derive
+#[derive(Transient)]
+pub struct AnyError<'r>(pub Box<dyn TypedError<'r> + 'r>);
+
+impl<'r> TypedError<'r> for AnyError<'r> {
+    fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> {
+        Some(self.0.as_ref())
     }
 }
 
@@ -177,7 +191,7 @@ pub mod resolution {
     {
         pub const SPECIALIZED: bool = true;
 
-        pub fn cast(self) -> Option<Box<dyn TypedError<'r>>> { Some(Box::new(self.0))}
+        pub fn cast(self) -> Option<Box<dyn TypedError<'r>>> { Some(Box::new(self.0)) }
     }
 
     /// Wrapper type to hold the return type of `resolve_typed_catcher`.

@@ -13,7 +13,7 @@ pub struct CustomResponder<'r, R> {
 }
 
 impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for CustomResponder<'r, R> {
-    type Error = <R as Responder>::Error;
+    type Error = <R as Responder<'r, 'o>>::Error;
     fn respond_to(self, req: &'r Request<'_>) -> Outcome<'o, Self::Error> {
         self.responder.respond_to(req)
     }

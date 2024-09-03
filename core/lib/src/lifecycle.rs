@@ -284,58 +284,94 @@ impl Rocket<Orbit> {
     /// Return `Ok(result)` if the handler succeeded. Returns `Ok(Some(Status))`
     /// if the handler ran to completion but failed. Returns `Ok(None)` if the
     /// handler panicked while executing.
+    ///
+    /// # TODO: updated semantics:
+    ///
+    /// Selects and invokes a specific catcher, with the following preference:
+    /// - Best matching error type (prefers calling `.source()` the fewest number
+    ///   of times)
+    /// - The longest path base
+    /// - Matching status
+    /// - If no catcher is found, Rocket's default handler is invoked
+    ///
+    /// Return `Ok(result)` if the handler succeeded. Returns `Ok(Some(Status))`
+    /// if the handler ran to completion but failed. Returns `Ok(None)` if the
+    /// handler panicked while executing.
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,
         error: Option<&'r dyn TypedError<'r>>,
         req: &'r Request<'s>
     ) -> Result<Response<'r>, Option<Status>> {
-        let mut error_copy  = error;
-        let mut counter = 0;
-        // Matches error [.source ...] type
-        while error_copy.is_some() && counter < 5 {
-            if let Some(catcher) = self.router.catch(
-                status,
-                req,
-                error_copy.map(|e| e.trait_obj_typeid())
-            ) {
-                return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
-            }
-            error_copy = error_copy.and_then(|e| e.source());
-            counter += 1;
+        // Lists error types by repeatedly calling `.source()`
+        let catchers = std::iter::successors(error, |e| e.source())
+            // Only go up to 5 levels deep (to prevent an endless cycle)
+            .take(5)
+            // Map to catchers
+            .filter_map(|e| self.router.catch(status, req, Some(e.trait_obj_typeid())).map(|c| (c, e)))
+            // Select the minimum by the catcher's rank
+            .min_by_key(|(c, _)| c.rank);
+        if let Some((catcher, e)) = catchers {
+            self.invoke_specific_catcher(catcher, status, Some(e), req).await
+        } else if let Some(catcher) = self.router.catch(status, req, None) {
+            self.invoke_specific_catcher(catcher, status, error, req).await
+        } else {
+            info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
+                "no registered catcher: using Rocket default");
+            Ok(catcher::default_handler(status, req))
         }
-        // Matches None type
-        if let Some(catcher) = self.router.catch(status, req, None) {
-            return self.invoke_specific_catcher(catcher, status, None, req).await;
-        }
-        let mut error_copy  = error;
-        let mut counter = 0;
-        // Matches error [.source ...] type, and any status
-        while error_copy.is_some() && counter < 5 {
-            if let Some(catcher) = self.router.catch_any(
-                status,
-                req,
-                error_copy.map(|e| e.trait_obj_typeid())
-            ) {
-                return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
-            }
-            error_copy = error_copy.and_then(|e| e.source());
-            counter += 1;
-        }
-        // Matches None type, and any status
-        if let Some(catcher) = self.router.catch_any(status, req, None) {
-            return self.invoke_specific_catcher(catcher, status, None, req).await;
-        }
-        if let Some(error) = error {
-            if let Ok(res) = error.respond_to(req) {
-                return Ok(res);
-                // TODO: this ignores the returned status.
-            }
-        }
-        // Rocket default catcher
-        info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
-            "no registered catcher: using Rocket default");
-        Ok(catcher::default_handler(status, req))
+        // let items = std::iter::from_fn(|| {
+        //     let tmp = error.map(|e| self.router.catch(status, req, Some(e.trait_obj_typeid())));
+        //     error_copy = error.and_then(|e| e.source());
+        //     tmp
+        // }).take(5).filter_map(|e| e).min_by_key(|e| e.rank);
+        
+        // let mut error_copy  = error;
+        // let mut counter = 0;
+        // // Matches error [.source ...] type
+        // while error_copy.is_some() && counter < 5 {
+        //     if let Some(catcher) = self.router.catch(
+        //         status,
+        //         req,
+        //         error_copy.map(|e| e.trait_obj_typeid())
+        //     ) {
+        //         return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
+        //     }
+        //     error_copy = error_copy.and_then(|e| e.source());
+        //     counter += 1;
+        // }
+        // // Matches None type
+        // if let Some(catcher) = self.router.catch(status, req, None) {
+        //     return self.invoke_specific_catcher(catcher, status, None, req).await;
+        // }
+        // let mut error_copy  = error;
+        // let mut counter = 0;
+        // // Matches error [.source ...] type, and any status
+        // while error_copy.is_some() && counter < 5 {
+        //     if let Some(catcher) = self.router.catch_any(
+        //         status,
+        //         req,
+        //         error_copy.map(|e| e.trait_obj_typeid())
+        //     ) {
+        //         return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
+        //     }
+        //     error_copy = error_copy.and_then(|e| e.source());
+        //     counter += 1;
+        // }
+        // // Matches None type, and any status
+        // if let Some(catcher) = self.router.catch_any(status, req, None) {
+        //     return self.invoke_specific_catcher(catcher, status, None, req).await;
+        // }
+        // if let Some(error) = error {
+        //     if let Ok(res) = error.respond_to(req) {
+        //         return Ok(res);
+        //         // TODO: this ignores the returned status.
+        //     }
+        // }
+        // // Rocket default catcher
+        // info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
+        //     "no registered catcher: using Rocket default");
+        // Ok(catcher::default_handler(status, req))
         // TODO: document:
         // Set of matching catchers, tried in order:
         // - Matches error type
@@ -348,6 +384,7 @@ impl Rocket<Orbit> {
         // At each step, the catcher with the longest path is selected
     }
 
+    /// Invokes a specific catcher
     async fn invoke_specific_catcher<'s, 'r: 's>(
         &'s self,
         catcher: &Catcher,

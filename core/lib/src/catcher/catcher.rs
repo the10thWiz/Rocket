@@ -133,7 +133,7 @@ pub struct Catcher {
 // with more nonempty segments have lower ranks => higher precedence.
 // Doubled to provide space between for typed catchers.
 fn rank(base: Path<'_>) -> isize {
-    -(base.segments().filter(|s| !s.is_empty()).count() as isize) * 2
+    -(base.segments().filter(|s| !s.is_empty()).count() as isize)
 }
 
 impl Catcher {
@@ -355,11 +355,6 @@ impl From<StaticInfo> for Catcher {
     #[inline]
     fn from(info: StaticInfo) -> Catcher {
         let mut catcher = Catcher::new(info.code, info.handler);
-        if info.error_type.is_some() {
-            // Lower rank if the error_type is defined, to ensure typed catchers
-            // are always tried first
-            catcher.rank -= 1;
-        }
         catcher.name = Some(info.name.into());
         catcher.error_type = info.error_type;
         catcher.location = Some(info.location);
