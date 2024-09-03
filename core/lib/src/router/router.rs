@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use transient::TypeId;
 
+use crate::catcher::TypedError;
 use crate::request::Request;
 use crate::http::{Method, Status};
 
@@ -54,16 +55,18 @@ impl Router {
     }
 
     // For many catchers, using aho-corasick or similar should be much faster.
-    pub fn catch<'r>(&self, status: Status, req: &'r Request<'r>, error_ty: Option<TypeId>) -> Option<&Catcher> {
+    // TODO: document difference between catch, and catch_any
+    pub fn catch<'r>(&self, status: Status, req: &'r Request<'r>, error: Option<TypeId>) -> Option<&Catcher> {
         // Note that catchers are presorted by descending base length.
         self.catchers.get(&Some(status.code))
-            .and_then(|c| c.iter().find(|c| c.matches(status, req, error_ty)))
+            .and_then(|c| c.iter().find(|c| c.matches(status, req, error)))
     }
 
-    pub fn catch_any<'r>(&self, status: Status, req: &'r Request<'r>, error_ty: Option<TypeId>) -> Option<&Catcher> {
+    // For many catchers, using aho-corasick or similar should be much faster.
+    pub fn catch_any<'r>(&self, status: Status, req: &'r Request<'r>, error: Option<TypeId>) -> Option<&Catcher> {
         // Note that catchers are presorted by descending base length.
         self.catchers.get(&None)
-            .and_then(|c| c.iter().find(|c| c.matches(status, req, error_ty)))
+            .and_then(|c| c.iter().find(|c| c.matches(status, req, error)))
     }
 
     fn collisions<'a, I, T>(&self, items: I) -> impl Iterator<Item = (T, T)> + 'a

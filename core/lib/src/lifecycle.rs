@@ -94,6 +94,7 @@ impl Rocket<Orbit> {
         _token: RequestToken,
         request: &'r Request<'s>,
         data: Data<'r>,
+        error_ptr: &'r mut Option<Box<dyn TypedError<'r> + 'r>>,
         // io_stream: impl Future<Output = io::Result<IoStream>> + Send,
     ) -> Response<'r> {
         // Remember if the request is `HEAD` for later body stripping.
@@ -109,16 +110,24 @@ impl Rocket<Orbit> {
                 request._set_method(Method::Get);
                 match self.route(request, data).await {
                     Outcome::Success(response) => response,
-                    Outcome::Error((status, error))
-                        => self.dispatch_error(status, request, error).await,
-                    Outcome::Forward((_, status, error))
-                        => self.dispatch_error(status, request, error).await,
+                    Outcome::Error((status, error)) => {
+                        *error_ptr = error;
+                        self.dispatch_error(status, request, error_ptr.as_ref().map(|b| b.as_ref())).await
+                    },
+                    Outcome::Forward((_, status, error)) => {
+                        *error_ptr = error;
+                        self.dispatch_error(status, request, error_ptr.as_ref().map(|b| b.as_ref())).await
+                    },
                 }
             }
-            Outcome::Forward((_, status, error))
-                => self.dispatch_error(status, request, error).await,
-            Outcome::Error((status, error))
-                => self.dispatch_error(status, request, error).await,
+            Outcome::Forward((_, status, error)) => {
+                *error_ptr = error;
+                self.dispatch_error(status, request, error_ptr.as_ref().map(|b| b.as_ref())).await
+            },
+            Outcome::Error((status, error)) => {
+                *error_ptr = error;
+                self.dispatch_error(status, request, error_ptr.as_ref().map(|b| b.as_ref())).await
+            },
         };
 
         // Set the cookies. Note that error responses will only include cookies
@@ -236,7 +245,7 @@ impl Rocket<Orbit> {
         &'s self,
         mut status: Status,
         req: &'r Request<'s>,
-        mut error: Option<Box<dyn TypedError<'r> + 'r>>,
+        mut error: Option<&'r dyn TypedError<'r>>,
     ) -> Response<'r> {
         // We may wish to relax this in the future.
         req.cookies().reset_delta();
@@ -273,48 +282,64 @@ impl Rocket<Orbit> {
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,
-        error: Option<Box<dyn TypedError<'r> + 'r>>,
+        error: Option<&'r dyn TypedError<'r>>,
         req: &'r Request<'s>
     ) -> Result<Response<'r>, Option<Status>> {
-        let error_ty = error.as_ref().map(|e| e.as_any().type_id());
-        println!("Catching {:?}", error.as_ref().map(|e| e.name()));
-        if let Some(catcher) = self.router.catch(status, req, error_ty) {
-            self.invoke_specific_catcher(catcher, status, error.as_ref().map(|e| e.as_ref()), req).await
-        } else if let Some(source) = error.as_ref().and_then(|e| e.source()) {
-            println!("Catching {:?}", source.name());
-            let error_ty = source.as_any().type_id();
-            if let Some(catcher) = self.router.catch(status, req, Some(error_ty)) {
-                self.invoke_specific_catcher(catcher, status, error.as_ref().and_then(|e| e.source()), req).await
-            } else {
-                info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
-                    "no registered catcher: using Rocket default");
-                Ok(catcher::default_handler(status, req))
+        let mut error_copy  = error;
+        let mut counter = 0;
+        // Matches error [.source ...] type
+        while error_copy.is_some() && counter < 5 {
+            if let Some(catcher) = self.router.catch(status, req, error_copy.map(|e| e.trait_obj_typeid())) {
+                return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
             }
-        } else {
-            info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
-                "no registered catcher: using Rocket default");
-            Ok(catcher::default_handler(status, req))
+            error_copy = error_copy.and_then(|e| e.source());
+            counter += 1;
         }
-        // if let Some(catcher) = self.router.catch(status, req, error.as_ref().map(|t| t.as_any().type_id())) {
-        //     catcher.trace_info();
-        //     catch_handle(
-        //         catcher.name.as_deref(),
-        //         || catcher.handler.handle(status, req, error)
-        //     ).await
-        //         .map(|result| result.map_err(|(s, e)| (Some(s), e)))
-        //         .unwrap_or_else(|| Err((None, None)))
-        // } else {
-        //     info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
-        //         "no registered catcher: using Rocket default");
-        //     Ok(catcher::default_handler(status, req))
-        // }
+        // Matches None type
+        if let Some(catcher) = self.router.catch(status, req, None) {
+            return self.invoke_specific_catcher(catcher, status, None, req).await;
+        }
+        let mut error_copy  = error;
+        let mut counter = 0;
+        // Matches error [.source ...] type, and any status
+        while error_copy.is_some() && counter < 5 {
+            if let Some(catcher) = self.router.catch_any(status, req, error_copy.map(|e| e.trait_obj_typeid())) {
+                return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
+            }
+            error_copy = error_copy.and_then(|e| e.source());
+            counter += 1;
+        }
+        // Matches None type, and any status
+        if let Some(catcher) = self.router.catch_any(status, req, None) {
+            return self.invoke_specific_catcher(catcher, status, None, req).await;
+        }
+        if let Some(error) = error {
+            if let Ok(res) = error.respond_to(req) {
+                return Ok(res);
+                // TODO: this ignores the returned status.
+            }
+        }
+        // Rocket default catcher
+        info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
+            "no registered catcher: using Rocket default");
+        Ok(catcher::default_handler(status, req))
+        // TODO: document:
+        // Set of matching catchers, tried in order:
+        // - Matches error type
+        // - Matches error.source type
+        // - Matches error.source.source type
+        // - ... etc
+        // - Matches None type
+        // - Registered default handler
+        // - Rocket default handler
+        // At each step, the catcher with the longest path is selected
     }
 
     async fn invoke_specific_catcher<'s, 'r: 's>(
         &'s self,
         catcher: &Catcher,
         status: Status,
-        error: Option<&'r (dyn TypedError<'r> + 'r)>,
+        error: Option<&'r dyn TypedError<'r>>,
         req: &'r Request<'s>
     ) -> Result<Response<'r>, Option<Status>> {
         catcher.trace_info();

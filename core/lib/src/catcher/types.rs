@@ -93,7 +93,6 @@ impl<'r, L, R> TypedError<'r> for Either<L, R>
     fn name(&self) -> &'static str { std::any::type_name::<Self>() }
 
     fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> { 
-        println!("Downcasting either");
         match self {
             Self::Left(v) => Some(v),
             Self::Right(v) => Some(v),

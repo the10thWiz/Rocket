@@ -137,18 +137,11 @@ impl Catcher {
     /// let b_count = b.base().segments().filter(|s| !s.is_empty()).count();
     /// assert!(b_count > a_count);
     /// ```
+    // TODO: document error matching
     pub fn matches(&self, status: Status, request: &Request<'_>, error: Option<TypeId>) -> bool {
         self.code.map_or(true, |code| code == status.code)
-            && self.error_matches(error)
+            && error == self.error_type.map(|(ty, _)| ty)
             && self.base().segments().prefix_of(request.uri().path().segments())
-    }
-
-    fn error_matches(&self, error: Option<TypeId>) -> bool {
-        if let Some((ty, _)) = self.error_type {
-            error.map_or(false, |t| t == ty)
-        } else {
-            true
-        }
     }
 }
 

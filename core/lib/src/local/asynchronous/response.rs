@@ -4,6 +4,7 @@ use std::{pin::Pin, task::{Context, Poll}};
 
 use tokio::io::{AsyncRead, ReadBuf};
 
+use crate::catcher::TypedError;
 use crate::http::CookieJar;
 use crate::{Request, Response};
 
@@ -55,6 +56,7 @@ use crate::{Request, Response};
 pub struct LocalResponse<'c> {
     // XXX: SAFETY: This (dependent) field must come first due to drop order!
     response: Response<'c>,
+    _error: Option<Box<dyn TypedError<'c> + 'c>>,
     cookies: CookieJar<'c>,
     _request: Box<Request<'c>>,
 }
@@ -65,8 +67,8 @@ impl Drop for LocalResponse<'_> {
 
 impl<'c> LocalResponse<'c> {
     pub(crate) fn new<F, O>(req: Request<'c>, f: F) -> impl Future<Output = LocalResponse<'c>>
-        where F: FnOnce(&'c Request<'c>) -> O + Send,
-              O: Future<Output = Response<'c>> + Send
+        where F: FnOnce(&'c Request<'c>, &'c mut Option<Box<dyn TypedError<'c> + 'c>>) -> O + Send,
+              O: Future<Output = Response<'c>> + Send + 'c
     {
         // `LocalResponse` is a self-referential structure. In particular,
         // `response` and `cookies` can refer to `_request` and its contents. As
@@ -93,17 +95,21 @@ impl<'c> LocalResponse<'c> {
         let request: &'c Request<'c> = unsafe { &*(&*boxed_req as *const _) };
 
         async move {
+            use std::mem::transmute;
+            let mut error: Option<Box<dyn TypedError<'c> + 'c>> = None;
             // NOTE: The cookie jar `secure` state will not reflect the last
             // known value in `request.cookies()`. This is okay: new cookies
             // should never be added to the resulting jar which is the only time
             // the value is used to set cookie defaults.
-            let response: Response<'c> = f(request).await;
+            // SAFETY: Much like request above, error can borrow from request, and
+            // response can borrow from request. TODO
+            let response: Response<'c> = f(request, unsafe { transmute(&mut error) }).await;
             let mut cookies = CookieJar::new(None, request.rocket());
             for cookie in response.cookies() {
                 cookies.add_original(cookie.into_owned());
             }
 
-            LocalResponse { _request: boxed_req, cookies, response, }
+            LocalResponse { _request: boxed_req, _error: error, cookies, response, }
         }
     }
 }

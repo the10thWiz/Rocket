@@ -8,6 +8,7 @@ use futures::future::BoxFuture;
 use http::request::Parts;
 use tokio::io::{AsyncRead, ReadBuf};
 
+use crate::catcher::TypedError;
 use crate::data::{Data, IoHandler, RawStream};
 use crate::{Request, Response, Rocket, Orbit};
 
@@ -34,10 +35,12 @@ impl Drop for ErasedRequest {
     fn drop(&mut self) { }
 }
 
-#[derive(Debug)]
+// TODO: #[derive(Debug)]
 pub struct ErasedResponse {
     // XXX: SAFETY: This (dependent) field must come first due to drop order!
     response: Response<'static>,
+    // XXX: SAFETY: This (dependent) field must come first due to drop order!
+    error: Option<Box<dyn TypedError<'static> + 'static>>,
     _request: Arc<ErasedRequest>,
 }
 
@@ -94,7 +97,8 @@ impl ErasedRequest {
             T,
             &'r Rocket<Orbit>,
             &'r Request<'r>,
-            Data<'r>
+            Data<'r>,
+            &'r mut Option<Box<dyn TypedError<'r> + 'r>>,
         ) -> BoxFuture<'r, Response<'r>>,
     ) -> ErasedResponse
         where T: Send + Sync + 'static,
@@ -111,15 +115,19 @@ impl ErasedRequest {
         };
 
         let parent = parent;
+        let mut error_ptr: Option<Box<dyn TypedError<'static> + 'static>> = None;
         let response: Response<'_> = {
             let parent: &ErasedRequest = &parent;
             let parent: &'static ErasedRequest = unsafe { transmute(parent) };
             let rocket: &Rocket<Orbit> = &parent._rocket;
             let request: &Request<'_> = &parent.request;
-            dispatch(token, rocket, request, data).await
+            // SAFETY: error_ptr is transmuted into the same type, with the same lifetime as the request.
+            // It is kept alive by the erased response, so that the response type can borrow from it
+            dispatch(token, rocket, request, data, unsafe { transmute(&mut error_ptr)}).await
         };
 
         ErasedResponse {
+            error: error_ptr,
             _request: parent,
             response,
         }
