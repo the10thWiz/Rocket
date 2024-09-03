@@ -51,7 +51,7 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                 fn set_header_tokens<T: ToTokens + Spanned>(item: T) -> TokenStream {
                     quote_spanned!(item.span() => __res.set_header(#item);)
                 }
-                
+
                 let error_outcome = match fields.parent {
                     FieldParent::Variant(p) => {
                         // let name = p.parent.ident.append("Error");
@@ -144,7 +144,8 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
         //         let variants = item.variants().map(|d| {
         //             let var_name = &d.ident;
         //             let (old, ty) = d.fields().iter().next().map(|f| {
-        //                 let ty = f.ty.with_replaced_lifetimes(Lifetime::new("'o", Span::call_site()));
+        //                 let ty = f.ty.with_replaced_lifetimes(
+        //                        Lifetime::new("'o", Span::call_site()));
         //                 (f.ty.clone(), ty)
         //             }).expect("have at least one field");
         //             let output_life = if old == ty {
@@ -170,7 +171,9 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
         //             .map(|p| &p.ident)
         //             .filter(|p| generic_used(p, &response_types))
         //             .collect();
-        //         // let bounds: Vec<_> = item.variants().map(|f| bounds_from_fields(f.fields()).expect("Bounds must be valid")).collect();
+        //         let bounds: Vec<_> = item.variants()
+        //             .map(|f| bounds_from_fields(f.fields()).expect("Bounds must be valid"))
+        //             .collect();
         //         let bounds: Vec<_> = item.variants()
         //             .flat_map(|f| responder_types(f.fields()).into_iter())
         //             .map(|t| quote!{#t: #_response::Responder<'r, 'o>,})
@@ -189,14 +192,16 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
         //             // TODO: validate this impl - roughly each variant must be (at least) inv
         //             // wrt a lifetime, since they impl CanTransendTo<Inv<'r>>
         //             // TODO: also need to add requirements on the type parameters
-        //             unsafe impl<'r, 'o: 'r, #(#type_params: 'r,)*> ::rocket::catcher::Transient for #name<'r, 'o, #(#type_params,)*>
-        //                 where #(#bounds)*
+        //             unsafe impl<'r, 'o: 'r, #(#type_params: 'r,)*> ::rocket::catcher::Transient
+        //                 for #name<'r, 'o, #(#type_params,)*>
+        //                     where #(#bounds)*
         //             {
         //                 type Static = #name<'static, 'static>;
         //                 type Transience = ::rocket::catcher::Inv<'r>;
         //             }
-        //             impl<'r, 'o: 'r, #(#type_params,)*> #TypedError<'r> for #name<'r, 'o, #(#type_params,)*>
-        //                 where #(#bounds)*
+        //             impl<'r, 'o: 'r, #(#type_params,)*> #TypedError<'r>
+        //                 for #name<'r, 'o, #(#type_params,)*>
+        //                     where #(#bounds)*
         //             {
         //                 fn source(&self) -> #_Option<&dyn #TypedError<'r>> {
         //                     match self {

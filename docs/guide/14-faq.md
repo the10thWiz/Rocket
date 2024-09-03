@@ -418,10 +418,13 @@ the example below:
 use rocket::request::Request;
 use rocket::response::{self, Response, Responder};
 use rocket::serde::json::Json;
+use rocket::outcome::try_outcome;
 
+// TODO: this needs a full update
 impl<'r> Responder<'r, 'static> for Person {
-    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static> {
-        Response::build_from(Json(&self).respond_to(req)?)
+    type Error = <Json<Self> as Responder<'r, 'static>>::Error;
+    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+        Response::build_from(try_outcome!(Json(&self).respond_to(req)))
             .raw_header("X-Person-Name", self.name)
             .raw_header("X-Person-Age", self.age.to_string())
             .ok()

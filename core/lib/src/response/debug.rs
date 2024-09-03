@@ -1,3 +1,5 @@
+use transient::Static;
+
 use crate::request::Request;
 use crate::response::{self, Responder};
 use crate::http::Status;
@@ -29,6 +31,7 @@ use crate::http::Status;
 /// Because of the generic `From<E>` implementation for `Debug<E>`, conversions
 /// from `Result<T, E>` to `Result<T, Debug<E>>` through `?` occur
 /// automatically:
+/// TODO: this has changed
 ///
 /// ```rust
 /// use std::string::FromUtf8Error;
@@ -37,7 +40,7 @@ use crate::http::Status;
 /// use rocket::response::Debug;
 ///
 /// #[get("/")]
-/// fn rand_str() -> Result<String, Debug<FromUtf8Error>> {
+/// fn rand_str() -> Result<String, FromUtf8Error> {
 ///     # /*
 ///     let bytes: Vec<u8> = random_bytes();
 ///     # */
@@ -56,16 +59,18 @@ use crate::http::Status;
 /// use rocket::response::Debug;
 ///
 /// #[get("/")]
-/// fn rand_str() -> Result<String, Debug<FromUtf8Error>> {
+/// fn rand_str() -> Result<String, FromUtf8Error> {
 ///     # /*
 ///     let bytes: Vec<u8> = random_bytes();
 ///     # */
 ///     # let bytes: Vec<u8> = vec![];
-///     String::from_utf8(bytes).map_err(Debug)
+///     String::from_utf8(bytes)
 /// }
 /// ```
 #[derive(Debug)]
 pub struct Debug<E>(pub E);
+
+impl<E: 'static> Static for Debug<E> {}
 
 impl<E> From<E> for Debug<E> {
     #[inline(always)]

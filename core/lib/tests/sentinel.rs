@@ -151,7 +151,7 @@ fn inner_sentinels_detected() {
 
     #[derive(Responder)]
     struct MyThing<T>(T);
-    
+
     #[derive(Debug, Transient)]
     struct ResponderSentinel;
     impl TypedError<'_> for ResponderSentinel {}

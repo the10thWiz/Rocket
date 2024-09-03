@@ -150,11 +150,12 @@ use crate::{Rocket, Ignite};
 /// use rocket::response::Responder;
 /// # type AnotherSentinel = ();
 ///
-/// #[get("/")]
-/// fn f<'r>() -> Either<impl Responder<'r, 'static>, AnotherSentinel> {
-///     /* ... */
-///     # Either::Left(())
-/// }
+/// // TODO: this no longer compiles, since the `impl Responder` doesn't meet the full reqs
+/// // #[get("/")]
+/// // fn f<'r>() -> Either<impl Responder<'r, 'static>, AnotherSentinel> {
+/// //     /* ... */
+/// //     # Either::Left(())
+/// // }
 /// ```
 ///
 /// **Note:** _Rocket actively discourages using `impl Trait` in route

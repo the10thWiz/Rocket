@@ -292,6 +292,7 @@ impl Rocket<Orbit> {
     ///   of times)
     /// - The longest path base
     /// - Matching status
+    /// - The error's built-in responder (TODO: should this be before untyped catchers?)
     /// - If no catcher is found, Rocket's default handler is invoked
     ///
     /// Return `Ok(result)` if the handler succeeded. Returns `Ok(Some(Status))`
@@ -308,24 +309,29 @@ impl Rocket<Orbit> {
             // Only go up to 5 levels deep (to prevent an endless cycle)
             .take(5)
             // Map to catchers
-            .filter_map(|e| self.router.catch(status, req, Some(e.trait_obj_typeid())).map(|c| (c, e)))
+            .filter_map(|e| {
+                self.router.catch(status, req, Some(e.trait_obj_typeid())).map(|c| (c, e))
+            })
             // Select the minimum by the catcher's rank
             .min_by_key(|(c, _)| c.rank);
         if let Some((catcher, e)) = catchers {
             self.invoke_specific_catcher(catcher, status, Some(e), req).await
         } else if let Some(catcher) = self.router.catch(status, req, None) {
             self.invoke_specific_catcher(catcher, status, error, req).await
+        } else if let Some(res) = error.and_then(|e| e.respond_to(req).ok()) {
+            Ok(res)
         } else {
             info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
                 "no registered catcher: using Rocket default");
             Ok(catcher::default_handler(status, req))
         }
+        // TODO: Clean this up
         // let items = std::iter::from_fn(|| {
         //     let tmp = error.map(|e| self.router.catch(status, req, Some(e.trait_obj_typeid())));
         //     error_copy = error.and_then(|e| e.source());
         //     tmp
         // }).take(5).filter_map(|e| e).min_by_key(|e| e.rank);
-        
+
         // let mut error_copy  = error;
         // let mut counter = 0;
         // // Matches error [.source ...] type

@@ -39,7 +39,8 @@ pin_project! {
     /// impl<'r, S: Stream<Item = String>> Responder<'r, 'r> for MyStream<S>
     ///     where S: Send + 'r
     /// {
-    ///     fn respond_to(self, _: &'r Request<'_>) -> response::Result<'r> {
+    ///     type Error = std::convert::Infallible;
+    ///     fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'r, Self::Error> {
     ///         Response::build()
     ///             .header(ContentType::Text)
     ///             .streamed_body(ReaderStream::from(self.0.map(Cursor::new)))

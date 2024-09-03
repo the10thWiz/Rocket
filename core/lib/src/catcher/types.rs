@@ -1,6 +1,6 @@
 use either::Either;
 use transient::{Any, CanRecoverFrom, CanTranscendTo, Downcast, Transience};
-use crate::{http::Status, Request, Response};
+use crate::{http::Status, response::{self, Responder}, Request, Response};
 #[doc(inline)]
 pub use transient::{Static, Transient, TypeId, Inv};
 
@@ -70,6 +70,7 @@ impl<'r> TypedError<'r> for std::io::Error {
 
 impl<'r> TypedError<'r> for std::num::ParseIntError {}
 impl<'r> TypedError<'r> for std::num::ParseFloatError {}
+impl<'r> TypedError<'r> for std::string::FromUtf8Error {}
 
 #[cfg(feature = "json")]
 impl<'r> TypedError<'r> for serde_json::Error {}
@@ -78,6 +79,13 @@ impl<'r> TypedError<'r> for serde_json::Error {}
 impl<'r> TypedError<'r> for rmp_serde::encode::Error {}
 #[cfg(feature = "msgpack")]
 impl<'r> TypedError<'r> for rmp_serde::decode::Error {}
+
+// TODO: This is a hack to make any static type implement Transient
+impl<'r, T: std::fmt::Debug + Send + Sync + 'static> TypedError<'r> for response::Debug<T> {
+    fn respond_to(&self, request: &'r Request<'_>) -> Result<Response<'r>, Status> {
+        format!("{:?}", self.0).respond_to(request).responder_error()
+    }
+}
 
 impl<'r, L, R> TypedError<'r> for Either<L, R>
     where L: TypedError<'r> + Transient,

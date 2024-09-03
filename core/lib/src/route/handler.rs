@@ -261,8 +261,12 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// use rocket::{Request, Data, route};
     /// use rocket::http::Status;
     ///
+    /// struct CustomError(&'static str);
+    /// impl rocket::catcher::Static for CustomError {}
+    /// impl rocket::catcher::TypedError<'_> for CustomError {}
+    ///
     /// fn bad_req_route<'r>(_: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
-    ///     route::Outcome::error_val(Status::BadRequest, "Some data to go with")
+    ///     route::Outcome::error_val(Status::BadRequest, CustomError("Some data to go with"))
     /// }
     /// ```
     #[inline(always)]

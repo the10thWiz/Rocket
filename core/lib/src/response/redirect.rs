@@ -1,3 +1,6 @@
+use transient::Transient;
+
+use crate::catcher::TypedError;
 use crate::request::Request;
 use crate::response::{self, Response, Responder};
 use crate::http::uri::Reference;
@@ -45,7 +48,7 @@ use crate::http::Status;
 ///
 /// [`Origin`]: crate::http::uri::Origin
 /// [`uri!`]: ../macro.uri.html
-#[derive(Debug)]
+#[derive(Debug, Transient)]
 pub struct Redirect(Status, Option<Reference<'static>>);
 
 impl Redirect {
@@ -87,63 +90,63 @@ impl Redirect {
         Redirect(Status::TemporaryRedirect, uri.try_into().ok())
     }
 
-   /// Construct a "permanent" (308) redirect response. This redirect must only
-   /// be used for permanent redirects as it is cached by clients. This
-   /// response instructs the client to reissue requests for the current URL to
-   /// a different URL, now and in the future, maintaining the contents of the
-   /// request identically. This means that, for example, a `POST` request will
-   /// be resent, contents included, to the requested URL.
-   ///
-   /// # Examples
-   ///
-   /// ```rust
-   /// # #[macro_use] extern crate rocket;
-   /// use rocket::response::Redirect;
-   ///
-   /// let redirect = Redirect::permanent(uri!("/other_url"));
-   /// let redirect = Redirect::permanent(format!("some-{}-thing", "crazy"));
-   /// ```
-   pub fn permanent<U: TryInto<Reference<'static>>>(uri: U) -> Redirect {
-       Redirect(Status::PermanentRedirect, uri.try_into().ok())
-   }
+    /// Construct a "permanent" (308) redirect response. This redirect must only
+    /// be used for permanent redirects as it is cached by clients. This
+    /// response instructs the client to reissue requests for the current URL to
+    /// a different URL, now and in the future, maintaining the contents of the
+    /// request identically. This means that, for example, a `POST` request will
+    /// be resent, contents included, to the requested URL.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # #[macro_use] extern crate rocket;
+    /// use rocket::response::Redirect;
+    ///
+    /// let redirect = Redirect::permanent(uri!("/other_url"));
+    /// let redirect = Redirect::permanent(format!("some-{}-thing", "crazy"));
+    /// ```
+    pub fn permanent<U: TryInto<Reference<'static>>>(uri: U) -> Redirect {
+        Redirect(Status::PermanentRedirect, uri.try_into().ok())
+    }
 
-   /// Construct a temporary "found" (302) redirect response. This response
-   /// instructs the client to reissue the current request to a different URL,
-   /// ideally maintaining the contents of the request identically.
-   /// Unfortunately, different clients may respond differently to this type of
-   /// redirect, so `303` or `307` redirects, which disambiguate, are
-   /// preferred.
-   ///
-   /// # Examples
-   ///
-   /// ```rust
-   /// # #[macro_use] extern crate rocket;
-   /// use rocket::response::Redirect;
-   ///
-   /// let redirect = Redirect::found(uri!("/other_url"));
-   /// let redirect = Redirect::found(format!("some-{}-thing", "crazy"));
-   /// ```
-   pub fn found<U: TryInto<Reference<'static>>>(uri: U) -> Redirect {
-       Redirect(Status::Found, uri.try_into().ok())
-   }
+    /// Construct a temporary "found" (302) redirect response. This response
+    /// instructs the client to reissue the current request to a different URL,
+    /// ideally maintaining the contents of the request identically.
+    /// Unfortunately, different clients may respond differently to this type of
+    /// redirect, so `303` or `307` redirects, which disambiguate, are
+    /// preferred.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # #[macro_use] extern crate rocket;
+    /// use rocket::response::Redirect;
+    ///
+    /// let redirect = Redirect::found(uri!("/other_url"));
+    /// let redirect = Redirect::found(format!("some-{}-thing", "crazy"));
+    /// ```
+    pub fn found<U: TryInto<Reference<'static>>>(uri: U) -> Redirect {
+        Redirect(Status::Found, uri.try_into().ok())
+    }
 
-   /// Construct a permanent "moved" (301) redirect response. This response
-   /// should only be used for permanent redirects as it can be cached by
-   /// browsers. Because different clients may respond differently to this type
-   /// of redirect, a `308` redirect, which disambiguates, is preferred.
-   ///
-   /// # Examples
-   ///
-   /// ```rust
-   /// # #[macro_use] extern crate rocket;
-   /// use rocket::response::Redirect;
-   ///
-   /// let redirect = Redirect::moved(uri!("here"));
-   /// let redirect = Redirect::moved(format!("some-{}-thing", "crazy"));
-   /// ```
-   pub fn moved<U: TryInto<Reference<'static>>>(uri: U) -> Redirect {
-       Redirect(Status::MovedPermanently, uri.try_into().ok())
-   }
+    /// Construct a permanent "moved" (301) redirect response. This response
+    /// should only be used for permanent redirects as it can be cached by
+    /// browsers. Because different clients may respond differently to this type
+    /// of redirect, a `308` redirect, which disambiguates, is preferred.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # #[macro_use] extern crate rocket;
+    /// use rocket::response::Redirect;
+    ///
+    /// let redirect = Redirect::moved(uri!("here"));
+    /// let redirect = Redirect::moved(format!("some-{}-thing", "crazy"));
+    /// ```
+    pub fn moved<U: TryInto<Reference<'static>>>(uri: U) -> Redirect {
+        Redirect(Status::MovedPermanently, uri.try_into().ok())
+    }
 }
 
 /// Constructs a response with the appropriate status code and the given URL in
@@ -162,5 +165,25 @@ impl<'r> Responder<'r, 'static> for Redirect {
             error!("Invalid URI used for redirect.");
             response::Outcome::Forward(Status::InternalServerError)
         }
+    }
+}
+
+// TODO: This is a hack
+impl<'r> TypedError<'r> for Redirect {
+    fn respond_to(&self, _req: &'r Request<'r>) -> Result<Response<'r>, Status> {
+        if let Some(uri) = &self.1 {
+            Response::build()
+                .status(self.0)
+                .raw_header("Location", uri.to_string())
+                .ok::<()>()
+                .responder_error()
+        } else {
+            error!("Invalid URI used for redirect.");
+            Err(Status::InternalServerError)
+        }
+    }
+
+    fn status(&self) -> Status {
+        self.0
     }
 }

@@ -122,14 +122,14 @@ impl Catcher {
     /// // Let's say `request` is `GET /` that 404s. The error matches only `a`:
     /// let request = client.get("/");
     /// # let request = request.inner();
-    /// assert!(a.matches(Status::NotFound, &request));
-    /// assert!(!b.matches(Status::NotFound, &request));
+    /// assert!(a.matches(Status::NotFound, &request, None));
+    /// assert!(!b.matches(Status::NotFound, &request, None));
     ///
     /// // Now `request` is a 404 `GET /bar`. The error matches `a` and `b`:
     /// let request = client.get("/bar");
     /// # let request = request.inner();
-    /// assert!(a.matches(Status::NotFound, &request));
-    /// assert!(b.matches(Status::NotFound, &request));
+    /// assert!(a.matches(Status::NotFound, &request, None));
+    /// assert!(b.matches(Status::NotFound, &request, None));
     ///
     /// // Note that because `b`'s base' has more complete segments that `a's,
     /// // Rocket would route the error to `b`, not `a`, even though both match.

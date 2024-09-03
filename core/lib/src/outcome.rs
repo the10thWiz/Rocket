@@ -86,6 +86,7 @@
 //! a type of `Option<S>`. If an `Outcome` is a `Forward`, the `Option` will be
 //! `None`.
 
+use crate::catcher::TypedError;
 use crate::request;
 use crate::data::{self, Data, FromData};
 use crate::http::Status;
@@ -634,7 +635,19 @@ impl<S, F> Outcome<S, std::convert::Infallible, F> {
             Self::Error(e) => match e {},
         }
     }
+}
 
+impl<'r, S, E: TypedError<'r>> Outcome<S, E, Status> {
+    /// Convenience function to convert the error type from `Infallible`
+    /// to any other type. This is trivially possible, since `Infallible`
+    /// cannot be constructed, so this cannot be an Error variant
+    pub fn responder_error(self) -> Result<S, Status> {
+        match self {
+            Self::Success(v) => Ok(v),
+            Self::Forward(v) => Err(v),
+            Self::Error(e) => Err(e.status()),
+        }
+    }
 }
 
 impl<'a, S: Send + 'a, E: Send + 'a, F: Send + 'a> Outcome<S, E, F> {

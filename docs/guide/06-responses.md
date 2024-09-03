@@ -263,9 +263,11 @@ use rocket::response::{self, Response, Responder};
 use rocket::http::ContentType;
 
 # struct String(std::string::String);
+// TODO: this needs a full update
 #[rocket::async_trait]
 impl<'r> Responder<'r, 'static> for String {
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
+    type Error = std::convert::Infallible;
+    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
         Response::build()
             .header(ContentType::Plain)
             # /*

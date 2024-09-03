@@ -436,7 +436,7 @@ impl<'r> Builder<'r> {
     /// ```rust
     /// use rocket::response::{Response, Outcome};
     ///
-    /// let response: Outcome<Response, ()> = Response::build()
+    /// let response: Outcome<'_, ()> = Response::build()
     ///     // build the response
     ///     .ok();
     ///

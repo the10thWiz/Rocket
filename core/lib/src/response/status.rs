@@ -29,6 +29,9 @@ use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 use std::borrow::Cow;
 
+use transient::Static;
+
+use crate::catcher::TypedError;
 use crate::outcome::try_outcome;
 use crate::request::Request;
 use crate::response::{self, Responder, Response};
@@ -181,6 +184,14 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Created<R> {
     }
 }
 
+// TODO: do we want this?
+impl<R: Send + Sync + 'static> TypedError<'_> for Created<R> {
+    fn status(&self) -> Status {
+        Status::Created
+    }
+}
+impl<R: 'static> Static for Created<R> {}
+
 /// Sets the status of the response to 204 No Content.
 ///
 /// The response body will be empty.
@@ -299,6 +310,14 @@ macro_rules! status_response {
                 Custom(Status::$T, self.0).respond_to(req)
             }
         }
+
+        // TODO: do we want this?
+        impl<R: Send + Sync + 'static> TypedError<'_> for $T<R> {
+            fn status(&self) -> Status {
+                Status::$T
+            }
+        }
+        impl<R: 'static> Static for $T<R> {}
     }
 }
 

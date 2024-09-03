@@ -199,6 +199,7 @@ use super::Outcome;
 /// # struct C;
 /// // If the response is or wraps a borrow that may outlive the request.
 /// impl<'r, 'o: 'r> Responder<'r, 'o> for &'o C {
+///     type Error = std::convert::Infallible;
 ///     fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
 ///         todo!()
 ///     }
@@ -207,6 +208,7 @@ use super::Outcome;
 /// # struct D<R>(R);
 /// // If the response wraps an existing responder.
 /// impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for D<R> {
+///     type Error = std::convert::Infallible;
 ///     fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
 ///         todo!()
 ///     }
@@ -254,12 +256,14 @@ use super::Outcome;
 ///
 /// use rocket::request::Request;
 /// use rocket::response::{self, Response, Responder};
+/// use rocket::outcome::try_outcome;
 /// use rocket::http::ContentType;
 ///
 /// impl<'r> Responder<'r, 'static> for Person {
-///     fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static> {
+///     type Error = std::convert::Infallible;
+///     fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
 ///         let string = format!("{}:{}", self.name, self.age);
-///         Response::build_from(string.respond_to(req)?)
+///         Response::build_from(try_outcome!(string.respond_to(req)))
 ///             .raw_header("X-Person-Name", self.name)
 ///             .raw_header("X-Person-Age", self.age.to_string())
 ///             .header(ContentType::new("application", "x-person"))
