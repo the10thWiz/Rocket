@@ -2051,7 +2051,7 @@ on implementing [`Transient`] for custom error types.
 
 * The form::Errors type does not (yet) implement Transient
 
-The function arguement must be a reference to the error type expected. See the 
+The function arguement must be a reference to the error type expected. See the
 [error handling example](@git/master/examples/error-handling)
 for a full application, including the route that generates the error.
 

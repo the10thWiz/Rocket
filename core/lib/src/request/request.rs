@@ -16,8 +16,8 @@ use crate::request::{FromParam, FromSegments, FromRequest, Outcome, AtomicMethod
 use crate::form::{self, ValueField, FromForm};
 use crate::data::Limits;
 
-use crate::http::ProxyProto;
-use crate::http::{Method, Header, HeaderMap, ContentType, Accept, MediaType, CookieJar, Cookie, Status};
+use crate::http::{Method, Header, HeaderMap, ContentType, Accept, MediaType, CookieJar, Cookie,
+    ProxyProto, Status};
 use crate::http::uri::{fmt::Path, Origin, Segments, Host, Authority};
 use crate::listener::{Certificates, Endpoint};
 

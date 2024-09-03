@@ -498,13 +498,15 @@ impl<'r, 'o: 'r, R: ?Sized + ToOwned> Responder<'r, 'o> for std::borrow::Cow<'o,
           <<&'o R as Responder<'r, 'o>>::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
           <R as ToOwned>::Owned: Responder<'r, 'o> + 'r,
           <<R as ToOwned>::Owned as Responder<'r, 'o>>::Error: Transient,
-          <<<R as ToOwned>::Owned as Responder<'r, 'o>>::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
+          <<<R as ToOwned>::Owned as Responder<'r, 'o>>::Error as Transient>::Transience:
+                                              CanTranscendTo<Inv<'r>>,
+                                              // TODO: this atrocious formatting
 {
     type Error = Either<
         <&'o R as Responder<'r, 'o>>::Error,
         <R::Owned as Responder<'r, 'o>>::Error,
     >;
-    
+
     fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
         match self {
             std::borrow::Cow::Borrowed(b) => b.respond_to(req).map_error(|e| Either::Left(e)),

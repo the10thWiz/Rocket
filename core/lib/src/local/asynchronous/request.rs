@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::lifecycle::error_ref;
 use crate::request::RequestErrors;
 use crate::{Request, Data};
 use crate::http::{Status, Method};
@@ -89,7 +90,7 @@ impl<'c> LocalRequest<'c> {
                 return LocalResponse::new(self.request, move |req, error_ptr| {
                     // TODO: Ideally the RequestErrors should contain actual information.
                     *error_ptr = Some(Box::new(RequestErrors::new(&[])));
-                    rocket.dispatch_error(Status::BadRequest, req, error_ptr.as_ref().map(|b| b.as_ref()))
+                    rocket.dispatch_error(Status::BadRequest, req, error_ref(error_ptr))
                 }).await
             }
         }

@@ -56,14 +56,18 @@ impl Router {
 
     // For many catchers, using aho-corasick or similar should be much faster.
     // TODO: document difference between catch, and catch_any
-    pub fn catch<'r>(&self, status: Status, req: &'r Request<'r>, error: Option<TypeId>) -> Option<&Catcher> {
+    pub fn catch<'r>(&self, status: Status, req: &'r Request<'r>, error: Option<TypeId>)
+        -> Option<&Catcher>
+    {
         // Note that catchers are presorted by descending base length.
         self.catchers.get(&Some(status.code))
             .and_then(|c| c.iter().find(|c| c.matches(status, req, error)))
     }
 
     // For many catchers, using aho-corasick or similar should be much faster.
-    pub fn catch_any<'r>(&self, status: Status, req: &'r Request<'r>, error: Option<TypeId>) -> Option<&Catcher> {
+    pub fn catch_any<'r>(&self, status: Status, req: &'r Request<'r>, error: Option<TypeId>)
+        -> Option<&Catcher>
+    {
         // Note that catchers are presorted by descending base length.
         self.catchers.get(&None)
             .and_then(|c| c.iter().find(|c| c.matches(status, req, error)))
@@ -556,7 +560,9 @@ mod test {
         router
     }
 
-    fn catcher<'a>(router: &'a Router, status: Status, uri: &str, error_ty: Option<TypeId>) -> Option<&'a Catcher> {
+    fn catcher<'a>(router: &'a Router, status: Status, uri: &str, error_ty: Option<TypeId>)
+        -> Option<&'a Catcher>
+    {
         let client = Client::debug_with(vec![]).expect("client");
         let request = client.get(Origin::parse(uri).unwrap());
         router.catch(status, &request, error_ty)

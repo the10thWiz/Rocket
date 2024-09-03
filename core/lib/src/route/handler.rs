@@ -194,7 +194,10 @@ impl<'r, 'o: 'r> Outcome<'o> {
         match responder.respond_to(req) {
             response::Outcome::Success(response) => Outcome::Success(response),
             response::Outcome::Error(error) => {
-                crate::trace::info!(type_name = std::any::type_name_of_val(&error), "Typed error to catch");
+                crate::trace::info!(
+                    type_name = std::any::type_name_of_val(&error),
+                    "Typed error to catch"
+                );
                 Outcome::Error((error.status(), Some(Box::new(error))))
             },
             response::Outcome::Forward(status) => Outcome::Error((status, None)),

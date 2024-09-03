@@ -40,7 +40,7 @@ pub trait TypedError<'r>: AsAny<Inv<'r>> + Send + Sync + 'r {
     fn respond_to(&self, request: &'r Request<'_>) -> Result<Response<'r>, Status> {
         Err(Status::InternalServerError)
     }
-    
+
     /// A descriptive name of this error type. Defaults to the type name.
     fn name(&self) -> &'static str { std::any::type_name::<Self>() }
 
@@ -92,7 +92,7 @@ impl<'r, L, R> TypedError<'r> for Either<L, R>
 
     fn name(&self) -> &'static str { std::any::type_name::<Self>() }
 
-    fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> { 
+    fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> {
         match self {
             Self::Left(v) => Some(v),
             Self::Right(v) => Some(v),

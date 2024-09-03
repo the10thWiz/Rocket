@@ -121,8 +121,10 @@ impl ErasedRequest {
             let parent: &'static ErasedRequest = unsafe { transmute(parent) };
             let rocket: &Rocket<Orbit> = &parent._rocket;
             let request: &Request<'_> = &parent.request;
-            // SAFETY: error_ptr is transmuted into the same type, with the same lifetime as the request.
-            // It is kept alive by the erased response, so that the response type can borrow from it
+            // SAFETY: TODO: error_ptr is transmuted into the same type, with the
+            // same lifetime as the request.
+            // It is kept alive by the erased response, so that the response
+            // type can borrow from it
             dispatch(token, rocket, request, data, unsafe { transmute(&mut error_ptr)}).await
         };
 

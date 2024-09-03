@@ -100,13 +100,17 @@ pub trait Handler: Cloneable + Send + Sync + 'static {
     /// Nevertheless, failure is allowed, both for convenience and necessity. If
     /// an error handler fails, Rocket's default `500` catcher is invoked. If it
     /// succeeds, the returned `Response` is used to respond to the client.
-    async fn handle<'r>(&self, status: Status, req: &'r Request<'_>, error: Option<&'r (dyn TypedError<'r> + 'r)>)
-        -> Result<'r>;
+    async fn handle<'r>(
+        &self,
+        status: Status,
+        req: &'r Request<'_>,
+        error: Option<&'r dyn TypedError<'r>>
+    ) -> Result<'r>;
 }
 
 // We write this manually to avoid double-boxing.
 impl<F: Clone + Sync + Send + 'static> Handler for F
-    where for<'x> F: Fn(Status, &'x Request<'_>, Option<&'x (dyn TypedError<'x> + 'x)>) -> BoxFuture<'x>,
+    where for<'x> F: Fn(Status, &'x Request<'_>, Option<&'x dyn TypedError<'x>>) -> BoxFuture<'x>,
 {
     fn handle<'r, 'life0, 'life1, 'life2, 'async_trait>(
         &'life0 self,
@@ -125,7 +129,9 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
 
 // Used in tests! Do not use, please.
 #[doc(hidden)]
-pub fn dummy_handler<'r>(_: Status, _: &'r Request<'_>, _: Option<&(dyn TypedError<'r> + 'r)>) -> BoxFuture<'r> {
+pub fn dummy_handler<'r>(_: Status, _: &'r Request<'_>, _: Option<&'r dyn TypedError<'r>>)
+    -> BoxFuture<'r>
+{
    Box::pin(async move { Ok(Response::new()) })
 }
 

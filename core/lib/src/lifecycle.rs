@@ -44,6 +44,11 @@ async fn catch_handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
         .ok()
 }
 
+pub(crate) fn error_ref<'r>(error_ptr: &'r mut Option<Box<dyn TypedError<'r> + 'r>>)
+    -> Option<&'r dyn TypedError<'r>> {
+    error_ptr.as_ref().map(|b| b.as_ref())
+}
+
 impl Rocket<Orbit> {
     /// Preprocess the request for Rocket things. Currently, this means:
     ///
@@ -112,21 +117,21 @@ impl Rocket<Orbit> {
                     Outcome::Success(response) => response,
                     Outcome::Error((status, error)) => {
                         *error_ptr = error;
-                        self.dispatch_error(status, request, error_ptr.as_ref().map(|b| b.as_ref())).await
+                        self.dispatch_error(status, request, error_ref(error_ptr)).await
                     },
                     Outcome::Forward((_, status, error)) => {
                         *error_ptr = error;
-                        self.dispatch_error(status, request, error_ptr.as_ref().map(|b| b.as_ref())).await
+                        self.dispatch_error(status, request, error_ref(error_ptr)).await
                     },
                 }
             }
             Outcome::Forward((_, status, error)) => {
                 *error_ptr = error;
-                self.dispatch_error(status, request, error_ptr.as_ref().map(|b| b.as_ref())).await
+                self.dispatch_error(status, request, error_ref(error_ptr)).await
             },
             Outcome::Error((status, error)) => {
                 *error_ptr = error;
-                self.dispatch_error(status, request, error_ptr.as_ref().map(|b| b.as_ref())).await
+                self.dispatch_error(status, request, error_ref(error_ptr)).await
             },
         };
 
@@ -289,7 +294,11 @@ impl Rocket<Orbit> {
         let mut counter = 0;
         // Matches error [.source ...] type
         while error_copy.is_some() && counter < 5 {
-            if let Some(catcher) = self.router.catch(status, req, error_copy.map(|e| e.trait_obj_typeid())) {
+            if let Some(catcher) = self.router.catch(
+                status,
+                req,
+                error_copy.map(|e| e.trait_obj_typeid())
+            ) {
                 return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
             }
             error_copy = error_copy.and_then(|e| e.source());
@@ -303,7 +312,11 @@ impl Rocket<Orbit> {
         let mut counter = 0;
         // Matches error [.source ...] type, and any status
         while error_copy.is_some() && counter < 5 {
-            if let Some(catcher) = self.router.catch_any(status, req, error_copy.map(|e| e.trait_obj_typeid())) {
+            if let Some(catcher) = self.router.catch_any(
+                status,
+                req,
+                error_copy.map(|e| e.trait_obj_typeid())
+            ) {
                 return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
             }
             error_copy = error_copy.and_then(|e| e.source());
