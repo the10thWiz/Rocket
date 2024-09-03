@@ -116,7 +116,7 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
                 let __e = #resolve_error!(__e);
                 ::rocket::trace::info!(
                     target: concat!("rocket::codegen::route::", module_path!()),
-                    error_type = __e.name(),
+                    error_type = __e.name,
                     "Forwarding error"
                 );
 

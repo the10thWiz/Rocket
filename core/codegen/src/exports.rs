@@ -88,6 +88,7 @@ define_exported_paths! {
     _ExitCode => ::std::process::ExitCode,
     _trace => ::rocket::trace,
     display_hack => ::rocket::error::display_hack,
+    try_outcome => ::rocket::outcome::try_outcome,
     BorrowMut => ::std::borrow::BorrowMut,
     Outcome => ::rocket::outcome::Outcome,
     FromForm => ::rocket::form::FromForm,

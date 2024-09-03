@@ -129,6 +129,7 @@ optional = true
 
 [dependencies.s2n-quic-h3]
 git = "https://github.com/SergioBenitez/s2n-quic-h3.git"
+rev = "865fd25"
 optional = true
 
 [target.'cfg(unix)'.dependencies]

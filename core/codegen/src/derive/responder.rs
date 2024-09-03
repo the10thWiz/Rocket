@@ -65,7 +65,9 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
         )
         .inner_mapper(MapperBuild::new()
             .with_output(|_, output| quote! {
-                fn respond_to(self, __req: &'r #Request<'_>) -> #_response::Result<'o> {
+                fn respond_to(self, __req: &'r #Request<'_>)
+                    -> #_response::Outcome<'o, Self::Error>
+                {
                     #output
                 }
             })
@@ -80,9 +82,9 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                 let responder = fields.iter().next().map(|f| {
                     let (accessor, ty) = (f.accessor(), f.ty.with_stripped_lifetimes());
                     quote_spanned! { f.span() =>
-                        let mut __res = <#ty as #_response::Responder>::respond_to(
+                        let mut __res = #try_outcome!(<#ty as #_response::Responder>::respond_to(
                             #accessor, __req
-                        )?;
+                        ));
                     }
                 }).expect("have at least one field");
 
@@ -106,7 +108,22 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                     #(#headers)*
                     #content_type
                     #status
-                    #_Ok(__res)
+                    #Outcome::Success(__res)
+                })
+            })
+        )
+        // TODO: What's the proper way to do this?
+        .inner_mapper(MapperBuild::new()
+            .with_output(|_, output| quote! {
+                type Error = #output;
+            })
+            .try_struct_map(|_, item| {
+                let responder = item.fields.iter().next().map(|f| {
+                    &f.ty
+                }).expect("have at least one field");
+
+                Ok(quote! {
+                    <#responder as #_response::Responder<'r, 'o>>::Error
                 })
             })
         )

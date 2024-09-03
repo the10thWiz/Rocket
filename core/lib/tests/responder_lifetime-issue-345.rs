@@ -3,7 +3,7 @@
 #[macro_use] extern crate rocket;
 
 use rocket::{Request, State};
-use rocket::response::{Responder, Result};
+use rocket::response::{Responder, Outcome};
 
 struct SomeState;
 
@@ -13,7 +13,8 @@ pub struct CustomResponder<'r, R> {
 }
 
 impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for CustomResponder<'r, R> {
-    fn respond_to(self, req: &'r Request<'_>) -> Result<'o> {
+    type Error = <R as Responder>::Error;
+    fn respond_to(self, req: &'r Request<'_>) -> Outcome<'o, Self::Error> {
         self.responder.respond_to(req)
     }
 }
