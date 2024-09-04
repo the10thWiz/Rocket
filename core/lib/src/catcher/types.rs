@@ -52,6 +52,7 @@ pub trait TypedError<'r>: AsAny<Inv<'r>> + Send + Sync + 'r {
     fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> { None }
 
     /// Status code
+    // TODO: This is currently only used for errors produced by Fairings
     fn status(&self) -> Status { Status::InternalServerError }
 }
 
@@ -71,6 +72,10 @@ impl<'r> TypedError<'r> for std::io::Error {
 impl<'r> TypedError<'r> for std::num::ParseIntError {}
 impl<'r> TypedError<'r> for std::num::ParseFloatError {}
 impl<'r> TypedError<'r> for std::string::FromUtf8Error {}
+
+impl TypedError<'_> for Status {
+    fn status(&self) -> Status { *self }
+}
 
 #[cfg(feature = "json")]
 impl<'r> TypedError<'r> for serde_json::Error {}

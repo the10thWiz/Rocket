@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use rocket::{Rocket, Request, State, Data, Build};
 use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
+use rocket::catcher::TypedError;
 use rocket::trace::Trace;
 use rocket::http::Method;
 
@@ -39,12 +40,15 @@ impl Fairing for Counter {
         Ok(rocket.manage(self.clone()).mount("/", routes![counts]))
     }
 
-    async fn on_request(&self, request: &mut Request<'_>, _: &mut Data<'_>) {
+    async fn on_request<'r>(&self, request: &'r mut Request<'_>, _: &mut Data<'_>)
+        -> Result<(), Box<dyn TypedError<'r> + 'r>>
+    {
         if request.method() == Method::Get {
             self.get.fetch_add(1, Ordering::Relaxed);
         } else if request.method() == Method::Post {
             self.post.fetch_add(1, Ordering::Relaxed);
         }
+        Ok(())
     }
 }
 
@@ -83,6 +87,7 @@ fn rocket() -> _ {
                         req.trace_info();
                     })
                 }
+                Ok(())
             })
         }))
         .attach(AdHoc::on_response("Response Rewriter", |req, res| {

@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::mem::transmute;
 
+use crate::catcher::TypedError;
 use crate::{Rocket, Request, Response, Data, Build, Orbit};
 use crate::fairing::{Fairing, Info, Kind};
 
@@ -147,9 +149,24 @@ impl Fairings {
     }
 
     #[inline(always)]
-    pub async fn handle_request(&self, req: &mut Request<'_>, data: &mut Data<'_>) {
+    pub async fn handle_request<'r>(
+        &self,
+        req: &'r mut Request<'_>,
+        data: &mut Data<'_>,
+        error: &mut Option<Box<dyn TypedError<'_> + '_>>,
+    ) {
         for fairing in iter!(self.request) {
-            fairing.on_request(req, data).await
+            // invoke_fairing(fairing, req, data, error)?;
+            match fairing.on_request(req, data).await {
+                Ok(()) => (),
+                Err(e) => {
+                    // TODO: Safety arguement
+                    // Generally, error is None at the start (hence no borrows),
+                    // and we always return immediatly with this value.
+                    *error = Some(unsafe { transmute(e) });
+                    return;
+                },
+            }
         }
     }
 

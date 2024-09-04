@@ -5,8 +5,9 @@ use std::error::Error as StdError;
 use std::sync::Arc;
 
 use figment::Profile;
-use transient::Static;
+use transient::{Static, Transient};
 
+use crate::catcher::TypedError;
 use crate::listener::Endpoint;
 use crate::{Catcher, Ignite, Orbit, Phase, Rocket, Route};
 use crate::trace::Trace;
@@ -89,10 +90,10 @@ pub enum ErrorKind {
 impl Static for ErrorKind {}
 
 /// An error that occurs when a value was unexpectedly empty.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Transient)]
 pub struct Empty;
 
-impl Static for Empty {}
+impl TypedError<'_> for Empty {}
 
 impl Error {
     #[inline(always)]

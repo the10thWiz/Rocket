@@ -1,6 +1,7 @@
 use parking_lot::Mutex;
 use futures::future::{Future, BoxFuture, FutureExt};
 
+use crate::catcher::TypedError;
 use crate::{Rocket, Request, Response, Data, Build, Orbit};
 use crate::fairing::{Fairing, Kind, Info, Result};
 use crate::route::RouteUri;
@@ -60,8 +61,8 @@ enum AdHocKind {
     Liftoff(Once<dyn for<'a> FnOnce(&'a Rocket<Orbit>) -> BoxFuture<'a, ()> + Send + 'static>),
 
     /// An ad-hoc **request** fairing. Called when a request is received.
-    Request(Box<dyn for<'a> Fn(&'a mut Request<'_>, &'a mut Data<'_>)
-        -> BoxFuture<'a, ()> + Send + Sync + 'static>),
+    Request(Box<dyn for<'a, 'b> Fn(&'a mut Request<'_>, &'b mut Data<'_>)
+        -> BoxFuture<'a, Result<(), Box<dyn TypedError<'a> + 'a>>> + Send + Sync + 'static>),
 
     /// An ad-hoc **response** fairing. Called when a response is ready to be
     /// sent to a client.
@@ -154,7 +155,8 @@ impl AdHoc {
     /// });
     /// ```
     pub fn on_request<F: Send + Sync + 'static>(name: &'static str, f: F) -> AdHoc
-        where F: for<'a> Fn(&'a mut Request<'_>, &'a mut Data<'_>) -> BoxFuture<'a, ()>
+        where F: for<'a, 'b> Fn(&'a mut Request<'_>, &'b mut Data<'_>)
+                        -> BoxFuture<'a, Result<(), Box<dyn TypedError<'a> + 'a>>>
     {
         AdHoc { name, kind: AdHocKind::Request(Box::new(f)) }
     }
@@ -377,10 +379,12 @@ impl AdHoc {
                 let _ = self.routes(rocket);
             }
 
-            async fn on_request(&self, req: &mut Request<'_>, _: &mut Data<'_>) {
+            async fn on_request<'r>(&self, req: &'r mut Request<'_>, _: &mut Data<'_>)
+                -> Result<(), Box<dyn TypedError<'r> + 'r>>
+            {
                 // If the URI has no trailing slash, it routes as before.
                 if req.uri().is_normalized_nontrailing() {
-                    return
+                    return Ok(());
                 }
 
                 // Otherwise, check if there's a route that matches the request
@@ -393,6 +397,7 @@ impl AdHoc {
                         "incoming request URI normalized for compatibility");
                     req.set_uri(normalized);
                 }
+                Ok(())
             }
         }
 
@@ -427,9 +432,13 @@ impl Fairing for AdHoc {
         }
     }
 
-    async fn on_request(&self, req: &mut Request<'_>, data: &mut Data<'_>) {
+    async fn on_request<'r>(&self, req: &'r mut Request<'_>, data: &mut Data<'_>)
+        -> Result<(), Box<dyn TypedError<'r> + 'r>>
+    {
         if let AdHocKind::Request(ref f) = self.kind {
             f(req, data).await
+        } else {
+            Ok(())
         }
     }
 

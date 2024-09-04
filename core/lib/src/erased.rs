@@ -91,7 +91,8 @@ impl ErasedRequest {
         preprocess: impl for<'r, 'x> FnOnce(
             &'r Rocket<Orbit>,
             &'r mut Request<'x>,
-            &'r mut Data<'x>
+            &'r mut Data<'x>,
+            &'r mut Option<Box<dyn TypedError<'r> + 'r>>,
         ) -> BoxFuture<'r, T>,
         dispatch: impl for<'r> FnOnce(
             T,
@@ -104,6 +105,7 @@ impl ErasedRequest {
         where T: Send + Sync + 'static,
               D: for<'r> Into<RawStream<'r>>
     {
+        let mut error_ptr: Option<Box<dyn TypedError<'static> + 'static>> = None;
         let mut data: Data<'_> = Data::from(raw_stream);
         let mut parent = Arc::new(self);
         let token: T = {
@@ -111,11 +113,11 @@ impl ErasedRequest {
             let rocket: &Rocket<Orbit> = &parent._rocket;
             let request: &mut Request<'_> = &mut parent.request;
             let data: &mut Data<'_> = &mut data;
-            preprocess(rocket, request, data).await
+            // SAFETY: TODO: Same as below
+            preprocess(rocket, request, data, unsafe { transmute(&mut error_ptr) }).await
         };
 
         let parent = parent;
-        let mut error_ptr: Option<Box<dyn TypedError<'static> + 'static>> = None;
         let response: Response<'_> = {
             let parent: &ErasedRequest = &parent;
             let parent: &'static ErasedRequest = unsafe { transmute(parent) };

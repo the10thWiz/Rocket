@@ -412,7 +412,7 @@ static DATE_TIME_FMT2: &[FormatItem<'_>] =
 impl<'v> FromFormField<'v> for Date {
     fn from_value(field: ValueField<'v>) -> Result<'v, Self> {
         let date = Self::parse(field.value, &DATE_FMT)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send>)?;
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
         Ok(date)
     }
@@ -422,7 +422,7 @@ impl<'v> FromFormField<'v> for Time {
     fn from_value(field: ValueField<'v>) -> Result<'v, Self> {
         let time = Self::parse(field.value, &TIME_FMT1)
             .or_else(|_| Self::parse(field.value, &TIME_FMT2))
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send>)?;
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
         Ok(time)
     }
@@ -432,7 +432,7 @@ impl<'v> FromFormField<'v> for PrimitiveDateTime {
     fn from_value(field: ValueField<'v>) -> Result<'v, Self> {
         let dt = Self::parse(field.value, &DATE_TIME_FMT1)
             .or_else(|_| Self::parse(field.value, &DATE_TIME_FMT2))
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send>)?;
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
         Ok(dt)
     }

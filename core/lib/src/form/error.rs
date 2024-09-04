@@ -147,7 +147,7 @@ pub struct Error<'v> {
     pub entity: Entity,
 }
 
-impl<'r> TypedError<'r> for Error<'r> { }
+// impl<'r> TypedError<'r> for Error<'r> { }
 
 /// The kind of form error that occurred.
 ///
@@ -202,7 +202,8 @@ pub enum ErrorKind<'v> {
     Unknown,
     /// A custom error occurred. Status defaults to
     /// [`Status::UnprocessableEntity`] if one is not directly specified.
-    Custom(Status, Box<dyn std::error::Error + Send>),
+    // TODO: This needs to be sync for TypedError
+    Custom(Status, Box<dyn std::error::Error + Send + Sync>),
     /// An error while parsing a multipart form occurred.
     Multipart(multer::Error),
     /// A string was invalid UTF-8.
@@ -457,9 +458,9 @@ impl<'v> Error<'v> {
     /// }
     /// ```
     pub fn custom<E>(error: E) -> Self
-        where E: std::error::Error + Send + 'static
+        where E: std::error::Error + Send + Sync + 'static
     {
-        (Box::new(error) as Box<dyn std::error::Error + Send>).into()
+        (Box::new(error) as Box<dyn std::error::Error + Send + Sync>).into()
     }
 
     /// Creates a new `Error` with `ErrorKind::Validation` and message `msg`.
@@ -972,14 +973,14 @@ impl<'a, 'v: 'a, const N: usize> From<&'static [Cow<'v, str>; N]> for ErrorKind<
     }
 }
 
-impl<'a> From<Box<dyn std::error::Error + Send>> for ErrorKind<'a> {
-    fn from(e: Box<dyn std::error::Error + Send>) -> Self {
+impl<'a> From<Box<dyn std::error::Error + Send + Sync>> for ErrorKind<'a> {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
         ErrorKind::Custom(Status::UnprocessableEntity, e)
     }
 }
 
-impl<'a> From<(Status, Box<dyn std::error::Error + Send>)> for ErrorKind<'a> {
-    fn from((status, e): (Status, Box<dyn std::error::Error + Send>)) -> Self {
+impl<'a> From<(Status, Box<dyn std::error::Error + Send + Sync>)> for ErrorKind<'a> {
+    fn from((status, e): (Status, Box<dyn std::error::Error + Send + Sync>)) -> Self {
         ErrorKind::Custom(status, e)
     }
 }

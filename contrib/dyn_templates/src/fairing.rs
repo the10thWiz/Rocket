@@ -1,6 +1,7 @@
 use rocket::{Rocket, Build, Orbit};
 use rocket::fairing::{self, Fairing, Info, Kind};
 use rocket::figment::{Source, value::magic::RelativePathBuf};
+use rocket::catcher::TypedError;
 use rocket::trace::Trace;
 
 use crate::context::{Callback, Context, ContextManager};
@@ -65,10 +66,13 @@ impl Fairing for TemplateFairing {
     }
 
     #[cfg(debug_assertions)]
-    async fn on_request(&self, req: &mut rocket::Request<'_>, _data: &mut rocket::Data<'_>) {
+    async fn on_request<'r>(&self, req: &'r mut rocket::Request<'_>, _data: &mut rocket::Data<'_>)
+        -> Result<(), Box<dyn TypedError<'r> + 'r>>
+    {
         let cm = req.rocket().state::<ContextManager>()
             .expect("Template ContextManager registered in on_ignite");
 
         cm.reload_if_needed(&self.callback);
+        Ok(())
     }
 }

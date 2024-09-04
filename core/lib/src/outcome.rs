@@ -638,9 +638,8 @@ impl<S, F> Outcome<S, std::convert::Infallible, F> {
 }
 
 impl<'r, S, E: TypedError<'r>> Outcome<S, E, Status> {
-    /// Convenience function to convert the error type from `Infallible`
-    /// to any other type. This is trivially possible, since `Infallible`
-    /// cannot be constructed, so this cannot be an Error variant
+    /// Convenience function to convert the outcome from a Responder impl to
+    /// the result used by TypedError
     pub fn responder_error(self) -> Result<S, Status> {
         match self {
             Self::Success(v) => Ok(v),

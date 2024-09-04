@@ -51,6 +51,7 @@
 
 use std::any::Any;
 
+use crate::catcher::TypedError;
 use crate::{Rocket, Request, Response, Data, Build, Orbit};
 
 mod fairings;
@@ -501,7 +502,9 @@ pub trait Fairing: Send + Sync + Any + 'static {
     /// ## Default Implementation
     ///
     /// The default implementation of this method does nothing.
-    async fn on_request(&self, _req: &mut Request<'_>, _data: &mut Data<'_>) {}
+    async fn on_request<'r>(&self, _req: &'r mut Request<'_>, _data: &mut Data<'_>)
+        -> Result<(), Box<dyn TypedError<'r> + 'r>>
+    { Ok(()) }
 
     /// The response callback.
     ///
@@ -551,7 +554,9 @@ impl<T: Fairing + ?Sized> Fairing for std::sync::Arc<T> {
     }
 
     #[inline]
-    async fn on_request(&self, req: &mut Request<'_>, data: &mut Data<'_>) {
+    async fn on_request<'r>(&self, req: &'r mut Request<'_>, data: &mut Data<'_>)
+        -> Result<(), Box<dyn TypedError<'r> + 'r>>
+    {
         (self as &T).on_request(req, data).await
     }
 

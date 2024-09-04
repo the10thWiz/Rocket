@@ -6,7 +6,8 @@ use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::catcher::TypedError;
 use crate::http::CookieJar;
-use crate::{Request, Response};
+use crate::lifecycle::RequestToken;
+use crate::{Data, Request, Response};
 
 /// An `async` response from a dispatched [`LocalRequest`](super::LocalRequest).
 ///
@@ -66,8 +67,10 @@ impl Drop for LocalResponse<'_> {
 }
 
 impl<'c> LocalResponse<'c> {
-    pub(crate) fn new<F, O>(req: Request<'c>, f: F) -> impl Future<Output = LocalResponse<'c>>
-        where F: FnOnce(&'c Request<'c>, &'c mut Option<Box<dyn TypedError<'c> + 'c>>) -> O + Send,
+    pub(crate) fn new<P, PO, F, O>(req: Request<'c>, mut data: Data<'c>, preprocess: P, f: F) -> impl Future<Output = LocalResponse<'c>>
+        where P: FnOnce(&'c mut Request<'c>, &'c mut Data<'c>, &'c mut Option<Box<dyn TypedError<'c> + 'c>>) -> PO + Send,
+              PO: Future<Output = RequestToken> + Send + 'c,
+              F: FnOnce(RequestToken, &'c Request<'c>, Data<'c>, &'c mut Option<Box<dyn TypedError<'c> + 'c>>) -> O + Send,
               O: Future<Output = Response<'c>> + Send + 'c
     {
         // `LocalResponse` is a self-referential structure. In particular,
@@ -91,19 +94,26 @@ impl<'c> LocalResponse<'c> {
         //      that 1) `LocalResponse` fields are private, and 2) all `impl`s
         //      of `LocalResponse` aside from this method abstract the lifetime
         //      away as `'_`, ensuring it is not used for any output value.
-        let boxed_req = Box::new(req);
-        let request: &'c Request<'c> = unsafe { &*(&*boxed_req as *const _) };
+        let mut boxed_req = Box::new(req);
 
         async move {
             use std::mem::transmute;
             let mut error: Option<Box<dyn TypedError<'c> + 'c>> = None;
+
+            // TODO: Is this safe?
+            let token = preprocess(
+                unsafe { transmute(&mut *boxed_req) },
+                unsafe { transmute(&mut data) },
+                unsafe { transmute(&mut error) },
+            ).await;
             // NOTE: The cookie jar `secure` state will not reflect the last
             // known value in `request.cookies()`. This is okay: new cookies
             // should never be added to the resulting jar which is the only time
             // the value is used to set cookie defaults.
             // SAFETY: Much like request above, error can borrow from request, and
-            // response can borrow from request. TODO
-            let response: Response<'c> = f(request, unsafe { transmute(&mut error) }).await;
+            // response can borrow from request or error. TODO
+            let request: &'c Request<'c> = unsafe { &*(&*boxed_req as *const _) };
+            let response: Response<'c> = f(token, request, data, unsafe { transmute(&mut error) }).await;
             let mut cookies = CookieJar::new(None, request.rocket());
             for cookie in response.cookies() {
                 cookies.add_original(cookie.into_owned());

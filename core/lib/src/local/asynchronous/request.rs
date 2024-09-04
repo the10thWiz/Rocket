@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::catcher::TypedError;
 use crate::lifecycle::error_ref;
 use crate::request::RequestErrors;
 use crate::{Request, Data};
@@ -87,18 +88,23 @@ impl<'c> LocalRequest<'c> {
             // _shouldn't_ error. Check that now and error only if not.
             if self.inner().uri() == invalid {
                 error!("invalid request URI: {:?}", invalid.path());
-                return LocalResponse::new(self.request, move |req, error_ptr| {
-                    // TODO: Ideally the RequestErrors should contain actual information.
-                    *error_ptr = Some(Box::new(RequestErrors::new(&[])));
-                    rocket.dispatch_error(Status::BadRequest, req, error_ref(error_ptr))
-                }).await
+                // return LocalResponse::new(self.request, move |req, error_ptr| {
+                //     // TODO: Ideally the RequestErrors should contain actual information.
+                //     *error_ptr = Some(Box::new(RequestErrors::new(&[])));
+                //     rocket.dispatch_error(Status::BadRequest, req, error_ref(error_ptr))
+                // }).await
+                todo!()
             }
         }
 
         // Actually dispatch the request.
-        let mut data = Data::local(self.data);
-        let token = rocket.preprocess(&mut self.request, &mut data).await;
-        let response = LocalResponse::new(self.request, move |req, error_ptr| {
+        let data = Data::local(self.data);
+        // let token = rocket.preprocess(&mut self.request, &mut data, &mut self.error).await;
+        let response = LocalResponse::new(self.request, data,
+            move |req, data, error_ptr| {
+                rocket.preprocess(req, data, error_ptr)
+            },
+            move |token, req, data, error_ptr| {
             rocket.dispatch(token, req, data, error_ptr)
         }).await;
 

@@ -57,10 +57,11 @@ impl Rocket<Orbit> {
     ///
     /// This is the only place during lifecycle processing that `Request` is
     /// mutable. Keep this in-sync with the `FromForm` derive.
-    pub(crate) async fn preprocess(
+    pub(crate) async fn preprocess<'r>(
         &self,
-        req: &mut Request<'_>,
-        data: &mut Data<'_>
+        req: &'r mut Request<'_>,
+        data: &mut Data<'_>,
+        error: &'r mut Option<Box<dyn TypedError<'r> + 'r>>,
     ) -> RequestToken {
         // Check if this is a form and if the form contains the special _method
         // field which we use to reinterpret the request's method.
@@ -77,7 +78,7 @@ impl Rocket<Orbit> {
         }
 
         // Run request fairings.
-        self.fairings.handle_request(req, data).await;
+        self.fairings.handle_request(req, data, error).await;
 
         RequestToken
     }
@@ -105,34 +106,39 @@ impl Rocket<Orbit> {
         // Remember if the request is `HEAD` for later body stripping.
         let was_head_request = request.method() == Method::Head;
 
-        // Route the request and run the user's handlers.
-        let mut response = match self.route(request, data).await {
-            Outcome::Success(response) => response,
-            Outcome::Forward((data, _, _)) if request.method() == Method::Head => {
-                tracing::Span::current().record("autohandled", true);
 
-                // Dispatch the request again with Method `GET`.
-                request._set_method(Method::Get);
-                match self.route(request, data).await {
-                    Outcome::Success(response) => response,
-                    Outcome::Error((status, error)) => {
-                        *error_ptr = error;
-                        self.dispatch_error(status, request, error_ref(error_ptr)).await
-                    },
-                    Outcome::Forward((_, status, error)) => {
-                        *error_ptr = error;
-                        self.dispatch_error(status, request, error_ref(error_ptr)).await
-                    },
+        // Route the request and run the user's handlers.
+        let mut response = if let Some(error) = error_ptr {
+            self.dispatch_error(error.status(), request, error_ref(error_ptr)).await
+        } else {
+            match self.route(request, data).await {
+                Outcome::Success(response) => response,
+                Outcome::Forward((data, _, _)) if request.method() == Method::Head => {
+                    tracing::Span::current().record("autohandled", true);
+
+                    // Dispatch the request again with Method `GET`.
+                    request._set_method(Method::Get);
+                    match self.route(request, data).await {
+                        Outcome::Success(response) => response,
+                        Outcome::Error((status, error)) => {
+                            *error_ptr = error;
+                            self.dispatch_error(status, request, error_ref(error_ptr)).await
+                        },
+                        Outcome::Forward((_, status, error)) => {
+                            *error_ptr = error;
+                            self.dispatch_error(status, request, error_ref(error_ptr)).await
+                        },
+                    }
                 }
+                Outcome::Forward((_, status, error)) => {
+                    *error_ptr = error;
+                    self.dispatch_error(status, request, error_ref(error_ptr)).await
+                },
+                Outcome::Error((status, error)) => {
+                    *error_ptr = error;
+                    self.dispatch_error(status, request, error_ref(error_ptr)).await
+                },
             }
-            Outcome::Forward((_, status, error)) => {
-                *error_ptr = error;
-                self.dispatch_error(status, request, error_ref(error_ptr)).await
-            },
-            Outcome::Error((status, error)) => {
-                *error_ptr = error;
-                self.dispatch_error(status, request, error_ref(error_ptr)).await
-            },
         };
 
         // Set the cookies. Note that error responses will only include cookies

@@ -6,6 +6,7 @@ use rocket::data::{Data, ToByteUnit};
 use rocket::http::{Status, Method::{Get, Post}};
 use rocket::response::{Responder, status::Custom};
 use rocket::tokio::fs::File;
+use rocket::catcher::TypedError;
 
 fn forward<'r>(_req: &'r Request, data: Data<'r>) -> route::BoxFuture<'r> {
     Box::pin(async move { route::Outcome::forward(data, Status::NotFound) })
@@ -29,9 +30,9 @@ fn echo_url<'r>(req: &'r Request, _: Data<'r>) -> route::BoxFuture<'r> {
             Some(Ok(v)) => v,
             Some(Err(e)) => return Outcome::Error((
                 Status::BadRequest,
-                Box::new(e) as catcher::ErasedError
+                Some(Box::new(e) as Box<dyn TypedError<'r>>)
             )),
-            None => return Outcome::Error((Status::BadRequest, catcher::default_error_type())),
+            None => return Outcome::Error((Status::BadRequest, None)),
         };
 
         route::Outcome::from(req, param_outcome)
@@ -66,11 +67,11 @@ fn get_upload<'r>(req: &'r Request, _: Data<'r>) -> route::BoxFuture<'r> {
     route::Outcome::from(req, std::fs::File::open(path).ok()).pin()
 }
 
-fn not_found_handler<'r>(_: Status, req: &'r Request, _e: catcher::ErasedError<'r>)
+fn not_found_handler<'r>(_: Status, req: &'r Request, _e: Option<&'r dyn TypedError<'r>>)
     -> catcher::BoxFuture<'r>
 {
     let responder = Custom(Status::NotFound, format!("Couldn't find: {}", req.uri()));
-    Box::pin(async move { responder.respond_to(req).map_err(|s| (s, _e)) })
+    Box::pin(async move { responder.respond_to(req).responder_error() })
 }
 
 #[derive(Clone)]
@@ -90,11 +91,11 @@ impl route::Handler for CustomHandler {
         let self_data = self.data;
         let id = match req.param::<&str>(1) {
             Some(Ok(v)) => v,
-            Some(Err(e)) => return Outcome::Forward((data, Status::BadRequest, Box::new(e))),
+            Some(Err(e)) => return Outcome::Forward((data, Status::BadRequest, Some(Box::new(e)))),
             None => return Outcome::Forward((
                 data,
                 Status::BadRequest,
-                catcher::default_error_type()
+                None
             )),
         };
 

@@ -1,4 +1,5 @@
 use rocket::outcome::IntoOutcome;
+use rocket::either::Either;
 use rocket::request::{self, FlashMessage, FromRequest, Request};
 use rocket::response::{Redirect, Flash};
 use rocket::http::{CookieJar, Status};
@@ -58,12 +59,12 @@ fn login_page(flash: Option<FlashMessage<'_>>) -> Template {
 }
 
 #[post("/login", data = "<login>")]
-fn post_login(jar: &CookieJar<'_>, login: Form<Login<'_>>) -> Result<Redirect, Flash<Redirect>> {
+fn post_login(jar: &CookieJar<'_>, login: Form<Login<'_>>) -> Either<Redirect, Flash<Redirect>> {
     if login.username == "Sergio" && login.password == "password" {
         jar.add_private(("user_id", "1"));
-        Ok(Redirect::to(uri!(index)))
+        Either::Left(Redirect::to(uri!(index)))
     } else {
-        Err(Flash::error(Redirect::to(uri!(login_page)), "Invalid username/password."))
+        Either::Right(Flash::error(Redirect::to(uri!(login_page)), "Invalid username/password."))
     }
 }
 
