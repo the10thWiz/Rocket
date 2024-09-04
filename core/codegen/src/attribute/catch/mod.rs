@@ -31,33 +31,20 @@ fn error_guard_decl(guard: &ErrorGuard) -> TokenStream {
 fn request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromRequest>::from_request(#__req).await {
-            #Outcome::Success(__v) => __v,
-            #Outcome::Forward(__e) => {
+        let #ident: #ty = match <#ty as #FromError>::from_error(#__status, #__req, __error_init).await {
+            #_Result::Ok(__v) => __v,
+            #_Result::Err(__e) => {
                 ::rocket::trace::info!(
                     name: "forward",
                     target: concat!("rocket::codegen::catch::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
                     status = __e.code,
-                    "request guard forwarding; trying next catcher"
+                    "error guard forwarding; trying next catcher"
                 );
 
                 return #_Err(#__status);
             },
-            #[allow(unreachable_code)]
-            #Outcome::Error((__c, __e)) => {
-                ::rocket::trace::info!(
-                    name: "failure",
-                    target: concat!("rocket::codegen::catch::", module_path!()),
-                    parameter = stringify!(#ident),
-                    type_name = stringify!(#ty),
-                    reason = %#display_hack!(&__e),
-                    "request guard failed; forwarding to 500 handler"
-                );
-
-                return #_Err(#Status::InternalServerError);
-            }
         };
     }
 }
@@ -81,10 +68,6 @@ pub fn _catch(
         .map(|ty| ty.span())
         .unwrap_or_else(Span::call_site);
 
-    let status_guard = catch.status_guard.as_ref().map(|(_, s)| {
-        let ident = s.rocketized();
-        quote! { let #ident = #__status; }
-    });
     let error_guard = catch.error_guard.as_ref().map(error_guard_decl);
     let error_type = Optional(catch.error_guard.as_ref().map(error_type));
     let request_guards = catch.request_guards.iter().map(request_guard_decl);
@@ -124,7 +107,6 @@ pub fn _catch(
                 ) -> #_catcher::BoxFuture<'__r> {
                     #_Box::pin(async move {
                         #error_guard
-                        #status_guard
                         #(#request_guards)*
                         let __response = #catcher_response;
                         #_Result::Ok(

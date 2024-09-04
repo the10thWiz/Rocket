@@ -143,9 +143,11 @@ fn json() -> content::RawJson<&'static str> {
     content::RawJson(r#"{ "payload": "I'm here" }"#)
 }
 
+// TODO: Should we allow this?
+// Unlike in routes, you actually can use `&Request` in catchers.
 #[catch(404)]
-fn not_found(format: Option<&Accept>, uri: &Origin) -> content::RawHtml<String> {
-    let html = match format {
+fn not_found(req: &Request<'_>, uri: &Origin) -> content::RawHtml<String> {
+    let html = match req.format() {
         Some(ref mt) if !mt.media_types().any(|m| m.is_xml() || m.is_html()) => {
             format!("<p>'{}' requests are not supported.</p>", mt)
         }

@@ -51,13 +51,10 @@ fn hello_not_found(uri: &Origin<'_>) -> content::RawHtml<String> {
         uri))
 }
 
-// Demonstrates a downcast error from `hello`
-// NOTE: right now, the error must be the first parameter, and all three params must
-// be present. I'm thinking about adding a param to the macro to indicate which (and whether)
-// param is a downcast error.
-
-// `error` and `status` type. All other params must be `FromOrigin`?
-#[catch(422, error = "<e>" /*, status = "<_s>"*/)]
+// `error` is typed error. All other parameters must implement `FromError`.
+// Any type that implements `FromRequest` automatically implements `FromError`,
+// as well as `Status`, `&Request` and `&dyn TypedError<'_>`
+#[catch(422, error = "<e>")]
 fn param_error(e: &ParseIntError, uri: &Origin<'_>) -> content::RawHtml<String> {
     content::RawHtml(format!("\
         <p>Sorry, but '{}' is not a valid path!</p>\

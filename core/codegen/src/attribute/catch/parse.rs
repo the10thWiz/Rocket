@@ -17,7 +17,6 @@ pub struct Attribute {
     pub function: syn::ItemFn,
     pub arguments: Arguments,
     pub error_guard: Option<ErrorGuard>,
-    pub status_guard: Option<(Name, syn::Ident)>,
     pub request_guards: Vec<Guard>,
 }
 
@@ -131,18 +130,13 @@ impl Attribute {
                 diags.push(diag);
             }
         }
-        // let mut error_guard = None;
         let error_guard = attr.error.clone()
             .map(|p| ErrorGuard::new(p, &arguments))
-            .and_then(|p| p.map_err(|e| diags.push(e)).ok());
-        let status_guard = attr.status.clone()
-            .map(|n| status_guard(n, &arguments))
             .and_then(|p| p.map_err(|e| diags.push(e)).ok());
         let request_guards = arguments.map.iter()
             .filter(|(name, _)| {
                 let mut all_other_guards = error_guard.iter()
-                    .map(|g| &g.name)
-                    .chain(status_guard.iter().map(|(n, _)| n));
+                    .map(|g| &g.name);
 
                 all_other_guards.all(|n| n != *name)
             })
@@ -159,7 +153,6 @@ impl Attribute {
             function,
             arguments,
             error_guard,
-            status_guard,
             request_guards,
         })
     }
