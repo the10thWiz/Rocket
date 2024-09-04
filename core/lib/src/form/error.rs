@@ -8,7 +8,9 @@ use std::net::AddrParseError;
 use std::borrow::Cow;
 
 use serde::{Serialize, ser::{Serializer, SerializeStruct}};
+use transient::Transient;
 
+use crate::catcher::TypedError;
 use crate::http::Status;
 use crate::form::name::{NameBuf, Name};
 use crate::data::ByteUnit;
@@ -54,11 +56,11 @@ use crate::data::ByteUnit;
 ///     Ok(i)
 /// }
 /// ```
-#[derive(Default, Debug, PartialEq, Serialize)]
-// TODO: this is invariant wrt 'v, since Cow<'a, T> is invariant wrt T.
-// We need it to be covariant wrt 'v, so we can use it as an error type.
+#[derive(Default, Debug, PartialEq, Serialize, Transient)]
 #[serde(transparent)]
 pub struct Errors<'v>(Vec<Error<'v>>);
+
+impl<'r> TypedError<'r> for Errors<'r> { }
 
 /// A form error, potentially tied to a specific form field.
 ///
@@ -133,7 +135,7 @@ pub struct Errors<'v>(Vec<Error<'v>>);
 /// | `value`  | `Option<&str>` | the erroring field's value, if known             |
 /// | `entity` | `&str`         | string representation of the erroring [`Entity`] |
 /// | `msg`    | `&str`         | concise message of the error                     |
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Transient)]
 pub struct Error<'v> {
     /// The name of the field, if it is known.
     pub name: Option<NameBuf<'v>>,
@@ -144,6 +146,8 @@ pub struct Error<'v> {
     /// The entity that caused the error.
     pub entity: Entity,
 }
+
+impl<'r> TypedError<'r> for Error<'r> { }
 
 /// The kind of form error that occurred.
 ///
