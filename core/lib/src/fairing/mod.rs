@@ -150,9 +150,18 @@ pub type Result<T = Rocket<Build>, E = Rocket<Build>> = std::result::Result<T, E
 ///     [`Request`] and [`Data`] structures but has not routed the request. A
 ///     request callback can modify the request at will and [`Data::peek()`]
 ///     into the incoming data. It may not, however, abort or respond directly
-///     to the request; these issues are better handled via [request guards] or
-///     via response callbacks. Any modifications to a request are persisted and
-///     can potentially alter how a request is routed.
+///     to the request; these issues are better handled via [request guards],
+///     Request filters, or via response callbacks. Any modifications to a
+///     request are persisted and can potentially alter how a request is routed.
+///
+///   * **<a name="filter_request">Request filter</a> (`filter_request`)**
+///
+///     A request callback, represented by the [`Fairing::filter_request()`] method,
+///     called after `on_request` callbacks have run, but before any handlers have
+///     been attempted. This type of fairing can choose to prematurly reject requests,
+///     skipping handlers all together, and moving it straight to error handling. This
+///     should generally only be used to apply filter that apply to the entire server,
+///     e.g. CORS processing.
 ///
 ///   * **<a name="response">Response</a> (`on_response`)**
 ///
@@ -502,7 +511,26 @@ pub trait Fairing: Send + Sync + Any + 'static {
     /// ## Default Implementation
     ///
     /// The default implementation of this method does nothing.
-    async fn on_request<'r>(&self, _req: &'r mut Request<'_>, _data: &mut Data<'_>)
+    async fn on_request<'r>(&self, _req: &'r mut Request<'_>, _data: &mut Data<'_>) { }
+
+    /// The request filter callback.
+    ///
+    /// See [Fairing Callbacks](#filter_request) for complete semantics.
+    ///
+    /// This method is called when a new request is received if `Kind::RequestFilter`
+    /// is in the `kind` field of the `Info` structure for this fairing. The
+    /// `&Request` parameter is the incoming request, and the `&Data`
+    /// parameter is the incoming data in the request.
+    ///
+    /// If this method returns `Ok`, the request routed as normal (assuming no other
+    /// fairing filters it). Otherwise, the request is routed to an error handler
+    /// based on the error type returned.
+    ///
+    /// ## Default Implementation
+    ///
+    /// The default implementation of this method does not filter any request,
+    /// by always returning `Ok(())`
+    async fn filter_request<'r>(&self, _req: &'r Request<'_>, _data: &Data<'_>)
         -> Result<(), Box<dyn TypedError<'r> + 'r>>
     { Ok(()) }
 
@@ -554,10 +582,15 @@ impl<T: Fairing + ?Sized> Fairing for std::sync::Arc<T> {
     }
 
     #[inline]
-    async fn on_request<'r>(&self, req: &'r mut Request<'_>, data: &mut Data<'_>)
+    async fn on_request<'r>(&self, req: &'r mut Request<'_>, data: &mut Data<'_>) {
+        (self as &T).on_request(req, data).await
+    }
+
+    #[inline]
+    async fn filter_request<'r>(&self, req: &'r Request<'_>, data: &Data<'_>)
         -> Result<(), Box<dyn TypedError<'r> + 'r>>
     {
-        (self as &T).on_request(req, data).await
+        (self as &T).filter_request(req, data).await
     }
 
     #[inline]

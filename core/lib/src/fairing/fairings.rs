@@ -1,7 +1,6 @@
 use std::collections::HashSet;
-use std::mem::transmute;
 
-use crate::catcher::TypedError;
+use crate::erased::ErasedError;
 use crate::{Rocket, Request, Response, Data, Build, Orbit};
 use crate::fairing::{Fairing, Info, Kind};
 
@@ -17,6 +16,7 @@ pub struct Fairings {
     ignite: Vec<usize>,
     liftoff: Vec<usize>,
     request: Vec<usize>,
+    filter_request: Vec<usize>,
     response: Vec<usize>,
     shutdown: Vec<usize>,
 }
@@ -45,6 +45,7 @@ impl Fairings {
         self.ignite.iter()
             .chain(self.liftoff.iter())
             .chain(self.request.iter())
+            .chain(self.filter_request.iter())
             .chain(self.response.iter())
             .chain(self.shutdown.iter())
     }
@@ -106,6 +107,7 @@ impl Fairings {
         if this_info.kind.is(Kind::Ignite) { self.ignite.push(index); }
         if this_info.kind.is(Kind::Liftoff) { self.liftoff.push(index); }
         if this_info.kind.is(Kind::Request) { self.request.push(index); }
+        if this_info.kind.is(Kind::RequestFilter) { self.filter_request.push(index); }
         if this_info.kind.is(Kind::Response) { self.response.push(index); }
         if this_info.kind.is(Kind::Shutdown) { self.shutdown.push(index); }
     }
@@ -153,17 +155,26 @@ impl Fairings {
         &self,
         req: &'r mut Request<'_>,
         data: &mut Data<'_>,
-        error: &mut Option<Box<dyn TypedError<'_> + '_>>,
     ) {
         for fairing in iter!(self.request) {
-            // invoke_fairing(fairing, req, data, error)?;
-            match fairing.on_request(req, data).await {
+            fairing.on_request(req, data).await;
+        }
+    }
+
+    #[inline(always)]
+    pub async fn handle_filter<'r>(
+        &self,
+        req: &'r Request<'_>,
+        data: &Data<'_>,
+        error: &mut ErasedError<'r>,
+    ) {
+        for fairing in iter!(self.filter_request) {
+            match fairing.filter_request(req, data).await {
                 Ok(()) => (),
                 Err(e) => {
-                    // TODO: Safety arguement
-                    // Generally, error is None at the start (hence no borrows),
-                    // and we always return immediatly with this value.
-                    *error = Some(unsafe { transmute(e) });
+                    // SAFETY: `e` can only contain *immutable* borrows of
+                    // `req`.
+                    error.write(Some(e));
                     return;
                 },
             }

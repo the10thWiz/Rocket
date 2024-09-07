@@ -4,7 +4,7 @@ use std::{pin::Pin, task::{Context, Poll}};
 
 use tokio::io::{AsyncRead, ReadBuf};
 
-use crate::catcher::TypedError;
+use crate::erased::ErasedError;
 use crate::http::CookieJar;
 use crate::lifecycle::RequestToken;
 use crate::{Data, Request, Response};
@@ -57,7 +57,7 @@ use crate::{Data, Request, Response};
 pub struct LocalResponse<'c> {
     // XXX: SAFETY: This (dependent) field must come first due to drop order!
     response: Response<'c>,
-    _error: Option<Box<dyn TypedError<'c> + 'c>>,
+    _error: ErasedError<'c>,
     cookies: CookieJar<'c>,
     _request: Box<Request<'c>>,
 }
@@ -68,15 +68,15 @@ impl Drop for LocalResponse<'_> {
 
 impl<'c> LocalResponse<'c> {
     pub(crate) fn new<P, PO, F, O>(req: Request<'c>, mut data: Data<'c>, preprocess: P, f: F) -> impl Future<Output = LocalResponse<'c>>
-        where P: FnOnce(&'c mut Request<'c>, &'c mut Data<'c>, &'c mut Option<Box<dyn TypedError<'c> + 'c>>) -> PO + Send,
+        where P: FnOnce(&'c mut Request<'c>, &'c mut Data<'c>, &'c mut ErasedError<'c>) -> PO + Send,
               PO: Future<Output = RequestToken> + Send + 'c,
-              F: FnOnce(RequestToken, &'c Request<'c>, Data<'c>, &'c mut Option<Box<dyn TypedError<'c> + 'c>>) -> O + Send,
+              F: FnOnce(RequestToken, &'c Request<'c>, Data<'c>, &'c mut ErasedError<'c>) -> O + Send,
               O: Future<Output = Response<'c>> + Send + 'c
     {
         // `LocalResponse` is a self-referential structure. In particular,
         // `response` and `cookies` can refer to `_request` and its contents. As
         // such, we must
-        //   1) Ensure `Request` has a stable address.
+        //   1) Ensure `Request` and `TypedError` have a stable address.
         //
         //      This is done by `Box`ing the `Request`, using only the stable
         //      address thereafter.
@@ -95,17 +95,73 @@ impl<'c> LocalResponse<'c> {
         //      of `LocalResponse` aside from this method abstract the lifetime
         //      away as `'_`, ensuring it is not used for any output value.
         let mut boxed_req = Box::new(req);
+        let mut error = ErasedError::new();
 
         async move {
             use std::mem::transmute;
-            let mut error: Option<Box<dyn TypedError<'c> + 'c>> = None;
 
-            // TODO: Is this safe?
-            let token = preprocess(
-                unsafe { transmute(&mut *boxed_req) },
-                unsafe { transmute(&mut data) },
-                unsafe { transmute(&mut error) },
-            ).await;
+            let token = {
+                // SAFETY: Much like request above, error can borrow from request, and
+                // response can borrow from request or error. TODO
+                let request: &'c mut Request<'c> = unsafe { &mut *(&mut *boxed_req as *mut _) };
+                // SAFETY: The type of `preprocess` ensures that all of these types have the correct
+                // lifetime ('c).
+                preprocess(
+                    request,
+                    unsafe { transmute(&mut data) },
+                    unsafe { transmute(&mut error) },
+                ).await
+            };
+            // SAFETY: Much like request above, error can borrow from request, and
+            // response can borrow from request or error. TODO
+            let request: &'c Request<'c> = unsafe { &*(&*boxed_req as *const _) };
+            // NOTE: The cookie jar `secure` state will not reflect the last
+            // known value in `request.cookies()`. This is okay: new cookies
+            // should never be added to the resulting jar which is the only time
+            // the value is used to set cookie defaults.
+            // SAFETY: The type of `preprocess` ensures that all of these types have the correct
+            // lifetime ('c).
+            let response: Response<'c> = f(token, request, data, unsafe { transmute(&mut error) }).await;
+            let mut cookies = CookieJar::new(None, request.rocket());
+            for cookie in response.cookies() {
+                cookies.add_original(cookie.into_owned());
+            }
+
+            LocalResponse { _request: boxed_req, _error: error, cookies, response, }
+        }
+    }
+
+    pub(crate) fn error<F, O>(req: Request<'c>, f: F) -> impl Future<Output = LocalResponse<'c>>
+        where F: FnOnce(&'c Request<'c>, &'c mut ErasedError<'c>) -> O + Send,
+              O: Future<Output = Response<'c>> + Send + 'c
+    {
+        // `LocalResponse` is a self-referential structure. In particular,
+        // `response` and `cookies` can refer to `_request` and its contents. As
+        // such, we must
+        //   1) Ensure `Request` and `TypedError` have a stable address.
+        //
+        //      This is done by `Box`ing the `Request`, using only the stable
+        //      address thereafter.
+        //
+        //   2) Ensure no refs to `Request` or its contents leak with a lifetime
+        //      extending beyond that of `&self`.
+        //
+        //      We have no methods that return an `&Request`. However, we must
+        //      also ensure that `Response` doesn't leak any such references. To
+        //      do so, we don't expose the `Response` directly in any way;
+        //      otherwise, methods like `.headers()` could, in conjunction with
+        //      particular crafted `Responder`s, potentially be used to obtain a
+        //      reference to contents of `Request`. All methods, instead, return
+        //      references bounded by `self`. This is easily verified by noting
+        //      that 1) `LocalResponse` fields are private, and 2) all `impl`s
+        //      of `LocalResponse` aside from this method abstract the lifetime
+        //      away as `'_`, ensuring it is not used for any output value.
+        let boxed_req = Box::new(req);
+
+        async move {
+            use std::mem::transmute;
+            let mut error = ErasedError::new();
+
             // NOTE: The cookie jar `secure` state will not reflect the last
             // known value in `request.cookies()`. This is okay: new cookies
             // should never be added to the resulting jar which is the only time
@@ -113,7 +169,7 @@ impl<'c> LocalResponse<'c> {
             // SAFETY: Much like request above, error can borrow from request, and
             // response can borrow from request or error. TODO
             let request: &'c Request<'c> = unsafe { &*(&*boxed_req as *const _) };
-            let response: Response<'c> = f(token, request, data, unsafe { transmute(&mut error) }).await;
+            let response: Response<'c> = f(request, unsafe { transmute(&mut error) }).await;
             let mut cookies = CookieJar::new(None, request.rocket());
             for cookie in response.cookies() {
                 cookies.add_original(cookie.into_owned());

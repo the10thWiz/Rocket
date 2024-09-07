@@ -45,11 +45,11 @@ impl Rocket<Orbit> {
             |rocket, request, data, error_ptr| Box::pin(rocket.preprocess(request, data, error_ptr)),
             |token, rocket, request, data, error_ptr| Box::pin(async move {
                 if !request.errors.is_empty() {
-                    *error_ptr =  Some(Box::new(RequestErrors::new(&request.errors)));
+                    error_ptr.write(Some(Box::new(RequestErrors::new(&request.errors))));
                     return rocket.dispatch_error(
                         Status::BadRequest,
                         request,
-                        error_ptr.as_ref().map(|b| b.as_ref())
+                        error_ptr.get(),
                     ).await;
                 }
 

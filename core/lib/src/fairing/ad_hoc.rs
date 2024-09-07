@@ -62,6 +62,10 @@ enum AdHocKind {
 
     /// An ad-hoc **request** fairing. Called when a request is received.
     Request(Box<dyn for<'a, 'b> Fn(&'a mut Request<'_>, &'b mut Data<'_>)
+        -> BoxFuture<'a, ()> + Send + Sync + 'static>),
+
+    /// An ad-hoc **request_filter** fairing. Called when a request is received.
+    RequestFilter(Box<dyn for<'a, 'b> Fn(&'a Request<'_>, &'b Data<'_>)
         -> BoxFuture<'a, Result<(), Box<dyn TypedError<'a> + 'a>>> + Send + Sync + 'static>),
 
     /// An ad-hoc **response** fairing. Called when a response is ready to be
@@ -156,9 +160,33 @@ impl AdHoc {
     /// ```
     pub fn on_request<F: Send + Sync + 'static>(name: &'static str, f: F) -> AdHoc
         where F: for<'a, 'b> Fn(&'a mut Request<'_>, &'b mut Data<'_>)
-                        -> BoxFuture<'a, Result<(), Box<dyn TypedError<'a> + 'a>>>
+                        -> BoxFuture<'a, ()>
     {
         AdHoc { name, kind: AdHocKind::Request(Box::new(f)) }
+    }
+
+    /// Constructs an `AdHoc` request fairing named `name`. The function `f`
+    /// will be called and the returned `Future` will be `await`ed by Rocket
+    /// when a new request is received.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use rocket::fairing::AdHoc;
+    ///
+    /// // The no-op request fairing.
+    /// let fairing = AdHoc::on_request("Dummy", |req, data| {
+    ///     Box::pin(async move {
+    ///         // do something with the request and data...
+    /// #       let (_, _) = (req, data);
+    ///     })
+    /// });
+    /// ```
+    pub fn filter_request<F: Send + Sync + 'static>(name: &'static str, f: F) -> AdHoc
+        where F: for<'a, 'b> Fn(&'a Request<'_>, &'b Data<'_>)
+                        -> BoxFuture<'a, Result<(), Box<dyn TypedError<'a> + 'a>>>
+    {
+        AdHoc { name, kind: AdHocKind::RequestFilter(Box::new(f)) }
     }
 
     // FIXME(rustc): We'd like to allow passing `async fn` to these methods...
@@ -379,12 +407,10 @@ impl AdHoc {
                 let _ = self.routes(rocket);
             }
 
-            async fn on_request<'r>(&self, req: &'r mut Request<'_>, _: &mut Data<'_>)
-                -> Result<(), Box<dyn TypedError<'r> + 'r>>
-            {
+            async fn on_request<'r>(&self, req: &'r mut Request<'_>, _: &mut Data<'_>) {
                 // If the URI has no trailing slash, it routes as before.
                 if req.uri().is_normalized_nontrailing() {
-                    return Ok(());
+                    return;
                 }
 
                 // Otherwise, check if there's a route that matches the request
@@ -397,7 +423,6 @@ impl AdHoc {
                         "incoming request URI normalized for compatibility");
                     req.set_uri(normalized);
                 }
-                Ok(())
             }
         }
 
@@ -412,6 +437,7 @@ impl Fairing for AdHoc {
             AdHocKind::Ignite(_) => Kind::Ignite,
             AdHocKind::Liftoff(_) => Kind::Liftoff,
             AdHocKind::Request(_) => Kind::Request,
+            AdHocKind::RequestFilter(_) => Kind::RequestFilter,
             AdHocKind::Response(_) => Kind::Response,
             AdHocKind::Shutdown(_) => Kind::Shutdown,
         };
@@ -432,10 +458,16 @@ impl Fairing for AdHoc {
         }
     }
 
-    async fn on_request<'r>(&self, req: &'r mut Request<'_>, data: &mut Data<'_>)
+    async fn on_request<'r>(&self, req: &'r mut Request<'_>, data: &mut Data<'_>) {
+        if let AdHocKind::Request(ref f) = self.kind {
+            f(req, data).await
+        }
+    }
+
+    async fn filter_request<'r>(&self, req: &'r Request<'_>, data: &Data<'_>)
         -> Result<(), Box<dyn TypedError<'r> + 'r>>
     {
-        if let AdHocKind::Request(ref f) = self.kind {
+        if let AdHocKind::RequestFilter(ref f) = self.kind {
             f(req, data).await
         } else {
             Ok(())

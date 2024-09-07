@@ -1,7 +1,5 @@
 use std::fmt;
 
-use crate::catcher::TypedError;
-use crate::lifecycle::error_ref;
 use crate::request::RequestErrors;
 use crate::{Request, Data};
 use crate::http::{Status, Method};
@@ -78,7 +76,7 @@ impl<'c> LocalRequest<'c> {
     }
 
     // Performs the actual dispatch.
-    async fn _dispatch(mut self) -> LocalResponse<'c> {
+    async fn _dispatch(self) -> LocalResponse<'c> {
         // First, revalidate the URI, returning an error response (generated
         // from an error catcher) immediately if it's invalid. If it's valid,
         // then `request` already contains a correct URI.
@@ -88,12 +86,11 @@ impl<'c> LocalRequest<'c> {
             // _shouldn't_ error. Check that now and error only if not.
             if self.inner().uri() == invalid {
                 error!("invalid request URI: {:?}", invalid.path());
-                // return LocalResponse::new(self.request, move |req, error_ptr| {
-                //     // TODO: Ideally the RequestErrors should contain actual information.
-                //     *error_ptr = Some(Box::new(RequestErrors::new(&[])));
-                //     rocket.dispatch_error(Status::BadRequest, req, error_ref(error_ptr))
-                // }).await
-                todo!()
+                return LocalResponse::error(self.request, move |req, error_ptr| {
+                    // TODO: Ideally the RequestErrors should contain actual information.
+                    error_ptr.write(Some(Box::new(RequestErrors::new(&[]))));
+                    rocket.dispatch_error(Status::BadRequest, req, error_ptr.get())
+                }).await;
             }
         }
 

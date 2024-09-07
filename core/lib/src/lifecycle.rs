@@ -1,6 +1,7 @@
 use futures::future::{FutureExt, Future};
 
 use crate::catcher::TypedError;
+use crate::erased::ErasedError;
 use crate::trace::Trace;
 use crate::util::Formatter;
 use crate::data::IoHandler;
@@ -44,11 +45,6 @@ async fn catch_handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
         .ok()
 }
 
-pub(crate) fn error_ref<'r>(error_ptr: &'r mut Option<Box<dyn TypedError<'r> + 'r>>)
-    -> Option<&'r dyn TypedError<'r>> {
-    error_ptr.as_ref().map(|b| b.as_ref())
-}
-
 impl Rocket<Orbit> {
     /// Preprocess the request for Rocket things. Currently, this means:
     ///
@@ -61,7 +57,7 @@ impl Rocket<Orbit> {
         &self,
         req: &'r mut Request<'_>,
         data: &mut Data<'_>,
-        error: &'r mut Option<Box<dyn TypedError<'r> + 'r>>,
+        error: &mut ErasedError<'r>,
     ) -> RequestToken {
         // Check if this is a form and if the form contains the special _method
         // field which we use to reinterpret the request's method.
@@ -78,7 +74,8 @@ impl Rocket<Orbit> {
         }
 
         // Run request fairings.
-        self.fairings.handle_request(req, data, error).await;
+        self.fairings.handle_request(req, data).await;
+        self.fairings.handle_filter(req, data, error).await;
 
         RequestToken
     }
@@ -100,7 +97,7 @@ impl Rocket<Orbit> {
         _token: RequestToken,
         request: &'r Request<'s>,
         data: Data<'r>,
-        error_ptr: &'r mut Option<Box<dyn TypedError<'r> + 'r>>,
+        error_ptr: &'r mut ErasedError<'r>,
         // io_stream: impl Future<Output = io::Result<IoStream>> + Send,
     ) -> Response<'r> {
         // Remember if the request is `HEAD` for later body stripping.
@@ -108,8 +105,11 @@ impl Rocket<Orbit> {
 
 
         // Route the request and run the user's handlers.
-        let mut response = if let Some(error) = error_ptr {
-            self.dispatch_error(error.status(), request, error_ref(error_ptr)).await
+        let mut response = if error_ptr.is_some() {
+            // error_ptr is always some here, we just checked.
+            self.dispatch_error(error_ptr.get().unwrap().status(), request, error_ptr.get()).await
+            // We MUST wait until we are inside this block to call `get`, since we HAVE to borrow it for `'r`.
+            // (And it's invariant, so we can't downcast the borrow to a shorter lifetime)
         } else {
             match self.route(request, data).await {
                 Outcome::Success(response) => response,
@@ -121,22 +121,22 @@ impl Rocket<Orbit> {
                     match self.route(request, data).await {
                         Outcome::Success(response) => response,
                         Outcome::Error((status, error)) => {
-                            *error_ptr = error;
-                            self.dispatch_error(status, request, error_ref(error_ptr)).await
+                            error_ptr.write(error);
+                            self.dispatch_error(status, request, error_ptr.get()).await
                         },
                         Outcome::Forward((_, status, error)) => {
-                            *error_ptr = error;
-                            self.dispatch_error(status, request, error_ref(error_ptr)).await
+                            error_ptr.write(error);
+                            self.dispatch_error(status, request, error_ptr.get()).await
                         },
                     }
                 }
                 Outcome::Forward((_, status, error)) => {
-                    *error_ptr = error;
-                    self.dispatch_error(status, request, error_ref(error_ptr)).await
+                    error_ptr.write(error);
+                    self.dispatch_error(status, request, error_ptr.get()).await
                 },
                 Outcome::Error((status, error)) => {
-                    *error_ptr = error;
-                    self.dispatch_error(status, request, error_ref(error_ptr)).await
+                    error_ptr.write(error);
+                    self.dispatch_error(status, request, error_ptr.get()).await
                 },
             }
         };
@@ -304,6 +304,9 @@ impl Rocket<Orbit> {
     /// Return `Ok(result)` if the handler succeeded. Returns `Ok(Some(Status))`
     /// if the handler ran to completion but failed. Returns `Ok(None)` if the
     /// handler panicked while executing.
+    ///
+    /// TODO: These semantics should (ideally) match the old semantics in the case where
+    /// `error` is `None`.
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,
@@ -331,69 +334,6 @@ impl Rocket<Orbit> {
                 "no registered catcher: using Rocket default");
             Ok(catcher::default_handler(status, req))
         }
-        // TODO: Clean this up
-        // let items = std::iter::from_fn(|| {
-        //     let tmp = error.map(|e| self.router.catch(status, req, Some(e.trait_obj_typeid())));
-        //     error_copy = error.and_then(|e| e.source());
-        //     tmp
-        // }).take(5).filter_map(|e| e).min_by_key(|e| e.rank);
-
-        // let mut error_copy  = error;
-        // let mut counter = 0;
-        // // Matches error [.source ...] type
-        // while error_copy.is_some() && counter < 5 {
-        //     if let Some(catcher) = self.router.catch(
-        //         status,
-        //         req,
-        //         error_copy.map(|e| e.trait_obj_typeid())
-        //     ) {
-        //         return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
-        //     }
-        //     error_copy = error_copy.and_then(|e| e.source());
-        //     counter += 1;
-        // }
-        // // Matches None type
-        // if let Some(catcher) = self.router.catch(status, req, None) {
-        //     return self.invoke_specific_catcher(catcher, status, None, req).await;
-        // }
-        // let mut error_copy  = error;
-        // let mut counter = 0;
-        // // Matches error [.source ...] type, and any status
-        // while error_copy.is_some() && counter < 5 {
-        //     if let Some(catcher) = self.router.catch_any(
-        //         status,
-        //         req,
-        //         error_copy.map(|e| e.trait_obj_typeid())
-        //     ) {
-        //         return self.invoke_specific_catcher(catcher, status, error_copy, req).await;
-        //     }
-        //     error_copy = error_copy.and_then(|e| e.source());
-        //     counter += 1;
-        // }
-        // // Matches None type, and any status
-        // if let Some(catcher) = self.router.catch_any(status, req, None) {
-        //     return self.invoke_specific_catcher(catcher, status, None, req).await;
-        // }
-        // if let Some(error) = error {
-        //     if let Ok(res) = error.respond_to(req) {
-        //         return Ok(res);
-        //         // TODO: this ignores the returned status.
-        //     }
-        // }
-        // // Rocket default catcher
-        // info!(name: "catcher", name = "rocket::default", "uri.base" = "/", code = status.code,
-        //     "no registered catcher: using Rocket default");
-        // Ok(catcher::default_handler(status, req))
-        // TODO: document:
-        // Set of matching catchers, tried in order:
-        // - Matches error type
-        // - Matches error.source type
-        // - Matches error.source.source type
-        // - ... etc
-        // - Matches None type
-        // - Registered default handler
-        // - Rocket default handler
-        // At each step, the catcher with the longest path is selected
     }
 
     /// Invokes a specific catcher
