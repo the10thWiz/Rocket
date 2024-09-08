@@ -31,6 +31,8 @@ pub struct ErasedRequest {
     _parts: Box<Parts>,
 }
 
+// SAFETY: This tells dropck that the parts of ErasedRequest MUST be dropped
+// as a group (and ensures they happen in order)
 impl Drop for ErasedRequest {
     fn drop(&mut self) { }
 }
@@ -72,6 +74,8 @@ pub struct ErasedResponse {
     _request: Arc<ErasedRequest>,
 }
 
+// SAFETY: This tells dropck that the parts of ErasedResponse MUST be dropped
+// as a group (and ensures they happen in order)
 impl Drop for ErasedResponse {
     fn drop(&mut self) { }
 }
@@ -82,6 +86,8 @@ pub struct ErasedIoHandler {
     _request: Arc<ErasedRequest>,
 }
 
+// SAFETY: This tells dropck that the parts of ErasedIoHandler MUST be dropped
+// as a group (and ensures they happen in order)
 impl Drop for ErasedIoHandler {
     fn drop(&mut self) { }
 }
