@@ -27,6 +27,7 @@
 use std::{io, fmt, error};
 use std::ops::{Deref, DerefMut};
 
+use crate::catcher::TypedError;
 use crate::request::{Request, local_cache};
 use crate::data::{Limits, Data, FromData, Outcome};
 use crate::response::{self, Responder, content};
@@ -139,6 +140,8 @@ pub enum Error<'a> {
     /// error from `serde`.
     Parse(&'a str, serde_json::error::Error),
 }
+
+impl<'a> TypedError<'a> for Error<'a> {  }
 
 unsafe impl<'a> Transient for Error<'a> {
     type Static = Error<'static>;

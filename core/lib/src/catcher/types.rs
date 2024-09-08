@@ -143,8 +143,9 @@ pub fn type_id_of<'r, T: TypedError<'r> + Transient + 'r>() -> (TypeId, &'static
 
 /// Downcast an error type to the underlying concrete type. Used by the `#[catch]` attribute.
 #[doc(hidden)]
-pub fn downcast<'r, T: TypedError<'r> + Transient + 'r>(v: Option<&'r dyn TypedError<'r>>) -> Option<&'r T>
-    where T::Transience: CanRecoverFrom<Inv<'r>>
+pub fn downcast<'r, T>(v: Option<&'r dyn TypedError<'r>>) -> Option<&'r T>
+    where T: TypedError<'r> + Transient + 'r,
+          T::Transience: CanRecoverFrom<Inv<'r>>,
 {
     // if v.is_none() {
     //     crate::trace::error!("No value to downcast from");

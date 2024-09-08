@@ -236,7 +236,10 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
                 #_Err(__error) => {
                     // TODO: allocation: (see above)
                     let __reason = ::std::format!("{}", #display_hack!(&__error));
-                    let __error = #_request::FromSegmentsError::new(#__req.routed_segments(#i..), __error);
+                    let __error = #_request::FromSegmentsError::new(
+                            #__req.routed_segments(#i..),
+                            __error
+                        );
                     return #parse_error;
                 },
             }

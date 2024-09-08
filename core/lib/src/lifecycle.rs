@@ -315,18 +315,22 @@ impl Rocket<Orbit> {
         req: &'r Request<'s>
     ) -> Result<Response<'r>, Option<Status>> {
         // Lists error types by repeatedly calling `.source()`
-        let catchers = std::iter::successors(error, |e| e.source())
+        let catcher = std::iter::successors(error, |e| e.source())
             // Only go up to 5 levels deep (to prevent an endless cycle)
             .take(5)
             // Map to catchers
             .filter_map(|e| {
-                self.router.catch(status, req, Some(e.trait_obj_typeid())).map(|c| (c, e))
+                self.router.catch(status, req, Some(e.trait_obj_typeid())).map(|c| (c, Some(e)))
             })
-            // Select the minimum by the catcher's rank
+            // Add untyped catcher, at the end (with the lowest priority)
+            .chain(
+                self.router.catch(status, req, None)
+                    .map(|c| (c, None))
+            )
+            // Select the minimum by the catcher's rank. In case of a tie, selects the
+            // first it comes across
             .min_by_key(|(c, _)| c.rank);
-        if let Some((catcher, e)) = catchers {
-            self.invoke_specific_catcher(catcher, status, Some(e), req).await
-        } else if let Some(catcher) = self.router.catch(status, req, None) {
+        if let Some((catcher, error)) = catcher {
             self.invoke_specific_catcher(catcher, status, error, req).await
         } else if let Some(res) = error.and_then(|e| e.respond_to(req).ok()) {
             Ok(res)

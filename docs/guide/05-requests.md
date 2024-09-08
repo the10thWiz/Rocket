@@ -2136,7 +2136,7 @@ similarly be registered with [`register()`]:
 use rocket::Request;
 use rocket::http::Status;
 
-#[catch(default, status = "<status>")]
+#[catch(default)]
 fn default_catcher(status: Status) { /* .. */ }
 
 #[launch]
