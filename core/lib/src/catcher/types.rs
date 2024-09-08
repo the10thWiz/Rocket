@@ -134,7 +134,16 @@ impl<'r> TypedError<'r> for AnyError<'r> {
     }
 }
 
-pub fn downcast<'r, T: Transient + 'r>(v: Option<&'r dyn TypedError<'r>>) -> Option<&'r T>
+/// Validates that a type implements `TypedError`. Used by the `#[catch]` attribute to ensure
+/// the `TypeError` is first in the diagnostics.
+#[doc(hidden)]
+pub fn type_id_of<'r, T: TypedError<'r> + Transient + 'r>() -> (TypeId, &'static str) {
+    (TypeId::of::<T>(), std::any::type_name::<T>())
+}
+
+/// Downcast an error type to the underlying concrete type. Used by the `#[catch]` attribute.
+#[doc(hidden)]
+pub fn downcast<'r, T: TypedError<'r> + Transient + 'r>(v: Option<&'r dyn TypedError<'r>>) -> Option<&'r T>
     where T::Transience: CanRecoverFrom<Inv<'r>>
 {
     // if v.is_none() {

@@ -14,7 +14,7 @@ use super::param::Guard;
 fn error_type(guard: &ErrorGuard) -> TokenStream {
     let ty = &guard.ty;
     quote! {
-        (#_catcher::TypeId::of::<#ty>(), ::std::any::type_name::<#ty>())
+        #_catcher::type_id_of::<#ty>()
     }
 }
 

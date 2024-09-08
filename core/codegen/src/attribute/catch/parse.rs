@@ -57,23 +57,12 @@ impl ErrorGuard {
     }
 }
 
-fn status_guard(param: SpanWrapped<Dynamic>, args: &Arguments) -> Result<(Name, Ident)> {
-    if let Some((ident, _)) = args.map.get(&param.name) {
-        Ok((param.name.clone(), ident.clone()))
-    } else {
-        let msg = format!("expected argument named `{}` here", param.name);
-        let diag = param.span().error("unused parameter").span_note(args.span, msg);
-        Err(diag)
-    }
-}
-
 /// We generate a full parser for the meta-item for great error messages.
 #[derive(FromMeta)]
 struct Meta {
     #[meta(naked)]
     code: Code,
     error: Option<SpanWrapped<Dynamic>>,
-    status: Option<SpanWrapped<Dynamic>>,
 }
 
 /// `Some` if there's a code, `None` if it's `default`.

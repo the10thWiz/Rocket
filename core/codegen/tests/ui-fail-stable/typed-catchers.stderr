@@ -1,0 +1,160 @@
+error: invalid type
+ --> tests/ui-fail-stable/typed-catchers.rs:7:26
+  |
+7 | #[catch(default, error = "<foo>")]
+  |                          ^^^^^^^
+
+error: [note] Error argument must be a reference, found `std :: io :: Error`
+       = help: Perhaps use `&std :: io :: Error` instead
+ --> tests/ui-fail-stable/typed-catchers.rs:8:18
+  |
+8 | fn isnt_ref(foo: std::io::Error) -> &'static str {
+  |                  ^^^
+
+error: invalid type
+  --> tests/ui-fail-stable/typed-catchers.rs:12:26
+   |
+12 | #[catch(default, error = "<foo>")]
+   |                          ^^^^^^^
+
+error: [note] Error argument must be a reference, found `Foo`
+       = help: Perhaps use `&Foo` instead
+  --> tests/ui-fail-stable/typed-catchers.rs:13:27
+   |
+13 | fn isnt_ref_or_error(foo: Foo) -> &'static str {
+   |                           ^^^
+
+error[E0277]: the trait bound `Foo: TypedError<'_>` is not satisfied
+  --> tests/ui-fail-stable/typed-catchers.rs:19:1
+   |
+19 | #[catch(default, error = "<foo>")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `TypedError<'_>` is not implemented for `Foo`
+   |
+   = help: the following other types implement trait `TypedError<'r>`:
+             <rocket::either::Either<L, R> as TypedError<'r>>
+             <rocket::serde::json::serde_json::Error as TypedError<'r>>
+             <rocket::serde::msgpack::Error as TypedError<'r>>
+             <rmp_serde::encode::Error as TypedError<'r>>
+             <std::io::Error as TypedError<'r>>
+             <Status as TypedError<'_>>
+             <RequestErrors<'r> as TypedError<'r>>
+             <FromUtf8Error as TypedError<'r>>
+           and $N others
+note: required by a bound in `type_id_of`
+  --> $WORKSPACE/core/lib/src/catcher/types.rs
+   |
+   | pub fn type_id_of<'r, T: TypedError<'r> + Transient + 'r>() -> (TypeId, &'static str) {
+   |                          ^^^^^^^^^^^^^^ required by this bound in `type_id_of`
+   = note: this error originates in the attribute macro `catch` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Foo: Transient` is not satisfied
+  --> tests/ui-fail-stable/typed-catchers.rs:19:1
+   |
+19 | #[catch(default, error = "<foo>")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `rocket::catcher::Static` is not implemented for `Foo`, which is required by `Foo: Transient`
+   |
+   = help: the following other types implement trait `Transient`:
+             Box<[T]>
+             rocket::either::Either<L, R>
+             Inv<'a>
+             transient::transience::Co<'a>
+             transient::transience::Contra<'a>
+             HashMap<K, V>
+             Cow<'a, T>
+             PhantomData<T>
+           and $N others
+   = note: required for `Foo` to implement `Transient`
+note: required by a bound in `type_id_of`
+  --> $WORKSPACE/core/lib/src/catcher/types.rs
+   |
+   | pub fn type_id_of<'r, T: TypedError<'r> + Transient + 'r>() -> (TypeId, &'static str) {
+   |                                           ^^^^^^^^^ required by this bound in `type_id_of`
+   = note: this error originates in the attribute macro `catch` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Foo: TypedError<'_>` is not satisfied
+  --> tests/ui-fail-stable/typed-catchers.rs:19:1
+   |
+19 | #[catch(default, error = "<foo>")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `TypedError<'_>` is not implemented for `Foo`
+   |
+   = help: the following other types implement trait `TypedError<'r>`:
+             <rocket::either::Either<L, R> as TypedError<'r>>
+             <rocket::serde::json::serde_json::Error as TypedError<'r>>
+             <rocket::serde::msgpack::Error as TypedError<'r>>
+             <rmp_serde::encode::Error as TypedError<'r>>
+             <std::io::Error as TypedError<'r>>
+             <Status as TypedError<'_>>
+             <RequestErrors<'r> as TypedError<'r>>
+             <FromUtf8Error as TypedError<'r>>
+           and $N others
+note: required by a bound in `downcast`
+  --> $WORKSPACE/core/lib/src/catcher/types.rs
+   |
+   | pub fn downcast<'r, T: TypedError<'r> + Transient + 'r>(v: Option<&'r dyn TypedError<'r>>) -> Option<&'r T>
+   |                        ^^^^^^^^^^^^^^ required by this bound in `downcast`
+   = note: this error originates in the attribute macro `catch` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Foo: rocket::catcher::Static` is not satisfied
+  --> tests/ui-fail-stable/typed-catchers.rs:19:1
+   |
+19 | #[catch(default, error = "<foo>")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `rocket::catcher::Static` is not implemented for `Foo`, which is required by `Foo: Transient`
+   |
+   = help: the following other types implement trait `rocket::catcher::Static`:
+             isize
+             i8
+             i16
+             i32
+             i64
+             i128
+             usize
+             u8
+           and $N others
+   = note: required for `Foo` to implement `Transient`
+   = note: this error originates in the attribute macro `catch` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Foo: FromError<'_>` is not satisfied
+  --> tests/ui-fail-stable/typed-catchers.rs:25:37
+   |
+25 | fn doesnt_implement_from_error(foo: Foo) -> &'static str {
+   |                                     ^^^ the trait `FromRequest<'_>` is not implemented for `Foo`, which is required by `Foo: FromError<'_>`
+   |
+   = help: the following other types implement trait `FromError<'r>`:
+             Status
+             std::option::Option<&'r (dyn TypedError<'r> + 'r)>
+             &'r rocket::Request<'r>
+             &'r (dyn TypedError<'r> + 'r)
+   = note: required for `Foo` to implement `FromError<'_>`
+
+error[E0277]: the trait bound `rocket::Request<'_>: FromError<'_>` is not satisfied
+  --> tests/ui-fail-stable/typed-catchers.rs:30:26
+   |
+30 | fn request_by_value(foo: Request<'_>) -> &'static str {
+   |                          ^^^^^^^^^^^ the trait `FromRequest<'_>` is not implemented for `rocket::Request<'_>`, which is required by `rocket::Request<'_>: FromError<'_>`
+   |
+   = help: the following other types implement trait `FromError<'r>`:
+             Status
+             std::option::Option<&'r (dyn TypedError<'r> + 'r)>
+             &'r rocket::Request<'r>
+             &'r (dyn TypedError<'r> + 'r)
+   = note: required for `rocket::Request<'_>` to implement `FromError<'_>`
+
+warning: unused variable: `foo`
+  --> tests/ui-fail-stable/typed-catchers.rs:20:27
+   |
+20 | fn doesnt_implement_error(foo: &Foo) -> &'static str {
+   |                           ^^^ help: if this is intentional, prefix it with an underscore: `_foo`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `foo`
+  --> tests/ui-fail-stable/typed-catchers.rs:25:32
+   |
+25 | fn doesnt_implement_from_error(foo: Foo) -> &'static str {
+   |                                ^^^ help: if this is intentional, prefix it with an underscore: `_foo`
+
+warning: unused variable: `foo`
+  --> tests/ui-fail-stable/typed-catchers.rs:30:21
+   |
+30 | fn request_by_value(foo: Request<'_>) -> &'static str {
+   |                     ^^^ help: if this is intentional, prefix it with an underscore: `_foo`

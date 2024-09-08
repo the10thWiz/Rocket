@@ -2,7 +2,13 @@ error[E0271]: type mismatch resolving `<String as FromParam<'_>>::Error == &str`
   --> tests/ui-fail-stable/typed-uri-bad-type.rs:24:37
    |
 24 | fn optionals(id: Option<i32>, name: Result<String, &str>) {  }
-   |                                     ^^^^^^^^^^^^^^^^^^^^ expected `Empty`, found `&str`
+   |                                     ^^^^^^ expected `Empty`, found `&str`
+
+error[E0271]: type mismatch resolving `<String as FromParam<'_>>::Error == &str`
+  --> tests/ui-fail-stable/typed-uri-bad-type.rs:24:37
+   |
+24 | fn optionals(id: Option<i32>, name: Result<String, &str>) {  }
+   |                                     ^^^^^^^^^^^^^^^^^^^^ expected `&str`, found `Empty`
 
 error[E0277]: the trait bound `usize: FromUriParam<rocket::http::uri::fmt::Path, &str>` is not satisfied
   --> tests/ui-fail-stable/typed-uri-bad-type.rs:15:15
@@ -319,9 +325,8 @@ error[E0277]: the trait bound `rocket::http::uri::Reference<'_>: ValidRoutePrefi
   --> tests/ui-fail-stable/typed-uri-bad-type.rs:79:15
    |
 79 |     uri!(uri!("?foo#bar"), simple(id = "hi"));
-   |          -----^^^^^^^^^^-
-   |          |    |
-   |          |    the trait `ValidRoutePrefix` is not implemented for `rocket::http::uri::Reference<'_>`
+   |          ---  ^^^^^^^^^^ the trait `ValidRoutePrefix` is not implemented for `rocket::http::uri::Reference<'_>`
+   |          |
    |          required by a bound introduced by this call
    |
    = help: the following other types implement trait `ValidRoutePrefix`:
@@ -352,9 +357,8 @@ error[E0277]: the trait bound `rocket::http::uri::Asterisk: ValidRoutePrefix` is
   --> tests/ui-fail-stable/typed-uri-bad-type.rs:80:15
    |
 80 |     uri!(uri!("*"), simple(id = "hi"));
-   |          -----^^^-
-   |          |    |
-   |          |    the trait `ValidRoutePrefix` is not implemented for `rocket::http::uri::Asterisk`
+   |          ---  ^^^ the trait `ValidRoutePrefix` is not implemented for `rocket::http::uri::Asterisk`
+   |          |
    |          required by a bound introduced by this call
    |
    = help: the following other types implement trait `ValidRoutePrefix`:
@@ -385,9 +389,8 @@ error[E0277]: the trait bound `rocket::http::uri::Asterisk: ValidRouteSuffix<roc
   --> tests/ui-fail-stable/typed-uri-bad-type.rs:83:37
    |
 83 |     uri!(_, simple(id = "hi"), uri!("*"));
-   |                                -----^^^-
-   |                                |    |
-   |                                |    the trait `ValidRouteSuffix<rocket::http::uri::Origin<'static>>` is not implemented for `rocket::http::uri::Asterisk`
+   |                                ---  ^^^ the trait `ValidRouteSuffix<rocket::http::uri::Origin<'static>>` is not implemented for `rocket::http::uri::Asterisk`
+   |                                |
    |                                required by a bound introduced by this call
    |
    = help: the following other types implement trait `ValidRouteSuffix<T>`:
@@ -422,9 +425,8 @@ error[E0277]: the trait bound `rocket::http::uri::Origin<'_>: ValidRouteSuffix<r
   --> tests/ui-fail-stable/typed-uri-bad-type.rs:84:37
    |
 84 |     uri!(_, simple(id = "hi"), uri!("/foo/bar"));
-   |                                -----^^^^^^^^^^-
-   |                                |    |
-   |                                |    the trait `ValidRouteSuffix<rocket::http::uri::Origin<'static>>` is not implemented for `rocket::http::uri::Origin<'_>`
+   |                                ---  ^^^^^^^^^^ the trait `ValidRouteSuffix<rocket::http::uri::Origin<'static>>` is not implemented for `rocket::http::uri::Origin<'_>`
+   |                                |
    |                                required by a bound introduced by this call
    |
    = help: the following other types implement trait `ValidRouteSuffix<T>`:
@@ -480,7 +482,7 @@ error[E0277]: the trait bound `i32: FromUriParam<rocket::http::uri::fmt::Path, s
   --> tests/ui-fail-stable/typed-uri-bad-type.rs:58:25
    |
 58 |     uri!(optionals(id = Some(10), name = Ok("bob".into())));
-   |                         ^^^^^^^^ the trait `FromUriParam<rocket::http::uri::fmt::Path, std::option::Option<{integer}>>` is not implemented for `i32`, which is required by `std::option::Option<i32>: FromUriParam<rocket::http::uri::fmt::Path, std::option::Option<{integer}>>`
+   |                         ^^^^ the trait `FromUriParam<rocket::http::uri::fmt::Path, std::option::Option<{integer}>>` is not implemented for `i32`, which is required by `std::option::Option<i32>: FromUriParam<rocket::http::uri::fmt::Path, std::option::Option<{integer}>>`
    |
    = help: the following other types implement trait `FromUriParam<P, T>`:
              <i32 as FromUriParam<P, i32>>

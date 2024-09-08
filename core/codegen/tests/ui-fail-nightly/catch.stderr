@@ -62,20 +62,15 @@ error: unexpected attribute parameter: `message`
    |
    = help: `#[catch]` expects a status code int or `default`: `#[catch(404)]` or `#[catch(default)]`
 
-error[E0308]: arguments to this function are incorrect
-  --> tests/ui-fail-nightly/catch.rs:30:4
+error[E0277]: the trait bound `bool: FromError<'_>` is not satisfied
+  --> tests/ui-fail-nightly/catch.rs:30:35
    |
 30 | fn f3(_request: &Request, _other: bool) { }
-   |    ^^           --------          ---- an argument of type `bool` is missing
-   |                 |
-   |                 unexpected argument of type `Status`
+   |                                   ^^^^ the trait `FromRequest<'_>` is not implemented for `bool`, which is required by `bool: FromError<'_>`
    |
-note: function defined here
-  --> tests/ui-fail-nightly/catch.rs:30:4
-   |
-30 | fn f3(_request: &Request, _other: bool) { }
-   |    ^^ ------------------  ------------
-help: provide the argument
-   |
-29 | f3(bool, /* bool */)
-   |
+   = help: the following other types implement trait `FromError<'r>`:
+             &'r (dyn TypedError<'r> + 'r)
+             &'r rocket::Request<'r>
+             Status
+             std::option::Option<&'r (dyn TypedError<'r> + 'r)>
+   = note: required for `bool` to implement `FromError<'_>`

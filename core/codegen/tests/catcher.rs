@@ -13,9 +13,9 @@ use rocket::http::{Status, uri::Origin};
 fn not_found_0() -> &'static str { "404-0" }
 #[catch(404)]
 fn not_found_1() -> &'static str { "404-1" }
-#[catch(404, status = "<_s>")]
+#[catch(404)]
 fn not_found_2(_s: Status) -> &'static str { "404-2" }
-#[catch(default, status = "<_s>")]
+#[catch(default)]
 fn all(_s: Status, uri: &Origin<'_>) -> String { uri.to_string() }
 
 #[test]
@@ -41,13 +41,13 @@ fn test_simple_catchers() {
 }
 
 #[get("/<code>")] fn forward(code: u16) -> Status { Status::new(code) }
-#[catch(400, status = "<status>")]
+#[catch(400)]
 fn forward_400(status: Status) -> String { status.code.to_string() }
-#[catch(404, status = "<status>")]
+#[catch(404)]
 fn forward_404(status: Status) -> String { status.code.to_string() }
-#[catch(444, status = "<status>")]
+#[catch(444)]
 fn forward_444(status: Status) -> String { status.code.to_string() }
-#[catch(500, status = "<status>")]
+#[catch(500)]
 fn forward_500(status: Status) -> String { status.code.to_string() }
 
 #[test]
@@ -70,7 +70,7 @@ fn test_status_param() {
 #[catch(404)]
 fn bad_req_untyped() -> &'static str { "404" }
 #[catch(404, error = "<_e>")]
-fn bad_req_string(_e: &String) -> &'static str { "404 String" }
+fn bad_req_string(_e: &std::io::Error) -> &'static str { "404 String" }
 #[catch(404, error = "<_e>")]
 fn bad_req_tuple(_e: &()) -> &'static str { "404 ()" }
 
