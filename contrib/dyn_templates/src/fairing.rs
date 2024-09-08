@@ -66,13 +66,10 @@ impl Fairing for TemplateFairing {
     }
 
     #[cfg(debug_assertions)]
-    async fn on_request<'r>(&self, req: &'r mut rocket::Request<'_>, _data: &mut rocket::Data<'_>)
-        -> Result<(), Box<dyn TypedError<'r> + 'r>>
-    {
+    async fn on_request(&self, req: &mut rocket::Request<'_>, _data: &mut rocket::Data<'_>) {
         let cm = req.rocket().state::<ContextManager>()
             .expect("Template ContextManager registered in on_ignite");
 
         cm.reload_if_needed(&self.callback);
-        Ok(())
     }
 }

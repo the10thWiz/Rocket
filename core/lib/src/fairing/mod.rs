@@ -511,7 +511,7 @@ pub trait Fairing: Send + Sync + Any + 'static {
     /// ## Default Implementation
     ///
     /// The default implementation of this method does nothing.
-    async fn on_request<'r>(&self, _req: &'r mut Request<'_>, _data: &mut Data<'_>) { }
+    async fn on_request(&self, _req: &mut Request<'_>, _data: &mut Data<'_>) { }
 
     /// The request filter callback.
     ///
@@ -582,7 +582,7 @@ impl<T: Fairing + ?Sized> Fairing for std::sync::Arc<T> {
     }
 
     #[inline]
-    async fn on_request<'r>(&self, req: &'r mut Request<'_>, data: &mut Data<'_>) {
+    async fn on_request(&self, req: &mut Request<'_>, data: &mut Data<'_>) {
         (self as &T).on_request(req, data).await
     }
 

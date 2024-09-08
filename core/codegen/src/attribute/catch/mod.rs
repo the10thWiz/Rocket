@@ -31,7 +31,11 @@ fn error_guard_decl(guard: &ErrorGuard) -> TokenStream {
 fn request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     quote_spanned! { ty.span() =>
-        let #ident: #ty = match <#ty as #FromError>::from_error(#__status, #__req, __error_init).await {
+        let #ident: #ty = match <#ty as #FromError>::from_error(
+            #__status,
+            #__req,
+            __error_init
+        ).await {
             #_Result::Ok(__v) => __v,
             #_Result::Err(__e) => {
                 ::rocket::trace::info!(

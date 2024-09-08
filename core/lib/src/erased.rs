@@ -41,7 +41,7 @@ pub struct ErasedError<'r> {
 
 impl<'r> ErasedError<'r> {
     pub fn new() -> Self {
-        Self { error: None }        
+        Self { error: None }
     }
 
     pub fn write(&mut self, error: Option<Box<dyn TypedError<'r> + 'r>>) {
@@ -142,11 +142,12 @@ impl ErasedRequest {
         // SAFETY: At this point, ErasedRequest contains a request, which is permitted
         // to borrow from `Rocket` and `Parts`. They both have stable addresses (due to
         // `Arc` and `Box`), and the Request will be dropped first (due to drop order).
-        // SAFETY: Here, we place the `ErasedRequest` (i.e. the `Request`) behind an `Arc` (TODO: Why not Box?)
+        // SAFETY: Here, we place the `ErasedRequest` (i.e. the `Request`) behind an `Arc`
         // to ensure it has a stable address, and we again use drop order to ensure the `Request`
         // is dropped before the values that can borrow from it.
         let mut parent = Arc::new(self);
-        // SAFETY: This error is permitted to borrow from the `Request` (as well as `Rocket` and `Parts`).
+        // SAFETY: This error is permitted to borrow from the `Request` (as well as `Rocket` and
+        // `Parts`).
         let mut error = ErasedError { error: None };
         let token: T = {
             let parent: &mut ErasedRequest = Arc::get_mut(&mut parent).unwrap();

@@ -37,7 +37,9 @@ pub fn derive_typed_error(input: proc_macro::TokenStream) -> TokenStream {
         .inner_mapper(MapperBuild::new()
             .with_output(|_, output| quote! {
                 #[allow(unused_variables)]
-                fn respond_to(&self, request: &'r #Request<'_>) -> #_Result<#Response<'r>, #_Status> {
+                fn respond_to(&self, request: &'r #Request<'_>)
+                    -> #_Result<#Response<'r>, #_Status>
+                {
                     #output
                 }
             })
@@ -76,7 +78,9 @@ pub fn derive_typed_error(input: proc_macro::TokenStream) -> TokenStream {
                                 None => Member::Unnamed(Index { index: field.index as u32, span })
                             };
 
-                            source = Some(quote_spanned!(span => #_Some(&self.#member as &dyn #TypedError<'r>)));
+                            source = Some(quote_spanned!(
+                                span => #_Some(&self.#member as &dyn #TypedError<'r>
+                            )));
                         }
                     }
                 }

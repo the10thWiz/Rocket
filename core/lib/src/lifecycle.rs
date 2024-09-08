@@ -108,8 +108,9 @@ impl Rocket<Orbit> {
         let mut response = if error_ptr.is_some() {
             // error_ptr is always some here, we just checked.
             self.dispatch_error(error_ptr.get().unwrap().status(), request, error_ptr.get()).await
-            // We MUST wait until we are inside this block to call `get`, since we HAVE to borrow it for `'r`.
-            // (And it's invariant, so we can't downcast the borrow to a shorter lifetime)
+            // We MUST wait until we are inside this block to call `get`, since we HAVE to borrow
+            // it for `'r`. (And it's invariant, so we can't downcast the borrow to a shorter
+            // lifetime)
         } else {
             match self.route(request, data).await {
                 Outcome::Success(response) => response,

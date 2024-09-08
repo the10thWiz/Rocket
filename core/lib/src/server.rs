@@ -42,7 +42,9 @@ impl Rocket<Orbit> {
         span_debug!("request headers" => request.inner().headers().iter().trace_all_debug());
         let mut response = request.into_response(
             stream,
-            |rocket, request, data, error_ptr| Box::pin(rocket.preprocess(request, data, error_ptr)),
+            |rocket, request, data, error_ptr| {
+                Box::pin(rocket.preprocess(request, data, error_ptr))
+            },
             |token, rocket, request, data, error_ptr| Box::pin(async move {
                 if !request.errors.is_empty() {
                     error_ptr.write(Some(Box::new(RequestErrors::new(&request.errors))));

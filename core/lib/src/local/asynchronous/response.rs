@@ -67,10 +67,13 @@ impl Drop for LocalResponse<'_> {
 }
 
 impl<'c> LocalResponse<'c> {
-    pub(crate) fn new<P, PO, F, O>(req: Request<'c>, mut data: Data<'c>, preprocess: P, f: F) -> impl Future<Output = LocalResponse<'c>>
-        where P: FnOnce(&'c mut Request<'c>, &'c mut Data<'c>, &'c mut ErasedError<'c>) -> PO + Send,
+    pub(crate) fn new<P, PO, F, O>(req: Request<'c>, mut data: Data<'c>, preprocess: P, f: F)
+        -> impl Future<Output = LocalResponse<'c>>
+        where P: FnOnce(&'c mut Request<'c>, &'c mut Data<'c>, &'c mut ErasedError<'c>)
+                  -> PO + Send,
               PO: Future<Output = RequestToken> + Send + 'c,
-              F: FnOnce(RequestToken, &'c Request<'c>, Data<'c>, &'c mut ErasedError<'c>) -> O + Send,
+              F: FnOnce(RequestToken, &'c Request<'c>, Data<'c>, &'c mut ErasedError<'c>)
+                  -> O + Send,
               O: Future<Output = Response<'c>> + Send + 'c
     {
         // `LocalResponse` is a self-referential structure. In particular,
@@ -121,7 +124,12 @@ impl<'c> LocalResponse<'c> {
             // the value is used to set cookie defaults.
             // SAFETY: The type of `preprocess` ensures that all of these types have the correct
             // lifetime ('c).
-            let response: Response<'c> = f(token, request, data, unsafe { transmute(&mut error) }).await;
+            let response: Response<'c> = f(
+                token,
+                request,
+                data,
+                unsafe { transmute(&mut error) }
+            ).await;
             let mut cookies = CookieJar::new(None, request.rocket());
             for cookie in response.cookies() {
                 cookies.add_original(cookie.into_owned());
