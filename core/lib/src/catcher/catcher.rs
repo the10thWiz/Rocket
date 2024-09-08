@@ -86,7 +86,7 @@ use crate::catcher::{BoxFuture, TypedError, Handler};
 ///     format!("I couldn't find '{}'. Try something else?", uri)
 /// }
 ///
-/// #[catch(default, status = "<status>")]
+/// #[catch(default)]
 /// fn default(status: Status, uri: &Origin) -> String {
 ///     format!("{} ({})", status, uri)
 /// }

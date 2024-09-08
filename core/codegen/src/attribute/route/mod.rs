@@ -155,13 +155,15 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
             },
             #[allow(unreachable_code)]
             #Outcome::Error((__c, __e)) => {
+                // TODO: allocation: see next
+                let reason = ::std::format!("{}", #display_hack!(&__e));
                 let __err = #resolve_error!(__e);
                 ::rocket::trace::info!(
                     name: "failure",
                     target: concat!("rocket::codegen::route::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
-                    // reason = %#display_hack!(&__e),
+                    reason,
                     error_type = __err.name,
                     "request guard failed"
                 );
@@ -175,7 +177,7 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
 fn param_guard_decl(guard: &Guard) -> TokenStream {
     let (i, name, ty) = (guard.index, &guard.name, &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _None, _Some, _Ok, _Err,
+        __req, __data, _request, _None, _Some, _Ok, _Err,
         Outcome, FromSegments, FromParam, Status, display_hack, resolve_error
     );
 
@@ -186,8 +188,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
             name: "forward",
             target: concat!("rocket::codegen::route::", module_path!()),
             parameter = #name,
-            type_name = stringify!(#ty),
-            // reason = %#display_hack!(&__error),
+            reason = __reason,
             error_type = __err.name,
             "path guard forwarding"
         );
@@ -203,7 +204,13 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
                 #_Some(__s) => match <#ty as #FromParam>::from_param(__s) {
                     #_Ok(__v) => __v,
                     #[allow(unreachable_code)]
-                    #_Err(__error) => return #parse_error,
+                    #_Err(__error) => {
+                        // TODO: allocation: which is needed since the actual
+                        // `__error` is boxed up for typed catchers
+                        let __reason = ::std::format!("{}", #display_hack!(&__error));
+                        let __error = #_request::FromParamError::new(__s, __error);
+                        return #parse_error;
+                    }
                 },
                 #_None => {
                     ::rocket::trace::error!(
@@ -226,7 +233,12 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
             match <#ty as #FromSegments>::from_segments(#__req.routed_segments(#i..)) {
                 #_Ok(__v) => __v,
                 #[allow(unreachable_code)]
-                #_Err(__error) => return #parse_error,
+                #_Err(__error) => {
+                    // TODO: allocation: (see above)
+                    let __reason = ::std::format!("{}", #display_hack!(&__error));
+                    let __error = #_request::FromSegmentsError::new(#__req.routed_segments(#i..), __error);
+                    return #parse_error;
+                },
             }
         },
     };
@@ -257,13 +269,15 @@ fn data_guard_decl(guard: &Guard) -> TokenStream {
             }
             #[allow(unreachable_code)]
             #Outcome::Error((__c, __e)) => {
+                // TODO: allocation: see next
+                let reason = ::std::format!("{}", #display_hack!(&__e));
                 let __e = #resolve_error!(__e);
                 ::rocket::trace::info!(
                     name: "failure",
                     target: concat!("rocket::codegen::route::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
-                    // reason = %#display_hack!(&__e),
+                    reason,
                     error_type = __e.name,
                     "data guard failed"
                 );

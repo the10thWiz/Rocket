@@ -301,7 +301,7 @@ route_attribute!(options => Method::Options);
 ///     format!("Sorry, {} does not exist.", uri)
 /// }
 ///
-/// #[catch(default, status = "<status>")]
+/// #[catch(default)]
 /// fn default(status: Status, uri: &Origin) -> String {
 ///     format!("{} ({})", status, uri)
 /// }
@@ -316,11 +316,11 @@ route_attribute!(options => Method::Options);
 ///
 /// STATUS := valid HTTP status code (integer in [200, 599])
 /// parameter := 'rank' '=' INTEGER
-///            | 'status' '=' '"' SINGLE_PARAM '"'
 ///            | 'error' '=' '"' SINGLE_PARAM '"'
 /// SINGLE_PARAM := '<' IDENT '>'
 /// ```
 ///
+/// TODO: typed: docs
 /// # Typing Requirements
 ///
 /// Every identifier, except for `_`, that appears in a dynamic parameter, must appear
@@ -329,11 +329,10 @@ route_attribute!(options => Method::Options);
 /// The type of each function argument corresponding to a dynamic parameter is required to
 /// meet specific requirements.
 ///
-/// - `status`: Must be [`Status`].
-/// - `error`: Must be a reference to a type that implements `Transient`. See
+/// - `error`: Must be a reference to a type that implements `TypedError`. See
 ///   [Typed catchers](Self#Typed-catchers) for more info.
 ///
-/// All other arguments must implement [`FromRequest`].
+/// All other arguments must implement [`FromError`], (or [`FromRequest`]).
 ///
 /// A route argument declared a `_` must not appear in the function argument list and has no typing requirements.
 ///
@@ -1011,7 +1010,7 @@ pub fn derive_responder(input: TokenStream) -> TokenStream {
 
 /// Derive for the [`TypedError`] trait.
 ///
-/// TODO: Full documentation
+/// TODO: typed: Full documentation
 /// [`TypedError`]: ../rocket/catcher/trait.TypedError.html
 #[proc_macro_derive(TypedError, attributes(error))]
 pub fn derive_typed_error(input: TokenStream) -> TokenStream {

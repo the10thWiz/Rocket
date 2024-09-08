@@ -96,6 +96,7 @@ impl Catcher {
     /// necessary but insufficient condition to determine if a catcher will
     /// handle a particular error.
     ///
+    /// TODO: typed: The following has changed
     /// The precedence of a catcher is determined by:
     ///
     ///   1. The number of _complete_ segments in the catcher's `base`.

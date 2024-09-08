@@ -10,7 +10,8 @@ mod tests;
 
 pub use self::request::{Request, RequestErrors};
 pub use self::from_request::{FromRequest, Outcome};
-pub use self::from_param::{FromParam, FromSegments};
+pub use self::from_param::{FromParam, FromParamError};
+pub use self::from_param::{FromSegments, FromSegmentsError};
 
 #[doc(inline)]
 pub use crate::response::flash::FlashMessage;

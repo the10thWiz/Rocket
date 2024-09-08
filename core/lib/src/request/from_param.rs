@@ -1,9 +1,12 @@
 use std::str::FromStr;
 use std::path::PathBuf;
 
+use transient::{CanTranscendTo, Inv, Transient};
+
+use crate::catcher::TypedError;
 use crate::error::Empty;
 use crate::either::Either;
-use crate::http::uri::{Segments, error::PathError, fmt::Path};
+use crate::http::{uri::{Segments, error::PathError, fmt::Path}, Status};
 
 /// Trait to convert a dynamic path segment string to a concrete value.
 ///
@@ -212,6 +215,52 @@ pub trait FromParam<'a>: Sized {
     fn from_param(param: &'a str) -> Result<Self, Self::Error>;
 }
 
+/// The error type produced by every `FromParam` implementation.
+/// This can be used to obtain both the error returned by the param,
+/// as well as the raw parameter value.
+pub struct FromParamError<'a, T> {
+    pub raw: &'a str,
+    pub error: T,
+    _priv: (),
+}
+
+impl<'a, T> FromParamError<'a, T> {
+    /// Unstable constructor used by codegen
+    #[doc(hidden)]
+    pub fn new(raw: &'a str, error: T) -> Self {
+        Self {
+            raw,
+            error,
+            _priv: (),
+        }
+    }
+}
+
+impl<'a, T: TypedError<'a>> TypedError<'a> for FromParamError<'a, T>
+    where Self: Transient<Transience = Inv<'a>>
+{
+    fn respond_to(&self, request: &'a crate::Request<'_>) -> Result<crate::Response<'a>, Status> {
+        self.error.respond_to(request)
+    }
+
+    fn source(&'a self) -> Option<&'a (dyn TypedError<'a> + 'a)> {
+        Some(&self.error)
+    }
+
+    fn status(&self) -> Status {
+        self.error.status()
+    }
+}
+
+// SAFETY: Since `T` `CanTransendTo` `Inv<'a>`, it is safe to
+// transend `FromParamError<'a, T>` to `Inv<'a>`
+unsafe impl<'a, T: Transient + 'a> Transient for FromParamError<'a, T>
+    where T::Transience: CanTranscendTo<Inv<'a>>,
+{
+    type Static = FromParamError<'static, T::Static>;
+    type Transience = Inv<'a>;
+}
+
 impl<'a> FromParam<'a> for &'a str {
     type Error = Empty;
 
@@ -331,6 +380,52 @@ pub trait FromSegments<'r>: Sized {
     /// Parses an instance of `Self` from many dynamic path parameter strings or
     /// returns an `Error` if one cannot be parsed.
     fn from_segments(segments: Segments<'r, Path>) -> Result<Self, Self::Error>;
+}
+
+/// The error type produced by every `FromParam` implementation.
+/// This can be used to obtain both the error returned by the param,
+/// as well as the raw parameter value.
+pub struct FromSegmentsError<'a, T> {
+    pub raw: Segments<'a, Path>,
+    pub error: T,
+    _priv: (),
+}
+
+impl<'a, T> FromSegmentsError<'a, T> {
+    /// Unstable constructor used by codegen
+    #[doc(hidden)]
+    pub fn new(raw: Segments<'a, Path>, error: T) -> Self {
+        Self {
+            raw,
+            error,
+            _priv: (),
+        }
+    }
+}
+
+impl<'a, T: TypedError<'a>> TypedError<'a> for FromSegmentsError<'a, T>
+    where Self: Transient<Transience = Inv<'a>>
+{
+    fn respond_to(&self, request: &'a crate::Request<'_>) -> Result<crate::Response<'a>, Status> {
+        self.error.respond_to(request)
+    }
+
+    fn source(&'a self) -> Option<&'a (dyn TypedError<'a> + 'a)> {
+        Some(&self.error)
+    }
+
+    fn status(&self) -> Status {
+        self.error.status()
+    }
+}
+
+// SAFETY: Since `T` `CanTransendTo` `Inv<'a>`, it is safe to
+// transend `FromSegmentsError<'a, T>` to `Inv<'a>`
+unsafe impl<'a, T: Transient + 'a> Transient for FromSegmentsError<'a, T>
+    where T::Transience: CanTranscendTo<Inv<'a>>,
+{
+    type Static = FromParamError<'static, T::Static>;
+    type Transience = Inv<'a>;
 }
 
 impl<'r> FromSegments<'r> for Segments<'r, Path> {
