@@ -320,48 +320,39 @@ route_attribute!(options => Method::Options);
 /// SINGLE_PARAM := '<' IDENT '>'
 /// ```
 ///
-/// TODO: typed: docs
+/// TODO: typed: docs (links)
 /// # Typing Requirements
 ///
-/// Every identifier, except for `_`, that appears in a dynamic parameter, must appear
-/// as an argument to the function.
-///
-/// The type of each function argument corresponding to a dynamic parameter is required to
-/// meet specific requirements.
-///
-/// - `error`: Must be a reference to a type that implements `TypedError`. See
-///   [Typed catchers](Self#Typed-catchers) for more info.
+/// The type of the `error` arguement must be a reference to a type that implements `TypedError`. See
+/// [Typed catchers](Self#Typed-catchers) for more info.
 ///
 /// All other arguments must implement [`FromError`], (or [`FromRequest`]).
-///
-/// A route argument declared a `_` must not appear in the function argument list and has no typing requirements.
 ///
 /// The return type of the decorated function must implement the [`Responder`] trait.
 ///
 /// # Typed catchers
 ///
 /// To make catchers more expressive and powerful, they can catch specific
-/// error types. This is accomplished using the [`transient`] crate as a
-/// replacement for [`std::any::Any`]. When a [`FromRequest`], [`FromParam`],
+/// error types. This is accomplished using the [`TypedError`] trait.
+/// When a [`FromRequest`], [`FromParam`],
 /// [`FromSegments`], [`FromForm`], or [`FromData`] implementation fails or
-/// forwards, Rocket will convert to the error type to `dyn Any<Co<'r>>`, if the
-/// error type implements `Transient`.
+/// forwards, Rocket will convert to the error type to `dyn TypedError`, if the
+/// error type implements `TypedError`.
 ///
 /// Only a single error type can be carried by a request - if a route forwards,
 /// and another route is attempted, any error produced by the second route
 /// overwrites the first.
 ///
+/// There are two convient types - [`FromParam`] types actually generate a
+/// [`FromParamError<T>`] (although you can still catch the inner `T` type).
+/// Likewise [`FromSegements`] actually generates [`FromSegementsError<T>`].
+///
 /// ## Custom error types
 ///
 /// All[^transient-impls] error types that Rocket itself produces implement
-/// `Transient`, and can therefore be caught by a typed catcher. If you have
-/// a custom guard of any type, you can implement `Transient` using the derive
-/// macro provided by the `transient` crate. If the error type has lifetimes,
-/// please read the documentation for the `Transient` derive macro - although it
-/// prevents any unsafe implementation, it's not the easiest to use. Note that
-/// Rocket upcasts the type to `dyn Any<Co<'r>>`, where `'r` is the lifetime of
-/// the `Request`, so any `Transient` impl must be able to trancend to `Co<'r>`,
-/// and desend from `Co<'r>` at the catcher.
+/// [`TypedError`], and can therefore be caught by a typed catcher. If you have
+/// a custom guard of any type, you can implement [`TypedError`] using the derive
+/// macro.
 ///
 /// [^transient-impls]: As of writing, this is a WIP.
 ///
@@ -1010,7 +1001,25 @@ pub fn derive_responder(input: TokenStream) -> TokenStream {
 
 /// Derive for the [`TypedError`] trait.
 ///
-/// TODO: typed: Full documentation
+/// This trait allows a type to be caught by a typed catcher.
+///
+/// # Semantics
+///
+/// The derived `TypedError` uses the default implementations for
+/// all `TypedError` types. The status and source can be overriden
+/// using error parameters. We only support a single lifetime parameter.
+///
+/// The variants (or struct) can be decorated with `#[error(status = <STATUS>)]` to
+/// set the status.
+///
+/// A field can be decorated with `#[error(source)]` to indicate that that field
+/// should also be available to be caught.
+///
+/// # Notes
+///
+/// This also generates an implementation of `Transient` (the underlying trait used to
+/// implement safe downcasting for non-'static types).
+///
 /// [`TypedError`]: ../rocket/catcher/trait.TypedError.html
 #[proc_macro_derive(TypedError, attributes(error))]
 pub fn derive_typed_error(input: TokenStream) -> TokenStream {

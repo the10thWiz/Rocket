@@ -283,31 +283,17 @@ impl Rocket<Orbit> {
 
     /// Invokes the handler with `req` for catcher with status `status`.
     ///
-    /// In order of preference, invoked handler is:
-    ///   * the user's registered handler for `status`
-    ///   * the user's registered `default` handler
-    ///   * Rocket's default handler for `status`
-    ///
-    /// Return `Ok(result)` if the handler succeeded. Returns `Ok(Some(Status))`
-    /// if the handler ran to completion but failed. Returns `Ok(None)` if the
-    /// handler panicked while executing.
-    ///
-    /// # TODO: updated semantics:
-    ///
     /// Selects and invokes a specific catcher, with the following preference:
+    /// - The longest path base
     /// - Best matching error type (prefers calling `.source()` the fewest number
     ///   of times)
-    /// - The longest path base
     /// - Matching status
-    /// - The error's built-in responder (TODO: should this be before untyped catchers?)
+    /// - The error's built-in responder
     /// - If no catcher is found, Rocket's default handler is invoked
     ///
     /// Return `Ok(result)` if the handler succeeded. Returns `Ok(Some(Status))`
     /// if the handler ran to completion but failed. Returns `Ok(None)` if the
     /// handler panicked while executing.
-    ///
-    /// TODO: These semantics should (ideally) match the old semantics in the case where
-    /// `error` is `None`.
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,

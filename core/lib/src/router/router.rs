@@ -578,7 +578,6 @@ mod test {
             let router = router_with_catchers(&catchers);
             for (req, expected) in requests.iter().zip(expected.iter()) {
                 let req_status = Status::from_code(req.0).expect("valid status");
-                // TODO: write test cases for typed variant
                 let catcher = catcher(&router, req_status, req.1, req.2).expect("some catcher");
                 assert_eq!(catcher.code, expected.0,
                     "\nmatched {:?}, expected {:?} for req {:?}", catcher, expected, req);
