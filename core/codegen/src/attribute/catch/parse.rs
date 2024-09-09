@@ -1,6 +1,6 @@
 use devise::ext::{SpanDiagnosticExt, TypeExt};
 use devise::{Diagnostic, FromMeta, MetaItem, Result, SpanWrapped, Spanned};
-use proc_macro2::{Span, TokenStream, Ident};
+use proc_macro2::{Span, TokenStream};
 use quote::ToTokens;
 
 use crate::attribute::param::{Dynamic, Guard};

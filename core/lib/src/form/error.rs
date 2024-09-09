@@ -202,7 +202,6 @@ pub enum ErrorKind<'v> {
     Unknown,
     /// A custom error occurred. Status defaults to
     /// [`Status::UnprocessableEntity`] if one is not directly specified.
-    // TODO: This needs to be sync for TypedError
     Custom(Status, Box<dyn std::error::Error + Send + Sync>),
     /// An error while parsing a multipart form occurred.
     Multipart(multer::Error),

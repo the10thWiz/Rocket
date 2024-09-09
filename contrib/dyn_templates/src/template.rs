@@ -265,6 +265,7 @@ impl Template {
 /// extension and a fixed-size body containing the rendered template. If
 /// rendering fails, an `Err` of `Status::InternalServerError` is returned.
 impl<'r> Responder<'r, 'static> for Template {
+    // TODO: typed: This should be a more useful type
     type Error = std::convert::Infallible;
     fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
         if let Some(ctxt) = req.rocket().state::<ContextManager>() {

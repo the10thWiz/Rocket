@@ -1,5 +1,4 @@
 use std::convert::Infallible;
-use std::fmt;
 use std::fs::File;
 use std::io::Cursor;
 use std::sync::Arc;

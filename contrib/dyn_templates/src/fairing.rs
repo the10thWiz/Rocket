@@ -1,7 +1,6 @@
 use rocket::{Rocket, Build, Orbit};
 use rocket::fairing::{self, Fairing, Info, Kind};
 use rocket::figment::{Source, value::magic::RelativePathBuf};
-use rocket::catcher::TypedError;
 use rocket::trace::Trace;
 
 use crate::context::{Callback, Context, ContextManager};

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use transient::TypeId;
 
-use crate::catcher::TypedError;
 use crate::request::Request;
 use crate::http::{Method, Status};
 
@@ -54,22 +53,6 @@ impl Router {
             .flat_map(move |routes| routes.iter().filter(move |r| r.matches(req)))
     }
 
-    // TODO: Catch order:
-    // There are four matches (ignoring uri base):
-    // - Error type & Status
-    // - Error type & any status
-    // - Any type & Status
-    // - Any type & any status
-    //
-    // What order should these be selected in?
-    // Master prefers longer paths over any other match. However, types could
-    // be considered more important
-    // - Error type, longest path, status
-    // - Any type, longest path, status
-    // !! There are actually more than 4 - b/c we need to check source()
-    // What we would want to do, is gather the catchers that match the source() x 5,
-    // and select the one with the longest path. If none exist, try without error.
-
     // For many catchers, using aho-corasick or similar should be much faster.
     pub fn catch<'r>(&self, status: Status, req: &'r Request<'r>, error: Option<TypeId>)
         -> Option<&Catcher>
@@ -110,6 +93,8 @@ impl Router {
 
 #[cfg(test)]
 mod test {
+    use transient::Transient;
+
     use super::*;
 
     use crate::route::dummy_handler;
@@ -561,10 +546,11 @@ mod test {
         );
     }
 
-    fn router_with_catchers(catchers: &[(Option<u16>, &str)]) -> Router {
+    fn router_with_catchers(catchers: &[(Option<u16>, &str, Option<TypeId>)]) -> Router {
         let mut router = Router::new();
-        for (code, base) in catchers {
-            let catcher = Catcher::new(*code, crate::catcher::dummy_handler);
+        for (code, base, error_type) in catchers {
+            let mut catcher = Catcher::new(*code, crate::catcher::dummy_handler);
+            catcher.error_type = error_type.map(|t| (t, ""));
             router.add_catcher(catcher.map_base(|_| base.to_string()).unwrap());
         }
 
@@ -581,102 +567,127 @@ mod test {
 
     macro_rules! assert_catcher_routing {
         (
-            catch: [$(($code:expr, $uri:expr)),+],
+            catch: [$(($code:expr, $uri:expr, $type:expr)),+],
             reqs: [$($r:expr),+],
-            with: [$(($ecode:expr, $euri:expr)),+]
+            with: [$(($ecode:expr, $euri:expr, $etype:expr)),+]
         ) => ({
-            let catchers = vec![$(($code.into(), $uri)),+];
+            let catchers = vec![$(($code.into(), $uri, $type)),+];
             let requests = vec![$($r),+];
-            let expected = vec![$(($ecode.into(), $euri)),+];
+            let expected = vec![$(($ecode.into(), $euri, $etype)),+];
 
             let router = router_with_catchers(&catchers);
             for (req, expected) in requests.iter().zip(expected.iter()) {
                 let req_status = Status::from_code(req.0).expect("valid status");
                 // TODO: write test cases for typed variant
-                let catcher = catcher(&router, req_status, req.1, None).expect("some catcher");
+                let catcher = catcher(&router, req_status, req.1, req.2).expect("some catcher");
                 assert_eq!(catcher.code, expected.0,
                     "\nmatched {:?}, expected {:?} for req {:?}", catcher, expected, req);
 
                 assert_eq!(catcher.base.path(), expected.1,
                     "\nmatched {:?}, expected {:?} for req {:?}", catcher, expected, req);
+
+                assert_eq!(catcher.error_type.map(|(t, _)| t), expected.2,
+                    "\nmatched {:?}, expected {:?} for req {:?}", catcher, expected, req);
             }
         })
     }
 
+    #[derive(Transient)]
+    struct A;
+    #[derive(Transient)]
+    struct B;
+
     #[test]
     fn test_catcher_routing() {
+        let a = TypeId::of::<A>();
+        let b = TypeId::of::<B>();
         // Check that the default `/` catcher catches everything.
         assert_catcher_routing! {
-            catch: [(None, "/")],
-            reqs: [(404, "/a/b/c"), (500, "/a/b"), (415, "/a/b/d"), (422, "/a/b/c/d?foo")],
-            with: [(None, "/"), (None, "/"), (None, "/"), (None, "/")]
+            catch: [(None, "/", None)],
+            reqs: [(404, "/a/b/c", None), (500, "/a/b", None), (415, "/a/b/d", None), (422, "/a/b/c/d?foo", None)],
+            with: [(None, "/", None), (None, "/", None), (None, "/", None), (None, "/", None)]
+        }
+
+        // Check that typed catchers only match exact requests
+        assert_catcher_routing! {
+            catch: [(None, "/", None), (None, "/", Some(a)), (None, "/", Some(b))],
+            reqs: [
+                (404, "/a/b/c", None), (500, "/a/b", None), (415, "/a/b/d", None), (422, "/a/b/c/d?foo", None),
+                (404, "/a/b/c", Some(a)), (500, "/a/b", Some(a)), (415, "/a/b/d", Some(a)), (422, "/a/b/c/d?foo", Some(a)),
+                (404, "/a/b/c", Some(b)), (500, "/a/b", Some(b)), (415, "/a/b/d", Some(b)), (422, "/a/b/c/d?foo", Some(b))
+            ],
+            with: [
+                (None, "/", None), (None, "/", None), (None, "/", None), (None, "/", None),
+                (None, "/", Some(a)), (None, "/", Some(a)), (None, "/", Some(a)), (None, "/", Some(a)),
+                (None, "/", Some(b)), (None, "/", Some(b)), (None, "/", Some(b)), (None, "/", Some(b))
+            ]
         }
 
         // Check prefixes when they're exact.
         assert_catcher_routing! {
-            catch: [(None, "/"), (None, "/a"), (None, "/a/b")],
+            catch: [(None, "/", None), (None, "/a", None), (None, "/a/b", None)],
             reqs: [
-                (404, "/"), (500, "/"),
-                (404, "/a"), (500, "/a"),
-                (404, "/a/b"), (500, "/a/b")
+                (404, "/", None), (500, "/", None),
+                (404, "/a", None), (500, "/a", None),
+                (404, "/a/b", None), (500, "/a/b", None)
             ],
             with: [
-                (None, "/"), (None, "/"),
-                (None, "/a"), (None, "/a"),
-                (None, "/a/b"), (None, "/a/b")
+                (None, "/", None), (None, "/", None),
+                (None, "/a", None), (None, "/a", None),
+                (None, "/a/b", None), (None, "/a/b", None)
             ]
         }
 
         // Check prefixes when they're not exact.
         assert_catcher_routing! {
-            catch: [(None, "/"), (None, "/a"), (None, "/a/b")],
+            catch: [(None, "/", None), (None, "/a", None), (None, "/a/b", None)],
             reqs: [
-                (404, "/foo"), (500, "/bar"), (422, "/baz/bar"), (418, "/poodle?yes"),
-                (404, "/a/foo"), (500, "/a/bar/baz"), (510, "/a/c"), (423, "/a/c/b"),
-                (404, "/a/b/c"), (500, "/a/b/c/d"), (500, "/a/b?foo"), (400, "/a/b/yes")
+                (404, "/foo", None), (500, "/bar", None), (422, "/baz/bar", None), (418, "/poodle?yes", None),
+                (404, "/a/foo", None), (500, "/a/bar/baz", None), (510, "/a/c", None), (423, "/a/c/b", None),
+                (404, "/a/b/c", None), (500, "/a/b/c/d", None), (500, "/a/b?foo", None), (400, "/a/b/yes", None)
             ],
             with: [
-                (None, "/"), (None, "/"), (None, "/"), (None, "/"),
-                (None, "/a"), (None, "/a"), (None, "/a"), (None, "/a"),
-                (None, "/a/b"), (None, "/a/b"), (None, "/a/b"), (None, "/a/b")
+                (None, "/", None), (None, "/", None), (None, "/", None), (None, "/", None),
+                (None, "/a", None), (None, "/a", None), (None, "/a", None), (None, "/a", None),
+                (None, "/a/b", None), (None, "/a/b", None), (None, "/a/b", None), (None, "/a/b", None)
             ]
         }
 
         // Check that we prefer specific to default.
         assert_catcher_routing! {
-            catch: [(400, "/"), (404, "/"), (None, "/")],
+            catch: [(400, "/", None), (404, "/", None), (None, "/", None)],
             reqs: [
-                (400, "/"), (400, "/bar"), (400, "/foo/bar"),
-                (404, "/"), (404, "/bar"), (404, "/foo/bar"),
-                (405, "/"), (405, "/bar"), (406, "/foo/bar")
+                (400, "/", None), (400, "/bar", None), (400, "/foo/bar", None),
+                (404, "/", None), (404, "/bar", None), (404, "/foo/bar", None),
+                (405, "/", None), (405, "/bar", None), (406, "/foo/bar", None)
             ],
             with: [
-                (400, "/"), (400, "/"), (400, "/"),
-                (404, "/"), (404, "/"), (404, "/"),
-                (None, "/"), (None, "/"), (None, "/")
+                (400, "/", None), (400, "/", None), (400, "/", None),
+                (404, "/", None), (404, "/", None), (404, "/", None),
+                (None, "/", None), (None, "/", None), (None, "/", None)
             ]
         }
 
         // Check that we prefer longer prefixes over specific.
         assert_catcher_routing! {
-            catch: [(None, "/a/b"), (404, "/a"), (422, "/a")],
+            catch: [(None, "/a/b", None), (404, "/a", None), (422, "/a", None)],
             reqs: [
-                (404, "/a/b"), (404, "/a/b/c"), (422, "/a/b/c"),
-                (404, "/a"), (404, "/a/c"), (404, "/a/cat/bar"),
-                (422, "/a"), (422, "/a/c"), (422, "/a/cat/bar")
+                (404, "/a/b", None), (404, "/a/b/c", None), (422, "/a/b/c", None),
+                (404, "/a", None), (404, "/a/c", None), (404, "/a/cat/bar", None),
+                (422, "/a", None), (422, "/a/c", None), (422, "/a/cat/bar", None)
             ],
             with: [
-                (None, "/a/b"), (None, "/a/b"), (None, "/a/b"),
-                (404, "/a"), (404, "/a"), (404, "/a"),
-                (422, "/a"), (422, "/a"), (422, "/a")
+                (None, "/a/b", None), (None, "/a/b", None), (None, "/a/b", None),
+                (404, "/a", None), (404, "/a", None), (404, "/a", None),
+                (422, "/a", None), (422, "/a", None), (422, "/a", None)
             ]
         }
 
         // Just a fun one.
         assert_catcher_routing! {
-            catch: [(None, "/"), (None, "/a/b"), (500, "/a/b/c"), (500, "/a/b")],
-            reqs: [(404, "/a/b/c"), (500, "/a/b"), (400, "/a/b/d"), (500, "/a/b/c/d?foo")],
-            with: [(None, "/a/b"), (500, "/a/b"), (None, "/a/b"), (500, "/a/b/c")]
+            catch: [(None, "/", None), (None, "/a/b", None), (500, "/a/b/c", None), (500, "/a/b", None)],
+            reqs: [(404, "/a/b/c", None), (500, "/a/b", None), (400, "/a/b/d", None), (500, "/a/b/c/d?foo", None)],
+            with: [(None, "/a/b", None), (500, "/a/b", None), (None, "/a/b", None), (500, "/a/b/c", None)]
         }
     }
 }

@@ -1,9 +1,9 @@
 use quote::ToTokens;
 use devise::{*, ext::{TypeExt, SpanDiagnosticExt}};
 use proc_macro2::{Span, TokenStream};
-use syn::{Ident, Lifetime, Type};
+use syn::Lifetime;
 
-use crate::{exports::*, syn_ext::IdentExt};
+use crate::exports::*;
 use crate::syn_ext::{TypeExt as _, GenericsExt as _};
 use crate::http_codegen::{ContentType, Status};
 
@@ -53,7 +53,7 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                 }
 
                 let error_outcome = match fields.parent {
-                    FieldParent::Variant(p) => {
+                    FieldParent::Variant(_p) => {
                         // let name = p.parent.ident.append("Error");
                         // let var_name = &p.ident;
                         // quote! { #name::#var_name(e) }
@@ -138,6 +138,7 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                 quote!{ #_catcher::AnyError<'r> }
             })
         )
+        // TODO: typed: We should generate this type, to avoid double-boxing the error
         // .outer_mapper(MapperBuild::new()
         //     .enum_map(|_, item| {
         //         let name = item.ident.append("Error");
@@ -216,25 +217,25 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
         .to_tokens()
 }
 
-fn generic_used(ident: &Ident, res_types: &[Type]) -> bool {
-    res_types.iter().any(|t| !t.is_concrete(&[ident]))
-}
+// fn generic_used(ident: &Ident, res_types: &[Type]) -> bool {
+//     res_types.iter().any(|t| !t.is_concrete(&[ident]))
+// }
 
-fn responder_types(fields: Fields<'_>) -> Vec<Type> {
-    let generic_idents = fields.parent.input().generics().type_idents();
-    let lifetime = |ty: &syn::Type| syn::Lifetime::new("'o", ty.span());
-    let mut types = fields.iter()
-        .map(|f| (f, &f.field.inner.ty))
-        .map(|(f, ty)| (f, ty.with_replaced_lifetimes(lifetime(ty))));
+// fn responder_types(fields: Fields<'_>) -> Vec<Type> {
+//     let generic_idents = fields.parent.input().generics().type_idents();
+//     let lifetime = |ty: &syn::Type| syn::Lifetime::new("'o", ty.span());
+//     let mut types = fields.iter()
+//         .map(|f| (f, &f.field.inner.ty))
+//         .map(|(f, ty)| (f, ty.with_replaced_lifetimes(lifetime(ty))));
 
-    let mut bounds = vec![];
-    if let Some((_, ty)) = types.next() {
-        if !ty.is_concrete(&generic_idents) {
-            bounds.push(ty);
-        }
-    }
-    bounds
-}
+//     let mut bounds = vec![];
+//     if let Some((_, ty)) = types.next() {
+//         if !ty.is_concrete(&generic_idents) {
+//             bounds.push(ty);
+//         }
+//     }
+//     bounds
+// }
 
 fn bounds_from_fields(fields: Fields<'_>) -> Result<TokenStream> {
     let generic_idents = fields.parent.input().generics().type_idents();
