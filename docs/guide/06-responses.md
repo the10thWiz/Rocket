@@ -318,15 +318,14 @@ async fn files(file: PathBuf) -> Option<NamedFile> {
 
 ### `Result`
 
-`Result` is another _wrapping_ responder: a `Result<T, E>` can only be returned
-when `T` implements `Responder` and `E` implements `Responder`.
+`Result` is a special responder, used to throw typed errors, so that they can
+later be caught by a typed catcher. `Result<T, E>` can only be used as a
+responder when `T` implements `Responder` and `E` implements `TypedError`.
 
-The wrapped `Responder` in `Ok` or `Err`, whichever it might be, is used to
-respond to the client. This means that the responder can be chosen dynamically
-at run-time, and two different kinds of responses can be used depending on the
-circumstances. Revisiting our file server, for instance, we might wish to
-provide more feedback to the user when a file isn't found. We might do this as
-follows:
+The wrapped `Responder` in `Ok` will be used to respond directly to the client,
+but an `Err` value can be caught by a typed catcher. Revisiting our file server,
+for instance, we might wish to format error values when the file isn't found.
+We might do this as follows:
 
 ```rust
 # #[macro_use] extern crate rocket;
@@ -336,10 +335,17 @@ follows:
 use rocket::fs::NamedFile;
 use rocket::response::status::NotFound;
 
+// `NotFound` is a wrapper over either responders or typed errors, that
+// sets the status to 404.
 #[get("/<file..>")]
-async fn files(file: PathBuf) -> Result<NamedFile, NotFound<String>> {
+async fn files(file: PathBuf) -> Result<NamedFile, NotFound<std::io::Error>> {
     let path = Path::new("static/").join(file);
-    NamedFile::open(&path).await.map_err(|e| NotFound(e.to_string()))
+    NamedFile::open(&path).await.map_err(|e| NotFound(e))
+}
+
+#[catch(404, error = "<e>")]
+fn catch_std_io(e: &std::io::Error) -> String {
+    format!("{}", e)
 }
 ```
 
