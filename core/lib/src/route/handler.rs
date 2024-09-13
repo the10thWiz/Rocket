@@ -175,10 +175,8 @@ impl<F: Clone + Sync + Send + 'static> Handler for F
 impl<'r, 'o: 'r> Outcome<'o> {
     /// Return the `Outcome` of response to `req` from `responder`.
     ///
-    // TODO: docs
-    /// If the responder returns `Ok`, an outcome of `Success` is returned with
-    /// the response. If the responder returns `Err`, an outcome of `Error` is
-    /// returned with the status code.
+    /// Converts both Forwards and Errors to Errors, with the same status,
+    /// (and the appropriate error type).
     ///
     /// # Example
     ///
@@ -203,33 +201,6 @@ impl<'r, 'o: 'r> Outcome<'o> {
             response::Outcome::Forward(status) => Outcome::Error((status, None)),
         }
     }
-
-    // TODO: does this still make sense
-    // /// Return the `Outcome` of response to `req` from `responder`.
-    // ///
-    // /// If the responder returns `Ok`, an outcome of `Success` is returned with
-    // /// the response. If the responder returns `Err`, an outcome of `Error` is
-    // /// returned with the status code.
-    // ///
-    // /// # Example
-    // ///
-    // /// ```rust
-    // /// use rocket::{Request, Data, route};
-    // ///
-    // /// fn str_responder<'r>(req: &'r Request, _: Data<'r>) -> route::Outcome<'r> {
-    // ///     route::Outcome::from(req, "Hello, world!")
-    // /// }
-    // /// ```
-    // #[inline]
-    // pub fn try_from<R, E>(req: &'r Request<'_>, result: Result<R, E>) -> Outcome<'r>
-    //     where R: Responder<'r, 'o>, E: std::fmt::Debug
-    // {
-    //     let responder = result.map_err(crate::response::Debug);
-    //     match responder.respond_to(req) {
-    //         Ok(response) => Outcome::Success(response),
-    //         Err(status) => Outcome::Error((status, Box::new(()))),
-    //     }
-    // }
 
     /// Return an `Outcome` of `Error` with the status code `code`. This is
     /// equivalent to `Outcome::error_val(code, ())`.

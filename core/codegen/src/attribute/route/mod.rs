@@ -123,7 +123,7 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
                 return #Outcome::Forward((
                     #__data,
                     #Status::UnprocessableEntity,
-                    __e.val
+                    __e.val.ok()
                 ));
             }
 
@@ -135,7 +135,7 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 fn request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, display_hack, FromRequest, Outcome, resolve_error, _None
+        __req, __data, _request, display_hack, FromRequest, Outcome, TypedError, resolve_error, _None
     );
 
     quote_spanned! { ty.span() =>
@@ -156,19 +156,26 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
             #[allow(unreachable_code)]
             #Outcome::Error((__c, __e)) => {
                 // TODO: allocation: see next
-                let reason = ::std::format!("{}", #display_hack!(&__e));
+                // let reason = ::std::format!("{}", #display_hack!(&__e));
                 let __err = #resolve_error!(__e);
+                let __err_ptr = match &__err.val {
+                    Err(r) => &r.0,
+                    // SAFETY: This is a pointer to __e (after moving it into a box),
+                    // so it's safe to cast it to the same type. If #ty implements
+                    // TypedError, we could downcast, but we can't write that if it doesn't.
+                    Ok(b) => unsafe { &*(b.as_ref() as *const dyn #TypedError<'_>).cast() },
+                };
                 ::rocket::trace::info!(
                     name: "failure",
                     target: concat!("rocket::codegen::route::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
-                    reason,
+                    reason = %#display_hack!(__err_ptr),
                     error_type = __err.name,
                     "request guard failed"
                 );
 
-                return #Outcome::Error((__c, __err.val));
+                return #Outcome::Error((__c, __err.val.ok()));
             }
         };
     }
@@ -178,22 +185,29 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
     let (i, name, ty) = (guard.index, &guard.name, &guard.ty);
     define_spanned_export!(ty.span() =>
         __req, __data, _request, _None, _Some, _Ok, _Err,
-        Outcome, FromSegments, FromParam, Status, display_hack, resolve_error
+        Outcome, FromSegments, FromParam, Status, TypedError, display_hack, resolve_error
     );
 
     // Returned when a dynamic parameter fails to parse.
     let parse_error = quote!({
         let __err = #resolve_error!(__error);
+        let __err_ptr = match &__err.val {
+            Err(r) => &r.0,
+            // SAFETY: This is a pointer to __e (after moving it into a box),
+            // so it's safe to cast it to the same type. If #ty implements
+            // TypedError, we could downcast, but we can't write that if it doesn't.
+            Ok(b) => unsafe { &*(b.as_ref() as *const dyn #TypedError<'_>).cast() },
+        };
         ::rocket::trace::info!(
             name: "forward",
             target: concat!("rocket::codegen::route::", module_path!()),
             parameter = #name,
-            reason = __reason,
+            reason = %#display_hack!(__err_ptr),
             error_type = __err.name,
             "path guard forwarding"
         );
 
-        #Outcome::Forward((#__data, #Status::UnprocessableEntity, __err.val))
+        #Outcome::Forward((#__data, #Status::UnprocessableEntity, __err.val.ok()))
     });
 
     // All dynamic parameters should be found if this function is being called;
@@ -207,7 +221,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
                     #_Err(__error) => {
                         // TODO: allocation: which is needed since the actual
                         // `__error` is boxed up for typed catchers
-                        let __reason = ::std::format!("{}", #display_hack!(&__error));
+                        // let __reason = ::std::format!("{}", #display_hack!(&__error));
                         let __error = #_request::FromParamError::new(__s, __error);
                         return #parse_error;
                     }
@@ -235,7 +249,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
                 #[allow(unreachable_code)]
                 #_Err(__error) => {
                     // TODO: allocation: (see above)
-                    let __reason = ::std::format!("{}", #display_hack!(&__error));
+                    // let __reason = ::std::format!("{}", #display_hack!(&__error));
                     let __error = #_request::FromSegmentsError::new(
                             #__req.routed_segments(#i..),
                             __error
@@ -253,7 +267,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 fn data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, display_hack, FromData, Outcome, resolve_error, _None);
+        __req, __data, display_hack, FromData, Outcome, TypedError, resolve_error, _None);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
@@ -273,19 +287,26 @@ fn data_guard_decl(guard: &Guard) -> TokenStream {
             #[allow(unreachable_code)]
             #Outcome::Error((__c, __e)) => {
                 // TODO: allocation: see next
-                let reason = ::std::format!("{}", #display_hack!(&__e));
+                // let reason = ::std::format!("{}", #display_hack!(&__e));
                 let __e = #resolve_error!(__e);
+                let __err_ptr = match &__e.val {
+                    Err(r) => &r.0,
+                    // SAFETY: This is a pointer to __e (after moving it into a box),
+                    // so it's safe to cast it to the same type. If #ty implements
+                    // TypedError, we could downcast, but we can't write that if it doesn't.
+                    Ok(b) => unsafe { &*(b.as_ref() as *const dyn #TypedError<'_>).cast() },
+                };
                 ::rocket::trace::info!(
                     name: "failure",
                     target: concat!("rocket::codegen::route::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
-                    reason,
+                    reason = %#display_hack!(__err_ptr),
                     error_type = __e.name,
                     "data guard failed"
                 );
 
-                return #Outcome::Error((__c, __e.val));
+                return #Outcome::Error((__c, __e.val.ok()));
             }
         };
     }

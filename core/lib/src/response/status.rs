@@ -29,9 +29,9 @@ use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 use std::borrow::Cow;
 
-use transient::Static;
+use transient::{Inv, Transient};
 
-use crate::catcher::TypedError;
+use crate::catcher::{AsAny, TypedError};
 use crate::outcome::try_outcome;
 use crate::request::Request;
 use crate::response::{self, Responder, Response};
@@ -184,14 +184,6 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Created<R> {
     }
 }
 
-// TODO: do we want this?
-impl<R: Send + Sync + 'static> TypedError<'_> for Created<R> {
-    fn status(&self) -> Status {
-        Status::Created
-    }
-}
-impl<R: 'static> Static for Created<R> {}
-
 /// Sets the status of the response to 204 No Content.
 ///
 /// The response body will be empty.
@@ -265,6 +257,13 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for (Status, R) {
     }
 }
 
+// SAFETY: Status is static, so doesn't impact this impl,
+// so Custom is simply a wrapper over R
+unsafe impl<R: Transient> Transient for Custom<R> {
+    type Static = Custom<R::Static>;
+    type Transience = R::Transience;
+}
+
 macro_rules! status_response {
     ($T:ident $kind:expr) => {
         /// Sets the status of the response to
@@ -311,13 +310,23 @@ macro_rules! status_response {
             }
         }
 
-        // TODO: do we want this?
-        impl<R: Send + Sync + 'static> TypedError<'_> for $T<R> {
+        impl<'r, R: TypedError<'r> + Send + Sync + 'static> TypedError<'r> for $T<R>
+            where $T<R>: AsAny<Inv<'r>>
+        {
             fn status(&self) -> Status {
                 Status::$T
             }
+
+            fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> {
+                Some(&self.0)
+            }
         }
-        impl<R: 'static> Static for $T<R> {}
+
+        // SAFETY: This is a thin wrapper over R, so we rely on R's impl
+        unsafe impl<R: Transient> Transient for $T<R> {
+            type Static = Created<R::Static>;
+            type Transience = R::Transience;
+        }
     }
 }
 

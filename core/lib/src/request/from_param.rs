@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::FromStr;
 use std::path::PathBuf;
 
@@ -252,13 +253,28 @@ impl<'a, T: TypedError<'a>> TypedError<'a> for FromParamError<'a, T>
     }
 }
 
-// SAFETY: Since `T` `CanTransendTo` `Inv<'a>`, it is safe to
+// SAFETY: Since `T` (and &'a str) `CanTransendTo` `Inv<'a>`, it is safe to
 // transend `FromParamError<'a, T>` to `Inv<'a>`
 unsafe impl<'a, T: Transient + 'a> Transient for FromParamError<'a, T>
     where T::Transience: CanTranscendTo<Inv<'a>>,
 {
     type Static = FromParamError<'static, T::Static>;
     type Transience = Inv<'a>;
+}
+
+impl<'a, T: fmt::Debug> fmt::Debug for FromParamError<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FromParamError")
+            .field("raw", &self.raw)
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, T: fmt::Display> fmt::Display for FromParamError<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
 }
 
 impl<'a> FromParam<'a> for &'a str {
@@ -403,6 +419,7 @@ impl<'a, T> FromSegmentsError<'a, T> {
     }
 }
 
+
 impl<'a, T: TypedError<'a>> TypedError<'a> for FromSegmentsError<'a, T>
     where Self: Transient<Transience = Inv<'a>>
 {
@@ -419,13 +436,28 @@ impl<'a, T: TypedError<'a>> TypedError<'a> for FromSegmentsError<'a, T>
     }
 }
 
-// SAFETY: Since `T` `CanTransendTo` `Inv<'a>`, it is safe to
+// SAFETY: Since `T` (and Segments<'a, Path>) `CanTransendTo` `Inv<'a>`, it is safe to
 // transend `FromSegmentsError<'a, T>` to `Inv<'a>`
 unsafe impl<'a, T: Transient + 'a> Transient for FromSegmentsError<'a, T>
     where T::Transience: CanTranscendTo<Inv<'a>>,
 {
     type Static = FromParamError<'static, T::Static>;
     type Transience = Inv<'a>;
+}
+
+impl<'a, T: fmt::Debug> fmt::Debug for FromSegmentsError<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FromSegmentsError")
+            .field("raw", &self.raw)
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, T: fmt::Display> fmt::Display for FromSegmentsError<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
 }
 
 impl<'r> FromSegments<'r> for Segments<'r, Path> {

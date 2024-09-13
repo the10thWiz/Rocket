@@ -1,4 +1,4 @@
-use std::io;
+use std::{fmt, io};
 use std::mem::transmute;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -41,6 +41,12 @@ pub struct ErasedError<'r> {
     error: Option<Pin<Box<dyn TypedError<'r> + 'r>>>,
 }
 
+impl fmt::Debug for ErasedError<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<dyn TypedError>")
+    }
+}
+
 impl<'r> ErasedError<'r> {
     pub fn new() -> Self {
         Self { error: None }
@@ -65,7 +71,7 @@ impl<'r> ErasedError<'r> {
     }
 }
 
-// TODO: #[derive(Debug)]
+#[derive(Debug)]
 pub struct ErasedResponse {
     // XXX: SAFETY: This (dependent) field must come first due to drop order!
     response: Response<'static>,

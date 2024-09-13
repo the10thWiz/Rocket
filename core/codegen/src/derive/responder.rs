@@ -1,18 +1,23 @@
+// use quote::ToTokens;
+// use crate::{exports::{*, Status as _Status}, syn_ext::IdentExt};
+// use devise::{*, ext::{TypeExt, SpanDiagnosticExt}};
+// use crate::http_codegen::{ContentType, Status};
+
+use syn::{Ident, Lifetime};
 use quote::ToTokens;
 use devise::{*, ext::{TypeExt, SpanDiagnosticExt}};
 use proc_macro2::{Span, TokenStream};
-use syn::Lifetime;
 
-use crate::exports::*;
+use crate::{exports::{*, Status as _Status}, syn_ext::IdentExt};
 use crate::syn_ext::{TypeExt as _, GenericsExt as _};
 use crate::http_codegen::{ContentType, Status};
+
 
 #[derive(Debug, Default, FromMeta)]
 struct ItemAttr {
     content_type: Option<SpanWrapped<ContentType>>,
-    status: Option<SpanWrapped<Status>>,
+    status: Option<SpanWrapped<Status>>,            
 }
-
 #[derive(Default, FromMeta)]
 struct FieldAttr {
     ignore: bool,
@@ -26,7 +31,37 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
         .type_bound_mapper(MapperBuild::new()
             .try_enum_map(|m, e| mapper::enum_null(m, e))
             .try_fields_map(|_, fields| {
-                bounds_from_fields(fields)
+                let generic_idents = fields.parent.input().generics().type_idents();
+                let lifetime = |ty: &syn::Type| syn::Lifetime::new("'o", ty.span());
+                let mut types = fields.iter()
+                    .map(|f| (f, &f.field.inner.ty))
+                    .map(|(f, ty)| (f, ty.with_replaced_lifetimes(lifetime(ty))));
+
+                let mut bounds = vec![];
+                if let Some((_, ty)) = types.next() {
+                    if !ty.is_concrete(&generic_idents) {
+                        let span = ty.span();
+                        bounds.push(quote_spanned!(span => #ty: #_response::Responder<'r, 'o>));
+                        bounds.push(quote_spanned!(span =>
+                            <
+                                <#ty as #_response::Responder<'r, 'o>>::Error
+                                as #_catcher::Transient
+                            >::Transience: #_catcher::CanTranscendTo<#_catcher::Inv<'r>>));
+                    }
+                }
+
+                for (f, ty) in types {
+                    let attr = FieldAttr::one_from_attrs("response", &f.attrs)?.unwrap_or_default();
+                    if ty.is_concrete(&generic_idents) || attr.ignore {
+                        continue;
+                    }
+
+                    bounds.push(quote_spanned! { ty.span() =>
+                        #ty: ::std::convert::Into<#_http::Header<'o>>
+                    });
+                }
+
+                Ok(quote!(#(#bounds,)*))
             })
         )
         .validator(ValidatorBuild::new()
@@ -53,11 +88,11 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                 }
 
                 let error_outcome = match fields.parent {
-                    FieldParent::Variant(_p) => {
-                        // let name = p.parent.ident.append("Error");
-                        // let var_name = &p.ident;
-                        // quote! { #name::#var_name(e) }
-                        quote! { #_catcher::AnyError(#_Box::new(e)) }
+                    FieldParent::Variant(p) => {
+                        let name = p.parent.ident.append("Error");
+                        let var_name = &p.ident;
+                        quote! { #name::#var_name(e) }
+                        // quote! { #_catcher::AnyError(#_Box::new(e)) }
                     },
                     _ => quote! { e },
                 };
@@ -124,144 +159,114 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                     <#ty as #_response::Responder<'r, #output_life>>::Error
                 })
             })
-            .enum_map(|_, _item| {
-                // let name = item.ident.append("Error");
-                // let response_types: Vec<_> = item.variants()
-                //     .flat_map(|f| responder_types(f.fields()).into_iter()).collect();
-                // // TODO: add where clauses, and filter for the type params I need
-                // let type_params: Vec<_> = item.generics
-                //     .type_params()
-                //     .map(|p| &p.ident)
-                //     .filter(|p| generic_used(p, &response_types))
-                //     .collect();
-                // quote!{ #name<'r, 'o, #(#type_params,)*> }
-                quote!{ #_catcher::AnyError<'r> }
+            .enum_map(|_, item| {
+                let name = item.ident.append("Error");
+                let type_params: Vec<_> = item.generics.type_params().map(|p| &p.ident).collect();
+                let types = item.variants()
+                    .map(|f| {
+                        let ty = f.fields()
+                        .iter()
+                        .next()
+                        .expect("Variants must have at least one field")
+                        .ty
+                        .with_replaced_lifetimes(Lifetime::new("'o", f.span()));
+
+                        let alt = ty.with_replaced_lifetimes(Lifetime::new("'a", f.span()));
+                        // TODO: typed: Check this logic - it seems to work.
+                        // This isn't safety critical - if it's wrong, it causes compilation failures.
+                        let output = if ty.is_concrete(&type_params) &&  alt == ty {
+                            quote! { 'static }
+                        } else {
+                            quote! { 'o }
+                        };
+                        quote! { <#ty as #_response::Responder<'r, #output>>::Error, }
+                    });
+                quote!{ #name<'r, #(#types)*> }
             })
         )
-        // TODO: typed: We should generate this type, to avoid double-boxing the error
-        // .outer_mapper(MapperBuild::new()
-        //     .enum_map(|_, item| {
-        //         let name = item.ident.append("Error");
-        //         let variants = item.variants().map(|d| {
-        //             let var_name = &d.ident;
-        //             let (old, ty) = d.fields().iter().next().map(|f| {
-        //                 let ty = f.ty.with_replaced_lifetimes(
-        //                        Lifetime::new("'o", Span::call_site()));
-        //                 (f.ty.clone(), ty)
-        //             }).expect("have at least one field");
-        //             let output_life = if old == ty {
-        //                 quote! { 'static }
-        //             } else {
-        //                 quote! { 'o }
-        //             };
-        //             quote!{
-        //                 #var_name(<#ty as #_response::Responder<'r, #output_life>>::Error),
-        //             }
-        //         });
-        //         let source = item.variants().map(|d| {
-        //             let var_name = &d.ident;
-        //             quote!{
-        //                 Self::#var_name(v) => #_Some(v),
-        //             }
-        //         });
-        //         let response_types: Vec<_> = item.variants()
-        //             .flat_map(|f| responder_types(f.fields()).into_iter()).collect();
-        //         // TODO: add where clauses, and filter for the type params I need
-        //         let type_params: Vec<_> = item.generics
-        //             .type_params()
-        //             .map(|p| &p.ident)
-        //             .filter(|p| generic_used(p, &response_types))
-        //             .collect();
-        //         let bounds: Vec<_> = item.variants()
-        //             .map(|f| bounds_from_fields(f.fields()).expect("Bounds must be valid"))
-        //             .collect();
-        //         let bounds: Vec<_> = item.variants()
-        //             .flat_map(|f| responder_types(f.fields()).into_iter())
-        //             .map(|t| quote!{#t: #_response::Responder<'r, 'o>,})
-        //             .collect();
-        //         quote!{
-        //             pub enum #name<'r, 'o, #(#type_params: 'r,)*>
-        //                 where #(#bounds)*
-        //             {
-        //                 #(#variants)*
-        //                 UnusedVariant(
-        //                     // Make this variant impossible to construct
-        //                     ::std::convert::Infallible,
-        //                     ::std::marker::PhantomData<&'o ()>,
-        //                 ),
-        //             }
-        //             // TODO: validate this impl - roughly each variant must be (at least) inv
-        //             // wrt a lifetime, since they impl CanTransendTo<Inv<'r>>
-        //             // TODO: also need to add requirements on the type parameters
-        //             unsafe impl<'r, 'o: 'r, #(#type_params: 'r,)*> ::rocket::catcher::Transient
-        //                 for #name<'r, 'o, #(#type_params,)*>
-        //                     where #(#bounds)*
-        //             {
-        //                 type Static = #name<'static, 'static>;
-        //                 type Transience = ::rocket::catcher::Inv<'r>;
-        //             }
-        //             impl<'r, 'o: 'r, #(#type_params,)*> #TypedError<'r>
-        //                 for #name<'r, 'o, #(#type_params,)*>
-        //                     where #(#bounds)*
-        //             {
-        //                 fn source(&self) -> #_Option<&dyn #TypedError<'r>> {
-        //                     match self {
-        //                         #(#source)*
-        //                         Self::UnusedVariant(f, ..) => match *f { }
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //     })
-        // )
+        .outer_mapper(MapperBuild::new()
+            .enum_map(|_, item| {
+                let name = item.ident.append("Error");
+                let type_params: Vec<Ident> =  item.variants()
+                    .map(|var| var.ident.clone())
+                    .collect();
+                let variants_decl = type_params.iter()
+                    .map(|i| quote! { #i(#i), });
+                let static_params = type_params.iter()
+                    .map(|i| quote! { #i::Static });
+                let transient_bounds = type_params.iter()
+                    .map(|i| quote! {
+                        #i: #_catcher::Transient,
+                        <#i as #_catcher::Transient>::Transience: #_catcher::CanTranscendTo<#_catcher::Inv<'r>>,
+                    });
+                let error_bounds = type_params.iter()
+                    .map(|i| quote! {
+                        #i: #_catcher::TypedError<'r>,
+                        #i: #_catcher::Transient,
+                        <#i as #_catcher::Transient>::Transience: #_catcher::CanTranscendTo<#_catcher::Inv<'r>>,
+                    });
+                quote!{
+                    pub enum #name<'r, #(#type_params,)*> {
+                        #(#variants_decl)*
+                        UnusedVariant(
+                            // Make this variant impossible to construct
+                            ::std::convert::Infallible,
+                            // Needed in case no variants use `'o`
+                            ::std::marker::PhantomData<fn(&'r ())>,
+                        ),
+                    }
+                    // SAFETY: Each variant holds a type `T` that must be
+                    // - T: Transient
+                    // - T::Transience: CanTranscendTo<Inv<'r>>
+                    // - T: 'r
+                    // The UnusedVariant has transience Co<'r>, which can transcend to Inv<'r>
+                    // Because each variant can transcend to Inv<'r>, it is safe to transcend
+                    // the enum as a whole to Inv<'r>
+                    unsafe impl<'r, #(#type_params: 'r,)*> ::rocket::catcher::Transient
+                        for #name<'r, #(#type_params,)*>
+                            where #(#transient_bounds)*
+                    {
+                        type Static = #name<'static, #(#static_params,)*>;
+                        type Transience = ::rocket::catcher::Inv<'r>;
+                    }
+
+                    impl<'r, #(#type_params,)*> #TypedError<'r>
+                        for #name<'r, #(#type_params,)*>
+                            where #(#error_bounds)*
+                    {
+                        fn source(&'r self) -> #_Option<&dyn #TypedError<'r>> {
+                            match self {
+                                #(Self::#type_params(v) => v.source(),)*
+                                Self::UnusedVariant(f, ..) => match *f { }
+                            }
+                        }
+
+                        fn name(&self) -> &'static str {
+                            match self {
+                                #(Self::#type_params(v) => v.name(),)*
+                                Self::UnusedVariant(f, ..) => match *f { }
+                            }
+                        }
+
+                        fn respond_to(
+                            &self,
+                            __req: &'r #_request::Request<'_>
+                        ) -> #_Result<#Response<'r>, #_Status> {
+                            match self {
+                                #(Self::#type_params(v) => v.respond_to(__req),)*
+                                Self::UnusedVariant(f, ..) => match *f { }
+                            }
+                        }
+
+                        fn status(&self) -> #_Status {
+                            match self {
+                                #(Self::#type_params(v) => v.status(),)*
+                                Self::UnusedVariant(f, ..) => match *f { }
+                            }
+                        }
+                    }
+                }
+            })
+        )
         .to_tokens()
-}
-
-// fn generic_used(ident: &Ident, res_types: &[Type]) -> bool {
-//     res_types.iter().any(|t| !t.is_concrete(&[ident]))
-// }
-
-// fn responder_types(fields: Fields<'_>) -> Vec<Type> {
-//     let generic_idents = fields.parent.input().generics().type_idents();
-//     let lifetime = |ty: &syn::Type| syn::Lifetime::new("'o", ty.span());
-//     let mut types = fields.iter()
-//         .map(|f| (f, &f.field.inner.ty))
-//         .map(|(f, ty)| (f, ty.with_replaced_lifetimes(lifetime(ty))));
-
-//     let mut bounds = vec![];
-//     if let Some((_, ty)) = types.next() {
-//         if !ty.is_concrete(&generic_idents) {
-//             bounds.push(ty);
-//         }
-//     }
-//     bounds
-// }
-
-fn bounds_from_fields(fields: Fields<'_>) -> Result<TokenStream> {
-    let generic_idents = fields.parent.input().generics().type_idents();
-    let lifetime = |ty: &syn::Type| syn::Lifetime::new("'o", ty.span());
-    let mut types = fields.iter()
-        .map(|f| (f, &f.field.inner.ty))
-        .map(|(f, ty)| (f, ty.with_replaced_lifetimes(lifetime(ty))));
-
-    let mut bounds = vec![];
-    if let Some((_, ty)) = types.next() {
-        if !ty.is_concrete(&generic_idents) {
-            let span = ty.span();
-            bounds.push(quote_spanned!(span => #ty: #_response::Responder<'r, 'o>));
-        }
-    }
-
-    for (f, ty) in types {
-        let attr = FieldAttr::one_from_attrs("response", &f.attrs)?.unwrap_or_default();
-        if ty.is_concrete(&generic_idents) || attr.ignore {
-            continue;
-        }
-
-        bounds.push(quote_spanned! { ty.span() =>
-            #ty: ::std::convert::Into<#_http::Header<'o>>
-        });
-    }
-
-    Ok(quote!(#(#bounds,)*))
 }
