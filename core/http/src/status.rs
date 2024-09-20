@@ -1,6 +1,6 @@
 use std::fmt;
 
-use transient::Transient;
+use transient::Static;
 
 /// Enumeration of HTTP status classes.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -114,11 +114,13 @@ impl StatusClass {
 /// }
 /// # }
 /// ```
-#[derive(Debug, Clone, Copy, Transient)]
+#[derive(Debug, Clone, Copy)]
 pub struct Status {
     /// The HTTP status code associated with this status.
     pub code: u16,
 }
+
+impl Static for Status {}
 
 impl Default for Status {
     fn default() -> Self {

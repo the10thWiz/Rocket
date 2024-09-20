@@ -41,7 +41,7 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
     }
 
     define_spanned_export!(Span::call_site() =>
-        __req, __data, _form, Outcome, _Ok, _Err, _Some, _None, Status, resolve_error
+        __req, __data, _form, Outcome, _Ok, _Err, _Some, _None, Status, resolve_error, _Box
     );
 
     // Record all of the static parameters for later filtering.
@@ -122,8 +122,9 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 
                 return #Outcome::Forward((
                     #__data,
-                    #Status::UnprocessableEntity,
-                    __e.val.ok()
+                    __e.val.unwrap_or_else(|_|
+                        #_Box::new(#Status::UnprocessableEntity)
+                    )
                 ));
             }
 
@@ -135,7 +136,7 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 fn request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, display_hack, FromRequest, Outcome, TypedError, resolve_error, _None
+        __req, __data, _request, display_hack, FromRequest, Outcome, TypedError, resolve_error, _Box, Status
     );
 
     quote_spanned! { ty.span() =>
@@ -151,12 +152,10 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
                     "request guard forwarding"
                 );
 
-                return #Outcome::Forward((#__data, __e, #_None));
+                return #Outcome::Forward((#__data, #_Box::new(__e) as #_Box<dyn #TypedError<'__r>>));
             },
             #[allow(unreachable_code)]
-            #Outcome::Error((__c, __e)) => {
-                // TODO: allocation: see next
-                // let reason = ::std::format!("{}", #display_hack!(&__e));
+            #Outcome::Error(__e) => {
                 let __err = #resolve_error!(__e);
                 let __err_ptr = match &__err.val {
                     Err(r) => &r.0,
@@ -175,7 +174,8 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
                     "request guard failed"
                 );
 
-                return #Outcome::Error((__c, __err.val.ok()));
+                // TODO: Default status
+                return #Outcome::Error(__err.val.unwrap_or_else(|_| #_Box::new(#Status::InternalServerError)));
             }
         };
     }
@@ -184,7 +184,7 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
 fn param_guard_decl(guard: &Guard) -> TokenStream {
     let (i, name, ty) = (guard.index, &guard.name, &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, _None, _Some, _Ok, _Err,
+        __req, __data, _request, _None, _Some, _Ok, _Err, _Box,
         Outcome, FromSegments, FromParam, Status, TypedError, display_hack, resolve_error
     );
 
@@ -207,7 +207,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
             "path guard forwarding"
         );
 
-        #Outcome::Forward((#__data, #Status::UnprocessableEntity, __err.val.ok()))
+        #Outcome::Forward((#__data, __err.val.unwrap_or(#_Box::new(#Status::UnprocessableEntity))))
     });
 
     // All dynamic parameters should be found if this function is being called;
@@ -219,9 +219,6 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
                     #_Ok(__v) => __v,
                     #[allow(unreachable_code)]
                     #_Err(__error) => {
-                        // TODO: allocation: which is needed since the actual
-                        // `__error` is boxed up for typed catchers
-                        // let __reason = ::std::format!("{}", #display_hack!(&__error));
                         let __error = #_request::FromParamError::new(__s, __error);
                         return #parse_error;
                     }
@@ -237,8 +234,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 
                     return #Outcome::Forward((
                         #__data,
-                        #Status::InternalServerError,
-                        #_None
+                        #_Box::new(#Status::InternalServerError),
                     ));
                 }
             }
@@ -248,8 +244,6 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
                 #_Ok(__v) => __v,
                 #[allow(unreachable_code)]
                 #_Err(__error) => {
-                    // TODO: allocation: (see above)
-                    // let __reason = ::std::format!("{}", #display_hack!(&__error));
                     let __error = #_request::FromSegmentsError::new(
                             #__req.routed_segments(#i..),
                             __error
@@ -267,7 +261,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 fn data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, display_hack, FromData, Outcome, TypedError, resolve_error, _None);
+        __req, __data, display_hack, FromData, Outcome, TypedError, Status, resolve_error, _None, _Box);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
@@ -282,12 +276,10 @@ fn data_guard_decl(guard: &Guard) -> TokenStream {
                     "data guard forwarding"
                 );
 
-                return #Outcome::Forward((__d, __e, #_None));
+                return #Outcome::Forward((__d, #_Box::new(__e) as #_Box<dyn #TypedError<'__r>>));
             }
             #[allow(unreachable_code)]
-            #Outcome::Error((__c, __e)) => {
-                // TODO: allocation: see next
-                // let reason = ::std::format!("{}", #display_hack!(&__e));
+            #Outcome::Error(__e) => {
                 let __e = #resolve_error!(__e);
                 let __err_ptr = match &__e.val {
                     Err(r) => &r.0,
@@ -306,7 +298,8 @@ fn data_guard_decl(guard: &Guard) -> TokenStream {
                     "data guard failed"
                 );
 
-                return #Outcome::Error((__c, __e.val.ok()));
+                // TODO: default status
+                return #Outcome::Error(__e.val.unwrap_or_else(|_| #_Box::new(#Status::UnprocessableEntity)));
             }
         };
     }

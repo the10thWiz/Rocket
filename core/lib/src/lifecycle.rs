@@ -114,29 +114,33 @@ impl Rocket<Orbit> {
         } else {
             match self.route(request, data).await {
                 Outcome::Success(response) => response,
-                Outcome::Forward((data, _, _)) if request.method() == Method::Head => {
+                Outcome::Forward((data, _)) if request.method() == Method::Head => {
                     tracing::Span::current().record("autohandled", true);
 
                     // Dispatch the request again with Method `GET`.
                     request._set_method(Method::Get);
                     match self.route(request, data).await {
                         Outcome::Success(response) => response,
-                        Outcome::Error((status, error)) => {
-                            error_ptr.write(error);
+                        Outcome::Error(error) => {
+                            let status = error.status();
+                            error_ptr.write(Some(error));
                             self.dispatch_error(status, request, error_ptr.get()).await
                         },
-                        Outcome::Forward((_, status, error)) => {
-                            error_ptr.write(error);
+                        Outcome::Forward((_, error)) => {
+                            let status = error.status();
+                            error_ptr.write(Some(error));
                             self.dispatch_error(status, request, error_ptr.get()).await
                         },
                     }
                 }
-                Outcome::Forward((_, status, error)) => {
-                    error_ptr.write(error);
+                Outcome::Forward((_, error)) => {
+                    let status = error.status();
+                    error_ptr.write(Some(error));
                     self.dispatch_error(status, request, error_ptr.get()).await
                 },
-                Outcome::Error((status, error)) => {
-                    error_ptr.write(error);
+                Outcome::Error(error) => {
+                    let status = error.status();
+                    error_ptr.write(Some(error));
                     self.dispatch_error(status, request, error_ptr.get()).await
                 },
             }
@@ -222,8 +226,7 @@ impl Rocket<Orbit> {
     ) -> route::Outcome<'r> {
         // Go through all matching routes until we fail or succeed or run out of
         // routes to try, in which case we forward with the last status.
-        let mut status = Status::NotFound;
-        let mut error = None;
+        let mut error: Box<dyn TypedError<'r>> = Box::new(Status::NotFound);
         for route in self.router.route(request) {
             // Retrieve and set the requests parameters.
             route.trace_info();
@@ -238,11 +241,11 @@ impl Rocket<Orbit> {
             outcome.trace_info();
             match outcome {
                 o@Outcome::Success(_) | o@Outcome::Error(_) => return o,
-                Outcome::Forward(forwarded) => (data, status, error) = forwarded,
+                Outcome::Forward(forwarded) => (data, error) = forwarded,
             }
         }
 
-        Outcome::Forward((data, status, error))
+        Outcome::Forward((data, error))
     }
 
     // Invokes the catcher for `status`. Returns the response on success.

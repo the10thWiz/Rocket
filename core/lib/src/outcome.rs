@@ -87,7 +87,6 @@
 //! `None`.
 
 use crate::catcher::TypedError;
-use crate::request;
 use crate::data::{self, Data, FromData};
 use crate::http::Status;
 
@@ -624,15 +623,11 @@ impl<S, E, F> Outcome<S, E, F> {
     }
 }
 
-impl<S, F> Outcome<S, std::convert::Infallible, F> {
-    /// Convenience function to convert the error type from `Infallible`
-    /// to any other type. This is trivially possible, since `Infallible`
-    /// cannot be constructed, so this cannot be an Error variant
-    pub(crate) fn map_err_type<T>(self) -> Outcome<S, T, F> {
-        match self {
-            Self::Success(v) => Outcome::Success(v),
-            Self::Forward(v) => Outcome::Forward(v),
-            Self::Error(e) => match e {},
+impl<S, E, F> From<Result<S, E>> for Outcome<S, E, F> {
+    fn from(value: Result<S, E>) -> Self {
+        match value {
+            Ok(v) => Self::Success(v),
+            Err(v) => Self::Error(v),
         }
     }
 }
@@ -782,7 +777,18 @@ impl<S, E, F> IntoOutcome<Outcome<S, E, F>> for Option<S> {
     }
 }
 
-impl<'r, T: FromData<'r>> IntoOutcome<data::Outcome<'r, T>> for Result<T, T::Error> {
+pub trait WithStatus {
+    type Result;
+    fn with_status(self, status: Status) -> Self::Result;
+}
+impl<T> WithStatus for T {
+    type Result = (Status, T);
+    fn with_status(self, status: Status) -> Self::Result {
+        (status, self)
+    }
+}
+
+impl<'r, E: WithStatus, T: FromData<'r, Error = E::Result>> IntoOutcome<data::Outcome<'r, T>> for Result<T, E> {
     type Error = Status;
     type Forward = (Data<'r>, Status);
 
@@ -790,7 +796,7 @@ impl<'r, T: FromData<'r>> IntoOutcome<data::Outcome<'r, T>> for Result<T, T::Err
     fn or_error(self, error: Status) -> data::Outcome<'r, T> {
         match self {
             Ok(val) => Success(val),
-            Err(err) => Error((error, err))
+            Err(err) => Error(err.with_status(error))
         }
     }
 
@@ -799,27 +805,6 @@ impl<'r, T: FromData<'r>> IntoOutcome<data::Outcome<'r, T>> for Result<T, T::Err
         match self {
             Ok(val) => Success(val),
             Err(_) => Forward((data, forward))
-        }
-    }
-}
-
-impl<S, E> IntoOutcome<request::Outcome<S, E>> for Result<S, E> {
-    type Error = Status;
-    type Forward = Status;
-
-    #[inline]
-    fn or_error(self, error: Status) -> request::Outcome<S, E> {
-        match self {
-            Ok(val) => Success(val),
-            Err(err) => Error((error, err))
-        }
-    }
-
-    #[inline]
-    fn or_forward(self, status: Status) -> request::Outcome<S, E> {
-        match self {
-            Ok(val) => Success(val),
-            Err(_) => Forward(status)
         }
     }
 }

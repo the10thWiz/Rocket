@@ -249,7 +249,7 @@ impl<'a, T: TypedError<'a>> TypedError<'a> for FromParamError<'a, T>
     }
 
     fn status(&self) -> Status {
-        self.error.status()
+        Status::UnprocessableEntity
     }
 }
 
@@ -432,7 +432,7 @@ impl<'a, T: TypedError<'a>> TypedError<'a> for FromSegmentsError<'a, T>
     }
 
     fn status(&self) -> Status {
-        self.error.status()
+        Status::UnprocessableEntity
     }
 }
 

@@ -540,7 +540,9 @@ use rocket::http::Status;
 
 #[derive(Debug, TypedError)]
 enum LoginError {
+    #[error(status = 401)]
     NotLoggedIn,
+    #[error(status = 401)]
     NotAdmin,
 }
 
@@ -552,9 +554,9 @@ impl<'r> FromRequest<'r> for AdminUser {
         if is_logged_in_as_admin(r) {
             Outcome::Success(Self {})
         } else if is_logged_in(r) {
-            Outcome::Error((Status::Unauthorized, LoginError::NotAdmin))
+            Outcome::Error(LoginError::NotAdmin)
         } else {
-            Outcome::Error((Status::Unauthorized, LoginError::NotLoggedIn))
+            Outcome::Error(LoginError::NotLoggedIn)
         }
     }
 }

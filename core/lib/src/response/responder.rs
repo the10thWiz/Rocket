@@ -304,6 +304,8 @@ use super::Outcome;
 /// # fn person() -> Person { Person::new("Bob", 29) }
 /// ```
 pub trait Responder<'r, 'o: 'r> {
+    // TODO: Should this instead be something like `HasStatus`, and we specialize
+    // on whether it implements TypedError?
     type Error: TypedError<'r> + Transient;
 
     /// Returns `Ok` if a `Response` could be generated successfully. Otherwise,
@@ -317,6 +319,8 @@ pub trait Responder<'r, 'o: 'r> {
     /// returned, the error catcher for the given status is retrieved and called
     /// to generate a final error response, which is then written out to the
     /// client.
+    // TODO: This could return `Result<Response, Self::Error>`, and we could use
+    // Self::Error = Status when we want the old behavior
     fn respond_to(self, request: &'r Request<'_>) -> response::Outcome<'o, Self::Error>;
 }
 

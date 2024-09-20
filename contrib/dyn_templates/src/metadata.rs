@@ -152,9 +152,9 @@ impl Sentinel for Metadata<'_> {
 /// (`500`) is returned.
 #[rocket::async_trait]
 impl<'r> FromRequest<'r> for Metadata<'r> {
-    type Error = ();
+    type Error = Status;
 
-    async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, ()> {
+    async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
         request.rocket().state::<ContextManager>()
             .map(|cm| request::Outcome::Success(Metadata(cm)))
             .unwrap_or_else(|| {
@@ -163,7 +163,7 @@ impl<'r> FromRequest<'r> for Metadata<'r> {
                     To use templates, you must attach `Template::fairing()`."
                 );
 
-                request::Outcome::Error((Status::InternalServerError, ()))
+                request::Outcome::Error(Status::InternalServerError)
             })
     }
 }

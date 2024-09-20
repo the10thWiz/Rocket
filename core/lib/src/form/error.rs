@@ -60,7 +60,14 @@ use crate::data::ByteUnit;
 #[serde(transparent)]
 pub struct Errors<'v>(Vec<Error<'v>>);
 
-impl<'r> TypedError<'r> for Errors<'r> { }
+impl<'r> TypedError<'r> for Errors<'r> {
+    fn respond_to(&self, _r: &'r crate::Request<'_>) -> Result<crate::Response<'r>, Status> {
+        Err(self.status())
+    }
+
+    // Calls inherent method impl
+    fn status(&self) -> Status { self.status() }
+}
 
 /// A form error, potentially tied to a specific form field.
 ///
@@ -146,8 +153,6 @@ pub struct Error<'v> {
     /// The entity that caused the error.
     pub entity: Entity,
 }
-
-// impl<'r> TypedError<'r> for Error<'r> { }
 
 /// The kind of form error that occurred.
 ///

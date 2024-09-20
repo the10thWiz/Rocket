@@ -107,6 +107,42 @@ fn json() -> RawTeapotJson {
 
 ### Errors
 
+TODO: This is probably where we should discuss typed errors
+
+Responders may fail instead of generating a response by returning an `Err`. This
+error can then be caught by a typed catcher. Typed errors can also be generated
+by any other step which can reject a request.
+
+Catchers are used to catch errors, and generate an error response. A simple catcher
+for serving a 404 page might look something like this:
+
+```rust
+# #[macro_use] extern crate rocket;
+# fn main() {}
+# use rocket::http::uri::Origin;
+#[catch(404)]
+fn not_found(uri: &Origin<'_>) -> String {
+    format!("{} does not exist.", uri)
+}
+```
+
+A typed catcher is very similar, but specifies an error parameter. This must be
+a reference to the error type. A catcher to respond when an invalid integer in
+a parameter was specified might look something like this:
+
+```rust
+# #[macro_use] extern crate rocket;
+# fn main() {}
+# use rocket::request::FromParamError;
+# use std::num::ParseIntError;
+#[catch(422, error = "<e>")]
+fn invalid_int(e: &FromParamError<'_, ParseIntError>) -> String {
+    format!("{} is not a valid int. {}", e.raw, e.error)
+}
+```
+
+TODO: the following is old
+
 Responders may fail instead of generating a response by returning an `Err` with
 a status code. When this happens, Rocket forwards the request to the [error
 catcher](../requests/#error-catchers) for that status code.

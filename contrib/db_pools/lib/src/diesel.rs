@@ -92,6 +92,31 @@ pub use diesel_async::AsyncMysqlConnection;
 #[cfg(feature = "diesel_postgres")]
 pub use diesel_async::AsyncPgConnection;
 
+use rocket::TypedError;
+
+/// Wrapper type for diesel errors
+#[derive(Debug, TypedError)]
+pub struct DieselError(diesel::result::Error);
+
+impl std::ops::Deref for DieselError {
+    type Target = diesel::result::Error;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<diesel::result::Error> for DieselError {
+    fn as_ref(&self) -> &diesel::result::Error {
+        &self.0
+    }
+}
+
+impl From<diesel::result::Error> for DieselError {
+    fn from(e: diesel::result::Error) -> Self {
+        Self(e)
+    }
+}
+
 /// Alias of a `Result` with an error type of [`Debug`] for a `diesel::Error`.
 ///
 /// `QueryResult` is a [`Responder`](rocket::response::Responder) when `T` (the
@@ -102,7 +127,8 @@ pub use diesel_async::AsyncPgConnection;
 /// See the [module level docs](self#example) for a usage example.
 ///
 /// [`Debug`]: rocket::response::Debug
-pub type QueryResult<T, E = rocket::response::Debug<diesel::result::Error>> = Result<T, E>;
+// TODO: this needs to change
+pub type QueryResult<T, E = DieselError> = Result<T, E>;
 
 /// Type alias for an `async` pool of MySQL connections for `async` [diesel].
 ///

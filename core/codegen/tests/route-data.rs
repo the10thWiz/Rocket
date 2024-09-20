@@ -17,7 +17,7 @@ struct Simple<'r>(&'r str);
 
 #[async_trait]
 impl<'r> FromData<'r> for Simple<'r> {
-    type Error = std::io::Error;
+    type Error = <&'r str as FromData<'r>>::Error;
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> data::Outcome<'r, Self> {
         <&'r str>::from_data(req, data).await.map(Simple)

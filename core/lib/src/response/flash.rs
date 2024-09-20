@@ -1,7 +1,6 @@
 use time::Duration;
 use serde::ser::{Serialize, Serializer, SerializeStruct};
 
-use crate::outcome::IntoOutcome;
 use crate::response::{self, Responder};
 use crate::request::{self, Request, FromRequest};
 use crate::http::{Status, Cookie, CookieJar};
@@ -243,7 +242,7 @@ impl<'r> FlashMessage<'r> {
 /// in `request`: `Option<FlashMessage>`.
 #[crate::async_trait]
 impl<'r> FromRequest<'r> for FlashMessage<'r> {
-    type Error = ();
+    type Error = Status;
 
     async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
         req.cookies().get(FLASH_COOKIE_NAME).ok_or(()).and_then(|cookie| {
@@ -258,7 +257,7 @@ impl<'r> FromRequest<'r> for FlashMessage<'r> {
                 Ok(i) if i <= kv.len() => Ok(Flash::named(&kv[..i], &kv[i..], req)),
                 _ => Err(())
             }
-        }).or_error(Status::BadRequest)
+        }).map_err(|_| Status::BadRequest).into()
     }
 }
 

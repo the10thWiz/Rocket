@@ -1,3 +1,5 @@
+use transient::{CanTranscendTo, Inv, Transient};
+
 use crate::catcher::TypedError;
 use crate::{Request, Data};
 use crate::response::{self, Response, Responder};
@@ -7,8 +9,8 @@ use crate::http::Status;
 /// [`Handler::handle()`].
 pub type Outcome<'r> = crate::outcome::Outcome<
     Response<'r>,
-    (Status, Option<Box<dyn TypedError<'r>>>),
-    (Data<'r>, Status, Option<Box<dyn TypedError<'r>>>)
+    Box<dyn TypedError<'r>>,
+    (Data<'r>, Box<dyn TypedError<'r>>)
 >;
 
 /// Type alias for the return type of a _raw_ [`Route`](crate::Route)'s
@@ -196,9 +198,11 @@ impl<'r, 'o: 'r> Outcome<'o> {
                     type_name = std::any::type_name_of_val(&error),
                     "Typed error to catch"
                 );
-                Outcome::Error((error.status(), Some(Box::new(error))))
+                Outcome::Error(Box::new(error))
             },
-            response::Outcome::Forward(status) => Outcome::Error((status, None)),
+            response::Outcome::Forward(status) => {
+                Outcome::Error(Box::new(status) as Box<dyn TypedError<'r>>)
+            }
         }
     }
 
@@ -219,7 +223,7 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// ```
     #[inline(always)]
     pub fn error(code: Status) -> Outcome<'r> {
-        Outcome::Error((code, None))
+        Outcome::Error(Box::new(code) as Box<dyn TypedError<'r>>)
     }
     /// Return an `Outcome` of `Error` with the status code `code`. This adds
     /// the value for typed catchers.
@@ -241,8 +245,10 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn error_val<T: TypedError<'r>>(code: Status, val: T) -> Outcome<'r> {
-        Outcome::Error((code, Some(Box::new(val))))
+    pub fn error_val<T: TypedError<'r> + Transient>(code: Status, val: T) -> Outcome<'r>
+        where T::Transience: CanTranscendTo<Inv<'r>>
+    {
+        Outcome::Error(Box::new((code, val)))
     }
 
     /// Return an `Outcome` of `Forward` with the data `data` and status
@@ -262,7 +268,7 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// ```
     #[inline(always)]
     pub fn forward(data: Data<'r>, status: Status) -> Outcome<'r> {
-        Outcome::Forward((data, status, None))
+        Outcome::Forward((data, Box::new(status) as Box<dyn TypedError<'r>>))
     }
 
     /// Return an `Outcome` of `Forward` with the data `data`, status
@@ -281,10 +287,11 @@ impl<'r, 'o: 'r> Outcome<'o> {
     /// }
     /// ```
     #[inline(always)]
-    pub fn forward_val<T: TypedError<'r>>(data: Data<'r>, status: Status, val: T)
+    pub fn forward_val<T: TypedError<'r> + Transient>(data: Data<'r>, status: Status, val: T)
         -> Outcome<'r>
+        where T::Transience: CanTranscendTo<Inv<'r>>
     {
-        Outcome::Forward((data, status, Some(Box::new(val))))
+        Outcome::Forward((data, Box::new((status, val)) as Box<dyn TypedError<'r>>))
     }
 }
 

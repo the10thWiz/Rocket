@@ -12,6 +12,9 @@ Whenever a guard fails with a type, such as a `FromParam`, `FromRequest`, etc
 implementation, the error type is boxed up, and can be retrieved by catchers.
 This well-requested feature makes providing useful error types much easier.
 
+The simplest way to start is by returning a `Result` from a route. At long as
+it implements `TypedError`, the `Err` variant can be caught by a typed catcher.
+
 The following example mounts a single route, and a catcher that will catch any
 invalid integer parameters. The catcher then formats the error into a JSON
 object and returns it.

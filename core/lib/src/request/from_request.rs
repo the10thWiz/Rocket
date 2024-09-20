@@ -10,7 +10,7 @@ use crate::http::{Status, ContentType, Accept, Method, ProxyProto, CookieJar};
 use crate::listener::Endpoint;
 
 /// Type alias for the `Outcome` of a `FromRequest` conversion.
-pub type Outcome<S, E> = outcome::Outcome<S, (Status, E), Status>;
+pub type Outcome<S, E> = outcome::Outcome<S, E, Status>;
 
 /// Trait implemented by request guards to derive a value from incoming
 /// requests.
@@ -206,12 +206,15 @@ pub type Outcome<S, E> = outcome::Outcome<S, (Status, E), Status>;
 /// #
 /// use rocket::http::Status;
 /// use rocket::request::{self, Outcome, Request, FromRequest};
+/// use rocket::catcher::TypedError;
 ///
 /// struct ApiKey<'r>(&'r str);
 ///
-/// #[derive(Debug)]
+/// #[derive(Debug, TypedError)]
 /// enum ApiKeyError {
+///     #[error(status = 400)]
 ///     Missing,
+///     #[error(status = 400)]
 ///     Invalid,
 /// }
 ///
@@ -226,9 +229,9 @@ pub type Outcome<S, E> = outcome::Outcome<S, (Status, E), Status>;
 ///         }
 ///
 ///         match req.headers().get_one("x-api-key") {
-///             None => Outcome::Error((Status::BadRequest, ApiKeyError::Missing)),
+///             None => Outcome::Error(ApiKeyError::Missing),
 ///             Some(key) if is_valid(key) => Outcome::Success(ApiKey(key)),
-///             Some(_) => Outcome::Error((Status::BadRequest, ApiKeyError::Invalid)),
+///             Some(_) => Outcome::Error(ApiKeyError::Invalid),
 ///         }
 ///     }
 /// }
@@ -513,7 +516,7 @@ impl<'r, T: FromRequest<'r>> FromRequest<'r> for Result<T, T::Error> {
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Infallible> {
         match T::from_request(request).await {
             Success(val) => Success(Ok(val)),
-            Error((_, e)) => Success(Err(e)),
+            Error(e) => Success(Err(e)),
             Forward(status) => Forward(status),
         }
     }

@@ -204,7 +204,7 @@ impl<'r, T: Deserialize<'r>> Json<T> {
 
 #[crate::async_trait]
 impl<'r, T: Deserialize<'r>> FromData<'r> for Json<T> {
-    type Error = Error<'r>;
+    type Error = (Status, Error<'r>);
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self> {
         match Self::from_data(req, data).await {

@@ -57,13 +57,37 @@ pub trait TypedError<'r>: AsAny<Inv<'r>> + Send + Sync + 'r {
     fn status(&self) -> Status { Status::InternalServerError }
 }
 
+// TODO: this is less useful, since impls should generally use `Status` instead.
 impl<'r> TypedError<'r> for () {  }
+
+impl<'r> TypedError<'r> for Status {
+    fn respond_to(&self, _r: &'r Request<'_>) -> Result<Response<'r>, Status> {
+        Err(*self)
+    }
+
+    fn name(&self) -> &'static str {
+        // TODO: Status generally shouldn't be caught
+        "<Status>"
+    }
+
+    fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> {
+        Some(&())
+    }
+
+    fn status(&self) -> Status {
+        *self
+    }
+}
 
 impl<'r, R: TypedError<'r> + Transient> TypedError<'r> for (Status, R)
     where R::Transience: CanTranscendTo<Inv<'r>>
 {
     fn respond_to(&self, request: &'r Request<'_>) -> Result<Response<'r>, Status> {
         self.1.respond_to(request)
+    }
+
+    fn name(&self) -> &'static str {
+        self.1.name()
     }
 
     fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> {
@@ -80,6 +104,10 @@ impl<'r, R: TypedError<'r> + Transient> TypedError<'r> for Custom<R>
 {
     fn respond_to(&self, request: &'r Request<'_>) -> Result<Response<'r>, Status> {
         self.1.respond_to(request)
+    }
+
+    fn name(&self) -> &'static str {
+        self.1.name()
     }
 
     fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> {
@@ -117,10 +145,6 @@ impl<'r> TypedError<'r> for std::string::FromUtf8Error {
     fn status(&self) -> Status { Status::BadRequest }
 }
 
-impl TypedError<'_> for Status {
-    fn status(&self) -> Status { *self }
-}
-
 #[cfg(feature = "json")]
 impl<'r> TypedError<'r> for serde_json::Error {
     fn status(&self) -> Status { Status::BadRequest }
@@ -141,6 +165,12 @@ impl<'r> TypedError<'r> for rmp_serde::decode::Error {
 //     }
 // }
 
+// TODO: This could exist to allow more complex specialization
+// pub enum EitherError<L, R> {
+//     Left(L),
+//     Right(R),
+// }
+
 impl<'r, L, R> TypedError<'r> for Either<L, R>
     where L: TypedError<'r> + Transient,
           L::Transience: CanTranscendTo<Inv<'r>>,
@@ -154,7 +184,12 @@ impl<'r, L, R> TypedError<'r> for Either<L, R>
         }
     }
 
-    fn name(&self) -> &'static str { std::any::type_name::<Self>() }
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Left(v) => v.name(),
+            Self::Right(v) => v.name(),
+        }
+    }
 
     fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> {
         match self {
@@ -274,6 +309,26 @@ pub mod resolution {
 
         pub fn cast(self) -> Result<Box<dyn TypedError<'r>>, Self> { Ok(Box::new(self.0)) }
     }
+
+    // TODO: These extensions maybe useful, but so far not really
+    // // Box<dyn _> can be upcast without double boxing?
+    // impl<'r> Resolve<'r, Box<dyn TypedError<'r>>> {
+    //     pub const SPECIALIZED: bool = true;
+
+    //     pub fn cast(self) -> Result<Box<dyn TypedError<'r>>, Self> { Ok(self.0) }
+    // }
+
+    // Ideally, we should be able to handle this case, but we can't, since we don't own `Either`
+    // impl<'r, A, B> Resolve<'r, Either<A, B>>
+    //     where A: TypedError<'r> + Transient,
+    //           A::Transience: CanTranscendTo<Inv<'r>>,
+    //           B: TypedError<'r> + Transient,
+    //           B::Transience: CanTranscendTo<Inv<'r>>,
+    // {
+    //     pub const SPECIALIZED: bool = true;
+
+    //     pub fn cast(self) -> Result<Box<dyn TypedError<'r>>, Self> { Ok(Box::new(self.0)) }
+    // }
 
     /// Wrapper type to hold the return type of `resolve_typed_catcher`.
     #[doc(hidden)]

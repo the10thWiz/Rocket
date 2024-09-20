@@ -60,9 +60,10 @@ impl<'r, T: FromRequest<'r>> FromError<'r> for T {
     ) -> Result<Self, Status> {
         match T::from_request(req).await {
             Outcome::Success(val) => Ok(val),
-            Outcome::Error((s, e)) => {
-                info!(status = %s, "Catcher guard error: {:?}", e);
-                Err(s)
+            Outcome::Error(e) => {
+                // TODO: This should be an actual status
+                info!("Catcher guard error: {:?}", e);
+                Err(Status::InternalServerError)
             },
             Outcome::Forward(s) => {
                 info!(status = %s, "Catcher guard forwarding");

@@ -422,12 +422,12 @@ pub type Result<T = Rocket<Build>, E = Rocket<Build>> = std::result::Result<T, E
 /// // Allows a route to access the time a request was initiated.
 /// #[rocket::async_trait]
 /// impl<'r> FromRequest<'r> for StartTime {
-///     type Error = ();
+///     type Error = Status;
 ///
-///     async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, ()> {
+///     async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
 ///         match *request.local_cache(|| TimerStart(None)) {
 ///             TimerStart(Some(time)) => request::Outcome::Success(StartTime(time)),
-///             TimerStart(None) => request::Outcome::Error((Status::InternalServerError, ())),
+///             TimerStart(None) => request::Outcome::Error(Status::InternalServerError),
 ///         }
 ///     }
 /// }

@@ -144,18 +144,26 @@ use crate::{Rocket, Ignite};
 ///
 /// Occasionally an existential `impl Trait` may find its way into return types:
 ///
+/// **Note:** _This example actually doesn't work right now - `impl Responder` isn't
+/// enough to use as a type argument to `Either`. We might be able to do something
+/// about this - we would have to remove the TypedError impl on Either, and instead
+/// use a specialization trick to handle it at the point we convert it to a dyn box._
+///
 /// ```rust
 /// # use rocket::*;
 /// # use either::Either;
+/// # use std::convert::Infallible;
 /// use rocket::response::Responder;
 /// # type AnotherSentinel = ();
 ///
 /// // TODO: this no longer compiles, since the `impl Responder` doesn't meet the full reqs
-/// // #[get("/")]
-/// // fn f<'r>() -> Either<impl Responder<'r, 'static>, AnotherSentinel> {
-/// //     /* ... */
-/// //     # Either::Left(())
-/// // }
+/// // For a type `T`, `Either` requires: `T: Responder<'r, 'o>` _and_
+/// // `T::Error: CanTransendTo<Inv<'r>>`
+/// #[get("/")]
+/// fn f<'r>() -> Either<impl Responder<'r, 'static, Error = Infallible>, AnotherSentinel> {
+///     /* ... */
+///     # Either::Left(())
+/// }
 /// ```
 ///
 /// **Note:** _Rocket actively discourages using `impl Trait` in route

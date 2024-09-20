@@ -193,10 +193,10 @@ impl<'r, T: Send + Sync + 'static> From<&'r T> for &'r State<T> {
 
 #[crate::async_trait]
 impl<'r, T: Send + Sync + 'static> FromRequest<'r> for &'r State<T> {
-    type Error = ();
+    type Error = Status;
 
     #[inline(always)]
-    async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, ()> {
+    async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
         match State::get(req.rocket()) {
             Some(state) => Outcome::Success(state),
             None => {
@@ -204,7 +204,7 @@ impl<'r, T: Send + Sync + 'static> FromRequest<'r> for &'r State<T> {
                 "retrieving unmanaged state\n\
                 state must be managed via `rocket.manage()`");
 
-                Outcome::Error((Status::InternalServerError, ()))
+                Outcome::Error(Status::InternalServerError)
             }
         }
     }

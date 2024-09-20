@@ -4,7 +4,6 @@ use std::marker::PhantomData;
 use rocket::{Phase, Rocket, Ignite, Sentinel};
 use rocket::fairing::{AdHoc, Fairing};
 use rocket::request::{Request, Outcome, FromRequest};
-use rocket::outcome::IntoOutcome;
 use rocket::http::Status;
 use rocket::trace::Trace;
 
@@ -212,17 +211,17 @@ impl<K, C: Poolable> Drop for ConnectionPool<K, C> {
 
 #[rocket::async_trait]
 impl<'r, K: 'static, C: Poolable> FromRequest<'r> for Connection<K, C> {
-    type Error = ();
+    type Error = Status;
 
     #[inline]
-    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, ()> {
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         match request.rocket().state::<ConnectionPool<K, C>>() {
-            Some(c) => c.get().await.or_error((Status::ServiceUnavailable, ())),
+            Some(c) => c.get().await.ok_or(Status::ServiceUnavailable).into(),
             None => {
                 let conn = std::any::type_name::<K>();
                 error!("`{conn}::fairing()` is not attached\n\
                     the fairing must be attached to use `{conn} in routes.");
-                Outcome::Error((Status::InternalServerError, ()))
+                Outcome::Error(Status::InternalServerError)
             }
         }
     }

@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
+use rocket::TypedError;
 use rocket::{error, Build, Ignite, Phase, Rocket, Sentinel, Orbit};
 use rocket::fairing::{self, Fairing, Info, Kind};
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket::figment::providers::Serialized;
-use rocket::http::Status;
 
 use crate::Pool;
 
@@ -278,17 +278,25 @@ impl<D: Database> Fairing for Initializer<D> {
     }
 }
 
+#[derive(Debug, TypedError)]
+pub enum ConnectionError<E> {
+    #[error(status = 503)]
+    ServiceUnavailable(E),
+    #[error(status = 500)]
+    InternalServerError,
+}
+
 #[rocket::async_trait]
 impl<'r, D: Database> FromRequest<'r> for Connection<D> {
-    type Error = Option<<D::Pool as Pool>::Error>;
+    type Error = ConnectionError<<D::Pool as Pool>::Error>;
 
     async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         match D::fetch(req.rocket()) {
             Some(db) => match db.get().await {
                 Ok(conn) => Outcome::Success(Connection(conn)),
-                Err(e) => Outcome::Error((Status::ServiceUnavailable, Some(e))),
+                Err(e) => Outcome::Error(ConnectionError::ServiceUnavailable(e)),
             },
-            None => Outcome::Error((Status::InternalServerError, None)),
+            None => Outcome::Error(ConnectionError::InternalServerError),
         }
     }
 }
