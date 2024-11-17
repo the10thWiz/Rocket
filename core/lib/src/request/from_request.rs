@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
 
+use crate::catcher::TypedError;
 use crate::{Request, Route};
 use crate::outcome::{self, IntoOutcome, Outcome::*};
 
@@ -35,7 +36,7 @@ pub type Outcome<S, E> = outcome::Outcome<S, E, Status>;
 /// ```rust
 /// use rocket::request::{self, Request, FromRequest};
 /// # struct MyType;
-/// # type MyError = String;
+/// # type MyError = std::convert::Infallible;
 ///
 /// #[rocket::async_trait]
 /// impl<'r> FromRequest<'r> for MyType {
@@ -382,7 +383,7 @@ pub type Outcome<S, E> = outcome::Outcome<S, E, Status>;
 #[crate::async_trait]
 pub trait FromRequest<'r>: Sized {
     /// The associated error to be returned if derivation fails.
-    type Error: Debug;
+    type Error: TypedError<'r> + Debug;
 
     /// Derives an instance of `Self` from the incoming request metadata.
     ///

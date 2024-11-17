@@ -27,7 +27,7 @@
 //! # #[macro_use] extern crate rocket;
 //! # #[cfg(feature = "diesel_mysql")] {
 //! use rocket_db_pools::{Database, Connection};
-//! use rocket_db_pools::diesel::{QueryResult, MysqlPool, prelude::*};
+//! use rocket_db_pools::diesel::{QueryResult, DieselError, MysqlPool, prelude::*};
 //!
 //! #[derive(Database)]
 //! #[database("diesel_mysql")]
@@ -57,6 +57,11 @@
 //!         .await?;
 //!
 //!     Ok(format!("{post_ids:?}"))
+//! }
+//!
+//! #[catch(500, error = "<e>")]
+//! fn catch_diesel_error(e: &DieselError) -> String {
+//!     format!("{e:?}")
 //! }
 //! # }
 //! ```
@@ -117,17 +122,14 @@ impl From<diesel::result::Error> for DieselError {
     }
 }
 
-/// Alias of a `Result` with an error type of [`Debug`] for a `diesel::Error`.
+/// Alias of a `Result` with an error type of `diesel::Error`.
 ///
 /// `QueryResult` is a [`Responder`](rocket::response::Responder) when `T` (the
 /// `Ok` value) is a `Responder`. By using this alias as a route handler's
 /// return type, the `?` operator can be applied to fallible `diesel` functions
 /// in the route handler while still providing a valid `Responder` return type.
 ///
-/// See the [module level docs](self#example) for a usage example.
-///
-/// [`Debug`]: rocket::response::Debug
-// TODO: this needs to change
+/// See module level docs for usage, and catching the error type.
 pub type QueryResult<T, E = DieselError> = Result<T, E>;
 
 /// Type alias for an `async` pool of MySQL connections for `async` [diesel].

@@ -2,7 +2,7 @@ use transient::{CanTranscendTo, Inv, Transient};
 
 use crate::catcher::TypedError;
 use crate::{Request, Data};
-use crate::response::{self, Response, Responder};
+use crate::response::{Response, Responder};
 use crate::http::Status;
 
 /// Type alias for the return type of a [`Route`](crate::Route)'s
@@ -192,17 +192,17 @@ impl<'r, 'o: 'r> Outcome<'o> {
     #[inline]
     pub fn from<R: Responder<'r, 'o>>(req: &'r Request<'_>, responder: R) -> Outcome<'r> {
         match responder.respond_to(req) {
-            response::Outcome::Success(response) => Outcome::Success(response),
-            response::Outcome::Error(error) => {
+            Ok(response) => Outcome::Success(response),
+            Err(error) => {
                 crate::trace::info!(
                     type_name = std::any::type_name_of_val(&error),
                     "Typed error to catch"
                 );
                 Outcome::Error(Box::new(error))
             },
-            response::Outcome::Forward(status) => {
-                Outcome::Error(Box::new(status) as Box<dyn TypedError<'r>>)
-            }
+            // response::Outcome::Forward(status) => {
+            //     Outcome::Error(Box::new(status) as Box<dyn TypedError<'r>>)
+            // }
         }
     }
 

@@ -32,7 +32,6 @@ use std::borrow::Cow;
 use transient::{Inv, Transient};
 
 use crate::catcher::{AsAny, TypedError};
-use crate::outcome::try_outcome;
 use crate::request::Request;
 use crate::response::{self, Responder, Response};
 use crate::http::Status;
@@ -168,10 +167,10 @@ impl<R> Created<R> {
 /// header is set to a hash value of the responder.
 impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Created<R> {
     type Error = R::Error;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         let mut response = Response::build();
         if let Some(responder) = self.1 {
-            response.merge(try_outcome!(responder.respond_to(req)));
+            response.merge(responder.respond_to(req)?);
         }
 
         if let Some(hash) = self.2 {
@@ -207,7 +206,7 @@ pub struct NoContent;
 /// Sets the status code of the response to 204 No Content.
 impl<'r> Responder<'r, 'static> for NoContent {
     type Error = std::convert::Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         Response::build().status(Status::NoContent).ok()
     }
 }
@@ -242,8 +241,8 @@ pub struct Custom<R>(pub Status, pub R);
 impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Custom<R> {
     type Error = R::Error;
     #[inline]
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
-        Response::build_from(try_outcome!(self.1.respond_to(req)))
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o, Self::Error> {
+        Response::build_from(self.1.respond_to(req)?)
             .status(self.0)
             .ok()
     }
@@ -252,7 +251,7 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Custom<R> {
 impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for (Status, R) {
     type Error = R::Error;
     #[inline(always)]
-    fn respond_to(self, request: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         Custom(self.0, self.1).respond_to(request)
     }
 }
@@ -305,7 +304,7 @@ macro_rules! status_response {
         impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for $T<R> {
             type Error = R::Error;
             #[inline(always)]
-            fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+            fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o, Self::Error> {
                 Custom(Status::$T, self.0).respond_to(req)
             }
         }

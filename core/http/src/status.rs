@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{convert::Infallible, fmt};
 
 use transient::Static;
 
@@ -125,6 +125,12 @@ impl Static for Status {}
 impl Default for Status {
     fn default() -> Self {
         Status::Ok
+    }
+}
+
+impl From<Infallible> for Status {
+    fn from(v: Infallible) -> Self {
+        match v {}
     }
 }
 

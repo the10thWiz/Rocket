@@ -65,7 +65,7 @@ impl<'r, S: Stream> Responder<'r, 'r> for ByteStream<S>
     where S: Send + 'r, S::Item: AsRef<[u8]> + Send + Unpin + 'r
 {
     type Error = std::convert::Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'r, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'r, Self::Error> {
         Response::build()
             .header(ContentType::Binary)
             .streamed_body(ReaderStream::from(self.0.map(std::io::Cursor::new)))

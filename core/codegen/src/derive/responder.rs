@@ -77,7 +77,7 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
         .inner_mapper(MapperBuild::new()
             .with_output(|_, output| quote! {
                 fn respond_to(self, __req: &'r #Request<'_>)
-                    -> #_response::Outcome<'o, Self::Error>
+                    -> #_response::Result<'o, Self::Error>
                 {
                     #output
                 }
@@ -106,9 +106,9 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                         let mut __res = match <#ty as #_response::Responder>::respond_to(
                             #accessor, __req
                         ) {
-                            #Outcome::Success(val) => val,
-                            #Outcome::Error(e) => return #Outcome::Error(#error_outcome),
-                            #Outcome::Forward(f) => return #Outcome::Forward(f),
+                            #_Result::Ok(val) => val,
+                            #_Result::Err(e) => return #_Result::Err(#error_outcome),
+                            // #Outcome::Forward(f) => return #Outcome::Forward(f),
                         };
                     }
                 }).expect("have at least one field");
@@ -133,7 +133,7 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                     #(#headers)*
                     #content_type
                     #status
-                    #Outcome::Success(__res)
+                    #_Ok(__res)
                 })
             })
         )
@@ -205,6 +205,10 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                         #i: #_catcher::Transient,
                         <#i as #_catcher::Transient>::Transience: #_catcher::CanTranscendTo<#_catcher::Inv<'r>>,
                     });
+                let debug_bounds = type_params.iter()
+                    .map(|i| quote! {
+                        #i: ::std::fmt::Debug,
+                    });
                 quote!{
                     pub enum #name<'r, #(#type_params,)*> {
                         #(#variants_decl)*
@@ -228,6 +232,18 @@ pub fn derive_responder(input: proc_macro::TokenStream) -> TokenStream {
                     {
                         type Static = #name<'static, #(#static_params,)*>;
                         type Transience = ::rocket::catcher::Inv<'r>;
+                    }
+
+                    impl<'r, #(#type_params,)*> ::std::fmt::Debug
+                        for #name<'r, #(#type_params,)*>
+                            where #(#debug_bounds)*
+                    {
+                        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                            match self {
+                                #(Self::#type_params(v) => v.fmt(f),)*
+                                Self::UnusedVariant(f, ..) => match *f { }
+                            }
+                        }
                     }
 
                     impl<'r, #(#type_params,)*> #TypedError<'r>

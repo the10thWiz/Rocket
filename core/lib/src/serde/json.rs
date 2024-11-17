@@ -226,16 +226,16 @@ impl<'r, T: Deserialize<'r>> FromData<'r> for Json<T> {
 /// fails, an `Err` of `Status::InternalServerError` is returned.
 impl<'r, T: Serialize> Responder<'r, 'static> for Json<T> {
     type Error = serde_json::Error;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         let string = match serde_json::to_string(&self.0) {
             Ok(v) => v,
             Err(e) => {
                 error!("JSON serialize failure: {}", e);
-                return response::Outcome::Error(e);
+                return Err(e);
             }
         };
 
-        content::RawJson(string).respond_to(req).map_error(|e| match e {})
+        content::RawJson(string).respond_to(req).map_err(|e| match e {})
     }
 }
 
@@ -311,7 +311,7 @@ impl<'v, T: Deserialize<'v> + Send> form::FromFormField<'v> for Json<T> {
 /// and a fixed-size body with the serialized value.
 impl<'r> Responder<'r, 'static> for Value {
     type Error = std::convert::Infallible;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         content::RawJson(self.to_string()).respond_to(req)
     }
 }

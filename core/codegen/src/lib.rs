@@ -320,10 +320,9 @@ route_attribute!(options => Method::Options);
 /// SINGLE_PARAM := '<' IDENT '>'
 /// ```
 ///
-/// TODO: typed: docs (links)
 /// # Typing Requirements
 ///
-/// The type of the `error` arguement must be a reference to a type that implements `TypedError`. See
+/// The type of the `error` arguement must be a reference to a type that implements [`TypedError`]. See
 /// [Typed catchers](Self#Typed-catchers) for more info.
 ///
 /// All other arguments must implement [`FromError`], (or [`FromRequest`]).
@@ -336,8 +335,8 @@ route_attribute!(options => Method::Options);
 /// error types. This is accomplished using the [`TypedError`] trait.
 /// When a [`FromRequest`], [`FromParam`],
 /// [`FromSegments`], [`FromForm`], or [`FromData`] implementation fails or
-/// forwards, Rocket will convert to the error type to `dyn TypedError`, if the
-/// error type implements `TypedError`.
+/// forwards, Rocket will convert to the error type to [`dyn TypedError`], if the
+/// error type implements [`TypedError`].
 ///
 /// Only a single error type can be carried by a request - if a route forwards,
 /// and another route is attempted, any error produced by the second route
@@ -345,16 +344,14 @@ route_attribute!(options => Method::Options);
 ///
 /// There are two convient types - [`FromParam`] types actually generate a
 /// [`FromParamError<T>`] (although you can still catch the inner `T` type).
-/// Likewise [`FromSegements`] actually generates [`FromSegementsError<T>`].
+/// Likewise [`FromSegments`] actually generates [`FromSegmentsError<T>`].
 ///
 /// ## Custom error types
 ///
-/// All[^transient-impls] error types that Rocket itself produces implement
+/// All error types that Rocket itself produces implement
 /// [`TypedError`], and can therefore be caught by a typed catcher. If you have
 /// a custom guard of any type, you can implement [`TypedError`] using the derive
 /// macro.
-///
-/// [^transient-impls]: As of writing, this is a WIP.
 ///
 /// # Semantics
 ///
@@ -382,7 +379,15 @@ route_attribute!(options => Method::Options);
 /// [`Catcher`]: ../rocket/struct.Catcher.html
 /// [`Response`]: ../rocket/struct.Response.html
 /// [`Responder`]: ../rocket/response/trait.Responder.html
+/// [`FromError`]: ../rocket/catcher/trait.FromError.html
 /// [`FromRequest`]: ../rocket/request/trait.FromRequest.html
+/// [`FromParam`]: ../rocket/request/trait.FromParam.html
+/// [`FromSegments`]: ../rocket/request/trait.FromSegments.html
+/// [`FromData`]: ../rocket/data/trait.FromData.html
+/// [`TypedError`]: ../rocket/catcher/trait.TypedError.html
+/// [`dyn TypedError`]: ../rocket/catcher/trait.TypedError.html
+/// [`FromParamError<T>`]: ../rocket/request/struct.FromParamError.html
+/// [`FromSegmentsError<T>`]: ../rocket/request/struct.FromSegmentsError.html
 #[proc_macro_attribute]
 pub fn catch(args: TokenStream, input: TokenStream) -> TokenStream {
     emit!(attribute::catch::catch_attribute(args, input))
@@ -470,7 +475,7 @@ pub fn async_test(args: TokenStream, input: TokenStream) -> TokenStream {
 /// }
 /// ```
 ///
-/// For all other cases, use [`#[launch]`](launch) instead.
+/// For all other cases, use [`#[launch]`](macro@launch) instead.
 ///
 /// The function attributed with `#[rocket::main]` _must_ be `async` and _must_
 /// be called `main`. Violation of either results in a compile-time error.

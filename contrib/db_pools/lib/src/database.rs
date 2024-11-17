@@ -287,7 +287,9 @@ pub enum ConnectionError<E> {
 }
 
 #[rocket::async_trait]
-impl<'r, D: Database> FromRequest<'r> for Connection<D> {
+impl<'r, D: Database> FromRequest<'r> for Connection<D>
+    where <D::Pool as Pool>::Error: Send + Sync,
+{
     type Error = ConnectionError<<D::Pool as Pool>::Error>;
 
     async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {

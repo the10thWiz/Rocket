@@ -136,7 +136,7 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 fn request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, display_hack, FromRequest, Outcome, TypedError, resolve_error, _Box, Status
+        __req, __data, _request, display_hack, FromRequest, Outcome, TypedError, _Box
     );
 
     quote_spanned! { ty.span() =>
@@ -156,26 +156,23 @@ fn request_guard_decl(guard: &Guard) -> TokenStream {
             },
             #[allow(unreachable_code)]
             #Outcome::Error(__e) => {
-                let __err = #resolve_error!(__e);
-                let __err_ptr = match &__err.val {
-                    Err(r) => &r.0,
+                let __err: #_Box<dyn #TypedError<'__r>> = #_Box::new(__e);
                     // SAFETY: This is a pointer to __e (after moving it into a box),
                     // so it's safe to cast it to the same type. If #ty implements
                     // TypedError, we could downcast, but we can't write that if it doesn't.
-                    Ok(b) => unsafe { &*(b.as_ref() as *const dyn #TypedError<'_>).cast() },
-                };
+                let __err_ptr: &<#ty as #FromRequest<'__r>>::Error
+                    = unsafe { &*(__err.as_ref() as *const dyn #TypedError<'_>).cast() };
                 ::rocket::trace::info!(
                     name: "failure",
                     target: concat!("rocket::codegen::route::", module_path!()),
                     parameter = stringify!(#ident),
                     type_name = stringify!(#ty),
                     reason = %#display_hack!(__err_ptr),
-                    error_type = __err.name,
+                    error_type = __err.name(),
                     "request guard failed"
                 );
 
-                // TODO: Default status
-                return #Outcome::Error(__err.val.unwrap_or_else(|_| #_Box::new(#Status::InternalServerError)));
+                return #Outcome::Error(__err);
             }
         };
     }
@@ -298,7 +295,6 @@ fn data_guard_decl(guard: &Guard) -> TokenStream {
                     "data guard failed"
                 );
 
-                // TODO: default status
                 return #Outcome::Error(__e.val.unwrap_or_else(|_| #_Box::new(#Status::UnprocessableEntity)));
             }
         };

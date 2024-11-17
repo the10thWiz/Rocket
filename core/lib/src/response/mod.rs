@@ -35,7 +35,5 @@ pub use self::redirect::Redirect;
 pub use self::flash::Flash;
 pub use self::debug::Debug;
 
-use crate::http::Status;
-
 /// Type alias for the `Outcome` of a [`Responder::respond_to()`] call.
-pub type Outcome<'o, Error> = crate::outcome::Outcome<Response<'o>, Error, Status>;
+pub type Result<'o, Error> = std::result::Result<Response<'o>, Error>;

@@ -11,8 +11,6 @@ use crate::http::{Status, ContentType, StatusClass};
 use crate::response::{self, Response};
 use crate::request::Request;
 
-use super::Outcome;
-
 /// Trait implemented by types that generate responses for clients.
 ///
 /// Any type that implements `Responder` can be used as the return type of a
@@ -181,7 +179,7 @@ use super::Outcome;
 /// // If the response contains no borrowed data.
 /// impl<'r> Responder<'r, 'static> for A {
 ///     type Error = std::convert::Infallible;
-///     fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+///     fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
 ///         todo!()
 ///     }
 /// }
@@ -190,7 +188,7 @@ use super::Outcome;
 /// // If the response borrows from the request.
 /// impl<'r> Responder<'r, 'r> for B<'r> {
 ///     type Error = std::convert::Infallible;
-///     fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'r, Self::Error> {
+///     fn respond_to(self, _: &'r Request<'_>) -> response::Result<'r, Self::Error> {
 ///         todo!()
 ///     }
 /// }
@@ -199,7 +197,7 @@ use super::Outcome;
 /// // If the response is or wraps a borrow that may outlive the request.
 /// impl<'r, 'o: 'r> Responder<'r, 'o> for &'o C {
 ///     type Error = std::convert::Infallible;
-///     fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+///     fn respond_to(self, _: &'r Request<'_>) -> response::Result<'o, Self::Error> {
 ///         todo!()
 ///     }
 /// }
@@ -208,7 +206,7 @@ use super::Outcome;
 /// // If the response wraps an existing responder.
 /// impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for D<R> {
 ///     type Error = std::convert::Infallible;
-///     fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+///     fn respond_to(self, _: &'r Request<'_>) -> response::Result<'o, Self::Error> {
 ///         todo!()
 ///     }
 /// }
@@ -260,9 +258,9 @@ use super::Outcome;
 ///
 /// impl<'r> Responder<'r, 'static> for Person {
 ///     type Error = std::convert::Infallible;
-///     fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+///     fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static, Self::Error> {
 ///         let string = format!("{}:{}", self.name, self.age);
-///         Response::build_from(try_outcome!(string.respond_to(req)))
+///         Response::build_from(string.respond_to(req)?)
 ///             .raw_header("X-Person-Name", self.name)
 ///             .raw_header("X-Person-Age", self.age.to_string())
 ///             .header(ContentType::new("application", "x-person"))
@@ -304,8 +302,6 @@ use super::Outcome;
 /// # fn person() -> Person { Person::new("Bob", 29) }
 /// ```
 pub trait Responder<'r, 'o: 'r> {
-    // TODO: Should this instead be something like `HasStatus`, and we specialize
-    // on whether it implements TypedError?
     type Error: TypedError<'r> + Transient;
 
     /// Returns `Ok` if a `Response` could be generated successfully. Otherwise,
@@ -319,16 +315,14 @@ pub trait Responder<'r, 'o: 'r> {
     /// returned, the error catcher for the given status is retrieved and called
     /// to generate a final error response, which is then written out to the
     /// client.
-    // TODO: This could return `Result<Response, Self::Error>`, and we could use
-    // Self::Error = Status when we want the old behavior
-    fn respond_to(self, request: &'r Request<'_>) -> response::Outcome<'o, Self::Error>;
+    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o, Self::Error>;
 }
 
 /// Returns a response with Content-Type `text/plain` and a fixed-size body
 /// containing the string `self`. Always returns `Ok`.
 impl<'r, 'o: 'r> Responder<'r, 'o> for &'o str {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         Response::build()
             .header(ContentType::Plain)
             .sized_body(self.len(), Cursor::new(self))
@@ -340,7 +334,7 @@ impl<'r, 'o: 'r> Responder<'r, 'o> for &'o str {
 /// containing the string `self`. Always returns `Ok`.
 impl<'r> Responder<'r, 'static> for String {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         Response::build()
             .header(ContentType::Plain)
             .sized_body(self.len(), Cursor::new(self))
@@ -361,7 +355,7 @@ impl<T: std::ops::Deref> AsRef<[u8]> for DerefRef<T> where T::Target: AsRef<[u8]
 /// containing the string `self`. Always returns `Ok`.
 impl<'r> Responder<'r, 'static> for Arc<str> {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         Response::build()
             .header(ContentType::Plain)
             .sized_body(self.len(), Cursor::new(DerefRef(self)))
@@ -373,7 +367,7 @@ impl<'r> Responder<'r, 'static> for Arc<str> {
 /// containing the string `self`. Always returns `Ok`.
 impl<'r> Responder<'r, 'static> for Box<str> {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         Response::build()
             .header(ContentType::Plain)
             .sized_body(self.len(), Cursor::new(DerefRef(self)))
@@ -385,7 +379,7 @@ impl<'r> Responder<'r, 'static> for Box<str> {
 /// fixed-size body containing the data in `self`. Always returns `Ok`.
 impl<'r, 'o: 'r> Responder<'r, 'o> for &'o [u8] {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         Response::build()
             .header(ContentType::Binary)
             .sized_body(self.len(), Cursor::new(self))
@@ -397,7 +391,7 @@ impl<'r, 'o: 'r> Responder<'r, 'o> for &'o [u8] {
 /// fixed-size body containing the data in `self`. Always returns `Ok`.
 impl<'r> Responder<'r, 'static> for Vec<u8> {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         Response::build()
             .header(ContentType::Binary)
             .sized_body(self.len(), Cursor::new(self))
@@ -409,7 +403,7 @@ impl<'r> Responder<'r, 'static> for Vec<u8> {
 /// fixed-size body containing the data in `self`. Always returns `Ok`.
 impl<'r> Responder<'r, 'static> for Arc<[u8]> {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         Response::build()
             .header(ContentType::Binary)
             .sized_body(self.len(), Cursor::new(self))
@@ -421,7 +415,7 @@ impl<'r> Responder<'r, 'static> for Arc<[u8]> {
 /// fixed-size body containing the data in `self`. Always returns `Ok`.
 impl<'r> Responder<'r, 'static> for Box<[u8]> {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         Response::build()
             .header(ContentType::Binary)
             .sized_body(self.len(), Cursor::new(self))
@@ -468,7 +462,7 @@ impl<'r, 'o: 'r, T: Responder<'r, 'o> + Sized> Responder<'r, 'o> for Box<T>
     where <T::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
 {
     type Error = T::Error;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         let inner = *self;
         inner.respond_to(req)
     }
@@ -477,7 +471,7 @@ impl<'r, 'o: 'r, T: Responder<'r, 'o> + Sized> Responder<'r, 'o> for Box<T>
 /// Returns a response with a sized body for the file. Always returns `Ok`.
 impl<'r> Responder<'r, 'static> for File {
     type Error = Infallible;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         tokio::fs::File::from(self).respond_to(req)
     }
 }
@@ -485,7 +479,7 @@ impl<'r> Responder<'r, 'static> for File {
 /// Returns a response with a sized body for the file. Always returns `Ok`.
 impl<'r> Responder<'r, 'static> for tokio::fs::File {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         Response::build().sized_body(None, self).ok()
     }
 }
@@ -493,8 +487,8 @@ impl<'r> Responder<'r, 'static> for tokio::fs::File {
 /// Returns an empty, default `Response`. Always returns `Ok`.
 impl<'r> Responder<'r, 'static> for () {
     type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
-        Outcome::Success(Response::new())
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
+        Ok(Response::new())
     }
 }
 
@@ -514,25 +508,27 @@ impl<'r, 'o: 'r, R: ?Sized + ToOwned> Responder<'r, 'o> for std::borrow::Cow<'o,
         <R::Owned as Responder<'r, 'o>>::Error,
     >;
 
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         match self {
-            std::borrow::Cow::Borrowed(b) => b.respond_to(req).map_error(|e| Either::Left(e)),
-            std::borrow::Cow::Owned(o) => o.respond_to(req).map_error(|e| Either::Right(e)),
+            std::borrow::Cow::Borrowed(b) => b.respond_to(req).map_err(|e| Either::Left(e)),
+            std::borrow::Cow::Owned(o) => o.respond_to(req).map_err(|e| Either::Right(e)),
         }
     }
 }
 
 /// If `self` is `Some`, responds with the wrapped `Responder`. Otherwise prints
 /// a warning message and returns an `Err` of `Status::NotFound`.
-impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Option<R> {
-    type Error = R::Error;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Option<R>
+    where <R::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
+{
+    type Error = Either<R::Error, Status>;
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         match self {
-            Some(r) => r.respond_to(req),
+            Some(r) => r.respond_to(req).map_err(|e| Either::Left(e)),
             None => {
                 let type_name = std::any::type_name::<Self>();
                 debug!(type_name, "`Option` responder returned `None`");
-                Outcome::Forward(Status::NotFound)
+                Err(Either::Right(Status::NotFound))
             },
         }
     }
@@ -540,7 +536,7 @@ impl<'r, 'o: 'r, R: Responder<'r, 'o>> Responder<'r, 'o> for Option<R> {
 
 /// Responds with the wrapped `Responder` in `self`, whether it is `Ok` or
 /// `Err`.
-impl<'r, 'o: 'r, T, E> Responder<'r, 'o> for Result<T, E>
+impl<'r, 'o: 'r, T, E> Responder<'r, 'o> for std::result::Result<T, E>
     where T: Responder<'r, 'o>,
           T::Error: Transient,
           <T::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
@@ -548,10 +544,10 @@ impl<'r, 'o: 'r, T, E> Responder<'r, 'o> for Result<T, E>
           E::Transience: CanTranscendTo<Inv<'r>>,
 {
     type Error = Either<T::Error, E>;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         match self {
-            Ok(responder) => responder.respond_to(req).map_error(|e| Either::Left(e)),
-            Err(error) => Outcome::Error(Either::Right(error)),
+            Ok(responder) => responder.respond_to(req).map_err(|e| Either::Left(e)),
+            Err(error) => Err(Either::Right(error)),
         }
     }
 }
@@ -566,10 +562,10 @@ impl<'r, 'o: 'r, T, E> Responder<'r, 'o> for either::Either<T, E>
           <E::Error as Transient>::Transience: CanTranscendTo<Inv<'r>>,
 {
     type Error = Either<T::Error, E::Error>;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         match self {
-            either::Either::Left(r) => r.respond_to(req).map_error(|e| Either::Left(e)),
-            either::Either::Right(r) => r.respond_to(req).map_error(|e| Either::Right(e)),
+            either::Either::Left(r) => r.respond_to(req).map_err(|e| Either::Left(e)),
+            either::Either::Right(r) => r.respond_to(req).map_err(|e| Either::Right(e)),
         }
     }
 }
@@ -589,10 +585,10 @@ impl<'r, 'o: 'r, T, E> Responder<'r, 'o> for either::Either<T, E>
 /// status code emit an error message and forward to the `500` (internal server
 /// error) catcher.
 impl<'r> Responder<'r, 'static> for Status {
-    type Error = Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    type Error = Status;
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         match self.class() {
-            StatusClass::ClientError | StatusClass::ServerError => Outcome::Forward(self),
+            StatusClass::ClientError | StatusClass::ServerError => Err(self),
             StatusClass::Success if self.code < 206 => {
                 Response::build().status(self).ok()
             }
@@ -604,7 +600,7 @@ impl<'r> Responder<'r, 'static> for Status {
                     "invalid status used as responder\n\
                     status must be one of 100, 200..=205, 400..=599");
 
-                Outcome::Forward(Status::InternalServerError)
+                Err(Status::InternalServerError)
             }
         }
     }

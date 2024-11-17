@@ -38,7 +38,7 @@ pub trait TypedError<'r>: AsAny<Inv<'r>> + Send + Sync + 'r {
     /// Generates a default response for this type (or forwards to a default catcher)
     #[allow(unused_variables)]
     fn respond_to(&self, request: &'r Request<'_>) -> Result<Response<'r>, Status> {
-        Err(Status::InternalServerError)
+        Err(self.status())
     }
 
     /// A descriptive name of this error type. Defaults to the type name.
@@ -48,12 +48,10 @@ pub trait TypedError<'r>: AsAny<Inv<'r>> + Send + Sync + 'r {
     ///
     /// # Warning
     /// A typed catcher will not attempt to follow the source of an error
-    /// more than once.
+    /// more than (TODO: exact number) 5 times.
     fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> { None }
 
     /// Status code
-    // TODO: This is currently only used for errors produced by Fairings
-    // and the `Result` responder impl
     fn status(&self) -> Status { Status::InternalServerError }
 }
 
@@ -163,12 +161,6 @@ impl<'r> TypedError<'r> for rmp_serde::decode::Error {
 //     fn respond_to(&self, request: &'r Request<'_>) -> Result<Response<'r>, Status> {
 //         format!("{:?}", self.0).respond_to(request).responder_error()
 //     }
-// }
-
-// TODO: This could exist to allow more complex specialization
-// pub enum EitherError<L, R> {
-//     Left(L),
-//     Right(R),
 // }
 
 impl<'r, L, R> TypedError<'r> for Either<L, R>

@@ -188,16 +188,16 @@ impl<'r, T: Deserialize<'r>> FromData<'r> for MsgPack<T> {
 /// serialization fails, an `Err` of `Status::InternalServerError` is returned.
 impl<'r, T: Serialize> Responder<'r, 'static> for MsgPack<T> {
     type Error = rmp_serde::encode::Error;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         let buf = match rmp_serde::to_vec(&self.0) {
             Ok(v) => v,
             Err(e) => {
                 error!("MsgPack serialize failure: {}", e);
-                return response::Outcome::Error(e);
+                return Err(e);
             }
         };
 
-        content::RawMsgPack(buf).respond_to(req).map_error(|e| match e {})
+        content::RawMsgPack(buf).respond_to(req).map_err(|e| match e {})
     }
 }
 

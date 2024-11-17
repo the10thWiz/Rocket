@@ -156,9 +156,6 @@ use crate::{Rocket, Ignite};
 /// use rocket::response::Responder;
 /// # type AnotherSentinel = ();
 ///
-/// // TODO: this no longer compiles, since the `impl Responder` doesn't meet the full reqs
-/// // For a type `T`, `Either` requires: `T: Responder<'r, 'o>` _and_
-/// // `T::Error: CanTransendTo<Inv<'r>>`
 /// #[get("/")]
 /// fn f<'r>() -> Either<impl Responder<'r, 'static, Error = Infallible>, AnotherSentinel> {
 ///     /* ... */
