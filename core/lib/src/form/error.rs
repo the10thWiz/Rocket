@@ -60,7 +60,14 @@ use crate::data::ByteUnit;
 #[serde(transparent)]
 pub struct Errors<'v>(Vec<Error<'v>>);
 
-impl<'r> TypedError<'r> for Errors<'r> { }
+impl<'r> TypedError<'r> for Errors<'r> {
+    fn respond_to(&self, _r: &'r crate::Request<'_>) -> Result<crate::Response<'r>, Status> {
+        Err(self.status())
+    }
+
+    // Calls inherent method impl
+    fn status(&self) -> Status { self.status() }
+}
 
 /// A form error, potentially tied to a specific form field.
 ///
@@ -147,8 +154,6 @@ pub struct Error<'v> {
     pub entity: Entity,
 }
 
-// impl<'r> TypedError<'r> for Error<'r> { }
-
 /// The kind of form error that occurred.
 ///
 /// ## Constructing
@@ -202,7 +207,6 @@ pub enum ErrorKind<'v> {
     Unknown,
     /// A custom error occurred. Status defaults to
     /// [`Status::UnprocessableEntity`] if one is not directly specified.
-    // TODO: This needs to be sync for TypedError
     Custom(Status, Box<dyn std::error::Error + Send + Sync>),
     /// An error while parsing a multipart form occurred.
     Multipart(multer::Error),

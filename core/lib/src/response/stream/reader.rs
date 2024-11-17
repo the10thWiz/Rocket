@@ -40,7 +40,7 @@ pin_project! {
     ///     where S: Send + 'r
     /// {
     ///     type Error = std::convert::Infallible;
-    ///     fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'r, Self::Error> {
+    ///     fn respond_to(self, _: &'r Request<'_>) -> response::Result<'r, Self::Error> {
     ///         Response::build()
     ///             .header(ContentType::Text)
     ///             .streamed_body(ReaderStream::from(self.0.map(Cursor::new)))
@@ -144,7 +144,7 @@ impl<'r, S: Stream> Responder<'r, 'r> for ReaderStream<S>
     where S: Send + 'r, S::Item: AsyncRead + Send,
 {
     type Error = std::convert::Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'r, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'r, Self::Error> {
         Response::build()
             .streamed_body(self)
             .ok()

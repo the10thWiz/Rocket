@@ -62,13 +62,19 @@ pub struct LocalResponse<'c> {
     _request: Box<Request<'c>>,
 }
 
+// SAFETY: This tells dropck that the parts of LocalResponse MUST be dropped
+// as a group (and ensures they happen in order)
 impl Drop for LocalResponse<'_> {
     fn drop(&mut self) { }
 }
 
 impl<'c> LocalResponse<'c> {
-    pub(crate) fn new<P, PO, F, O>(req: Request<'c>, mut data: Data<'c>, preprocess: P, f: F)
-        -> impl Future<Output = LocalResponse<'c>>
+    pub(crate) fn new<P, PO, F, O>(
+        req: Request<'c>,
+        mut data: Data<'c>,
+        preprocess: P,
+        dispatch: F,
+    ) -> impl Future<Output = LocalResponse<'c>>
         where P: FnOnce(&'c mut Request<'c>, &'c mut Data<'c>, &'c mut ErasedError<'c>)
                   -> PO + Send,
               PO: Future<Output = RequestToken> + Send + 'c,
@@ -105,7 +111,7 @@ impl<'c> LocalResponse<'c> {
 
             let token = {
                 // SAFETY: Much like request above, error can borrow from request, and
-                // response can borrow from request or error. TODO
+                // response can borrow from request and/or error.
                 let request: &'c mut Request<'c> = unsafe { &mut *(&mut *boxed_req as *mut _) };
                 // SAFETY: The type of `preprocess` ensures that all of these types have the correct
                 // lifetime ('c).
@@ -116,15 +122,15 @@ impl<'c> LocalResponse<'c> {
                 ).await
             };
             // SAFETY: Much like request above, error can borrow from request, and
-            // response can borrow from request or error. TODO
+            // response can borrow from request and/or error.
             let request: &'c Request<'c> = unsafe { &*(&*boxed_req as *const _) };
             // NOTE: The cookie jar `secure` state will not reflect the last
             // known value in `request.cookies()`. This is okay: new cookies
             // should never be added to the resulting jar which is the only time
             // the value is used to set cookie defaults.
-            // SAFETY: The type of `preprocess` ensures that all of these types have the correct
+            // SAFETY: The type of `dispatch` ensures that all of these types have the correct
             // lifetime ('c).
-            let response: Response<'c> = f(
+            let response: Response<'c> = dispatch(
                 token,
                 request,
                 data,
@@ -139,7 +145,10 @@ impl<'c> LocalResponse<'c> {
         }
     }
 
-    pub(crate) fn error<F, O>(req: Request<'c>, f: F) -> impl Future<Output = LocalResponse<'c>>
+    pub(crate) fn error<F, O>(
+        req: Request<'c>,
+        dispatch: F,
+    ) -> impl Future<Output = LocalResponse<'c>>
         where F: FnOnce(&'c Request<'c>, &'c mut ErasedError<'c>) -> O + Send,
               O: Future<Output = Response<'c>> + Send + 'c
     {
@@ -175,9 +184,9 @@ impl<'c> LocalResponse<'c> {
             // should never be added to the resulting jar which is the only time
             // the value is used to set cookie defaults.
             // SAFETY: Much like request above, error can borrow from request, and
-            // response can borrow from request or error. TODO
+            // response can borrow from request and/or error.
             let request: &'c Request<'c> = unsafe { &*(&*boxed_req as *const _) };
-            let response: Response<'c> = f(request, unsafe { transmute(&mut error) }).await;
+            let response: Response<'c> = dispatch(request, unsafe { transmute(&mut error) }).await;
             let mut cookies = CookieJar::new(None, request.rocket());
             for cookie in response.cookies() {
                 cookies.add_original(cookie.into_owned());

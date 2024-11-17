@@ -56,7 +56,7 @@ error[E0277]: the trait bound `Foo<usize>: FromFormField<'_>` is not satisfied
   --> tests/ui-fail-stable/from_form_type_errors.rs:14:12
    |
 14 |     field: Foo<usize>,
-   |            ^^^^^^^^^^ the trait `FromFormField<'_>` is not implemented for `Foo<usize>`, which is required by `Foo<usize>: FromForm<'r>`
+   |            ^^^ the trait `FromFormField<'_>` is not implemented for `Foo<usize>`, which is required by `Foo<usize>: FromForm<'r>`
    |
    = help: the following other types implement trait `FromFormField<'v>`:
              bool
@@ -209,7 +209,7 @@ error[E0277]: the trait bound `Foo<usize>: FromFormField<'_>` is not satisfied
    |          -------- in this derive macro expansion
 13 | struct Other {
 14 |     field: Foo<usize>,
-   |            ^^^^^^^^^^ the trait `FromFormField<'_>` is not implemented for `Foo<usize>`, which is required by `Foo<usize>: FromForm<'r>`
+   |            ^^^ the trait `FromFormField<'_>` is not implemented for `Foo<usize>`, which is required by `Foo<usize>: FromForm<'r>`
    |
    = help: the following other types implement trait `FromFormField<'v>`:
              bool

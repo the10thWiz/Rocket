@@ -7,8 +7,6 @@ use rocket::serde::uuid::Uuid;
 // real application this would be a database.
 struct People(HashMap<Uuid, &'static str>);
 
-// TODO: this is actually the same as previous, since Result<T, E> didn't
-// set or override the status.
 #[get("/people/<id>")]
 fn people(id: Uuid, people: &State<People>) -> String {
     if let Some(person) = people.0.get(&id) {

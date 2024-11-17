@@ -7,7 +7,7 @@ use crate::outcome::{self, IntoOutcome, try_outcome, Outcome::*};
 ///
 /// [`FromData`]: crate::data::FromData
 pub type Outcome<'r, T, E = <T as FromData<'r>>::Error>
-    = outcome::Outcome<T, (Status, E), (Data<'r>, Status)>;
+    = outcome::Outcome<T, E, (Data<'r>, Status)>;
 
 /// Trait implemented by data guards to derive a value from request body data.
 ///
@@ -231,12 +231,17 @@ pub type Outcome<'r, T, E = <T as FromData<'r>>::Error>
 /// use rocket::data::{self, Data, FromData, ToByteUnit};
 /// use rocket::http::{Status, ContentType};
 /// use rocket::outcome::Outcome;
+/// use rocket::catcher::TypedError;
 ///
-/// #[derive(Debug)]
+/// #[derive(Debug, TypedError)]
 /// enum Error {
+///     #[error(status = 413)]
 ///     TooLarge,
+///     #[error(status = 422)]
 ///     NoColon,
+///     #[error(status = 422)]
 ///     InvalidAge,
+///     #[error(status = 500)]
 ///     Io(std::io::Error),
 /// }
 ///
@@ -259,8 +264,8 @@ pub type Outcome<'r, T, E = <T as FromData<'r>>::Error>
 ///         // Read the data into a string.
 ///         let string = match data.open(limit).into_string().await {
 ///             Ok(string) if string.is_complete() => string.into_inner(),
-///             Ok(_) => return Outcome::Error((Status::PayloadTooLarge, TooLarge)),
-///             Err(e) => return Outcome::Error((Status::InternalServerError, Io(e))),
+///             Ok(_) => return Outcome::Error(TooLarge),
+///             Err(e) => return Outcome::Error(Io(e)),
 ///         };
 ///
 ///         // We store `string` in request-local cache for long-lived borrows.
@@ -269,13 +274,13 @@ pub type Outcome<'r, T, E = <T as FromData<'r>>::Error>
 ///         // Split the string into two pieces at ':'.
 ///         let (name, age) = match string.find(':') {
 ///             Some(i) => (&string[..i], &string[(i + 1)..]),
-///             None => return Outcome::Error((Status::UnprocessableEntity, NoColon)),
+///             None => return Outcome::Error(NoColon),
 ///         };
 ///
 ///         // Parse the age.
 ///         let age: u16 = match age.parse() {
 ///             Ok(age) => age,
-///             Err(_) => return Outcome::Error((Status::UnprocessableEntity, InvalidAge)),
+///             Err(_) => return Outcome::Error(InvalidAge),
 ///         };
 ///
 ///         Outcome::Success(Person { name, age })
@@ -318,7 +323,7 @@ use crate::data::Capped;
 
 #[crate::async_trait]
 impl<'r> FromData<'r> for Capped<String> {
-    type Error = std::io::Error;
+    type Error = (Status, std::io::Error);
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self> {
         let limit = req.limits().get("string").unwrap_or(Limits::STRING);
@@ -330,7 +335,7 @@ impl_strict_from_data_from_capped!(String);
 
 #[crate::async_trait]
 impl<'r> FromData<'r> for Capped<&'r str> {
-    type Error = std::io::Error;
+    type Error = (Status, std::io::Error);
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self> {
         let capped = try_outcome!(<Capped<String>>::from_data(req, data).await);
@@ -343,7 +348,7 @@ impl_strict_from_data_from_capped!(&'r str);
 
 #[crate::async_trait]
 impl<'r> FromData<'r> for Capped<&'r RawStr> {
-    type Error = std::io::Error;
+    type Error = (Status, std::io::Error);
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self> {
         let capped = try_outcome!(<Capped<String>>::from_data(req, data).await);
@@ -356,7 +361,7 @@ impl_strict_from_data_from_capped!(&'r RawStr);
 
 #[crate::async_trait]
 impl<'r> FromData<'r> for Capped<std::borrow::Cow<'_, str>> {
-    type Error = std::io::Error;
+    type Error = (Status, std::io::Error);
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self> {
         let capped = try_outcome!(<Capped<String>>::from_data(req, data).await);
@@ -368,7 +373,7 @@ impl_strict_from_data_from_capped!(std::borrow::Cow<'_, str>);
 
 #[crate::async_trait]
 impl<'r> FromData<'r> for Capped<&'r [u8]> {
-    type Error = std::io::Error;
+    type Error = (Status, std::io::Error);
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self> {
         let capped = try_outcome!(<Capped<Vec<u8>>>::from_data(req, data).await);
@@ -381,7 +386,7 @@ impl_strict_from_data_from_capped!(&'r [u8]);
 
 #[crate::async_trait]
 impl<'r> FromData<'r> for Capped<Vec<u8>> {
-    type Error = std::io::Error;
+    type Error = (Status, std::io::Error);
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self> {
         let limit = req.limits().get("bytes").unwrap_or(Limits::BYTES);
@@ -407,7 +412,7 @@ impl<'r, T: FromData<'r> + 'r> FromData<'r> for Result<T, T::Error> {
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self> {
         match T::from_data(req, data).await {
             Success(v) => Success(Ok(v)),
-            Error((_, e)) => Success(Err(e)),
+            Error(e) => Success(Err(e)),
             Forward(d) => Forward(d),
         }
     }

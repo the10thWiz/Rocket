@@ -158,7 +158,7 @@ fn inner_sentinels_detected() {
 
     impl<'r, 'o: 'r> response::Responder<'r, 'o> for ResponderSentinel {
         type Error = std::convert::Infallible;
-        fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+        fn respond_to(self, _: &'r Request<'_>) -> response::Result<'o, Self::Error> {
             unimplemented!()
         }
     }

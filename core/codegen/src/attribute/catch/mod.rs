@@ -14,7 +14,7 @@ use super::param::Guard;
 fn error_type(guard: &ErrorGuard) -> TokenStream {
     let ty = &guard.ty;
     quote! {
-        (#_catcher::TypeId::of::<#ty>(), ::std::any::type_name::<#ty>())
+        #_catcher::type_id_of::<#ty>()
     }
 }
 
@@ -85,9 +85,9 @@ pub fn _catch(
     let catcher_response = quote_spanned!(return_type_span => {
         let ___responder = #user_catcher_fn_name(#(#parameter_names),*) #dot_await;
         match #_response::Responder::respond_to(___responder, #__req) {
-            #Outcome::Success(v) => v,
+            #_Ok(v) => v,
             // If the responder fails, we drop any typed error, and convert to 500
-            #Outcome::Error(_) | #Outcome::Forward(_) => return Err(#Status::InternalServerError),
+            #_Err(_) => return #_Err(#Status::InternalServerError),
         }
     });
 

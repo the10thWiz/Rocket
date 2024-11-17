@@ -25,7 +25,7 @@ pub fn derive_typed_error(input: proc_macro::TokenStream) -> TokenStream {
         .type_bound_mapper(MapperBuild::new()
             .input_map(|_, i| {
                 let bounds = i.generics().type_params().map(|g| &g.ident);
-                quote! { #(#bounds: 'static,)* }
+                quote! { #(#bounds: ::std::marker::Send + ::std::marker::Sync + 'static,)* }
             })
         )
         .validator(ValidatorBuild::new()

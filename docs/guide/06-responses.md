@@ -107,6 +107,42 @@ fn json() -> RawTeapotJson {
 
 ### Errors
 
+TODO: This is probably where we should discuss typed errors
+
+Responders may fail instead of generating a response by returning an `Err`. This
+error can then be caught by a typed catcher. Typed errors can also be generated
+by any other step which can reject a request.
+
+Catchers are used to catch errors, and generate an error response. A simple catcher
+for serving a 404 page might look something like this:
+
+```rust
+# #[macro_use] extern crate rocket;
+# fn main() {}
+# use rocket::http::uri::Origin;
+#[catch(404)]
+fn not_found(uri: &Origin<'_>) -> String {
+    format!("{} does not exist.", uri)
+}
+```
+
+A typed catcher is very similar, but specifies an error parameter. This must be
+a reference to the error type. A catcher to respond when an invalid integer in
+a parameter was specified might look something like this:
+
+```rust
+# #[macro_use] extern crate rocket;
+# fn main() {}
+# use rocket::request::FromParamError;
+# use std::num::ParseIntError;
+#[catch(422, error = "<e>")]
+fn invalid_int(e: &FromParamError<'_, ParseIntError>) -> String {
+    format!("{} is not a valid int. {}", e.raw, e.error)
+}
+```
+
+TODO: the following is old
+
 Responders may fail instead of generating a response by returning an `Err` with
 a status code. When this happens, Rocket forwards the request to the [error
 catcher](../requests/#error-catchers) for that status code.
@@ -318,15 +354,14 @@ async fn files(file: PathBuf) -> Option<NamedFile> {
 
 ### `Result`
 
-`Result` is another _wrapping_ responder: a `Result<T, E>` can only be returned
-when `T` implements `Responder` and `E` implements `Responder`.
+`Result` is a special responder, used to throw typed errors, so that they can
+later be caught by a typed catcher. `Result<T, E>` can only be used as a
+responder when `T` implements `Responder` and `E` implements `TypedError`.
 
-The wrapped `Responder` in `Ok` or `Err`, whichever it might be, is used to
-respond to the client. This means that the responder can be chosen dynamically
-at run-time, and two different kinds of responses can be used depending on the
-circumstances. Revisiting our file server, for instance, we might wish to
-provide more feedback to the user when a file isn't found. We might do this as
-follows:
+The wrapped `Responder` in `Ok` will be used to respond directly to the client,
+but an `Err` value can be caught by a typed catcher. Revisiting our file server,
+for instance, we might wish to format error values when the file isn't found.
+We might do this as follows:
 
 ```rust
 # #[macro_use] extern crate rocket;
@@ -336,10 +371,17 @@ follows:
 use rocket::fs::NamedFile;
 use rocket::response::status::NotFound;
 
+// `NotFound` is a wrapper over either responders or typed errors, that
+// sets the status to 404.
 #[get("/<file..>")]
-async fn files(file: PathBuf) -> Result<NamedFile, NotFound<String>> {
+async fn files(file: PathBuf) -> Result<NamedFile, NotFound<std::io::Error>> {
     let path = Path::new("static/").join(file);
-    NamedFile::open(&path).await.map_err(|e| NotFound(e.to_string()))
+    NamedFile::open(&path).await.map_err(|e| NotFound(e))
+}
+
+#[catch(404, error = "<e>")]
+fn catch_std_io(e: &std::io::Error) -> String {
+    format!("{}", e)
 }
 ```
 

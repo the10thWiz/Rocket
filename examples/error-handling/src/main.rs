@@ -2,12 +2,16 @@
 
 #[cfg(test)] mod tests;
 
+use std::num::ParseIntError;
+
 use transient::Transient;
 
-use rocket::{Rocket, Build};
+use rocket::{Rocket, Build, Responder};
 use rocket::response::{content, status};
 use rocket::http::{Status, uri::Origin};
-use std::num::ParseIntError;
+
+use rocket::serde::{Serialize, json::Json};
+use rocket::request::FromParamError;
 
 #[get("/hello/<name>/<age>")]
 fn hello(name: &str, age: i8) -> String {
@@ -51,16 +55,29 @@ fn hello_not_found(uri: &Origin<'_>) -> content::RawHtml<String> {
         uri))
 }
 
-// `error` is typed error. All other parameters must implement `FromError`.
-// Any type that implements `FromRequest` automatically implements `FromError`,
-// as well as `Status`, `&Request` and `&dyn TypedError<'_>`
-#[catch(422, error = "<e>")]
-fn param_error(e: &ParseIntError, uri: &Origin<'_>) -> content::RawHtml<String> {
-    content::RawHtml(format!("\
-        <p>Sorry, but '{}' is not a valid path!</p>\
-        <p>Try visiting /hello/&lt;name&gt;/&lt;age&gt; instead.</p>\
-        <p>Error: {e:?}</p>",
-        uri))
+// Code to generate a Json response:
+#[derive(Responder)]
+#[response(status = 422)]
+struct ParameterError<T>(T);
+
+#[derive(Serialize)]
+#[serde(crate = "rocket::serde")]
+struct ErrorInfo<'a> {
+    invalid_value: &'a str,
+    description: String,
+}
+
+// Actual catcher:
+#[catch(422, error = "<int_error>")]
+fn param_error<'a>(
+    // `&ParseIntError` would also work here, but `&FromParamError<ParseIntError>`
+    // also gives us access to `raw`, the specific segment that failed to parse.
+    int_error: &FromParamError<'a, ParseIntError>
+) -> ParameterError<Json<ErrorInfo<'a>>> {
+    ParameterError(Json(ErrorInfo {
+        invalid_value: int_error.raw,
+        description: format!("{}", int_error.error),
+    }))
 }
 
 #[catch(default)]
@@ -68,7 +85,7 @@ fn sergio_error() -> &'static str {
     "I...don't know what to say."
 }
 
-#[catch(default, status = "<status>")]
+#[catch(default)]
 fn default_catcher(status: Status, uri: &Origin<'_>) -> status::Custom<String> {
     let msg = format!("{} ({})", status, uri);
     status::Custom(status, msg)

@@ -551,7 +551,7 @@ impl<'v> FromFormField<'v> for Capped<TempFile<'v>> {
 
 #[crate::async_trait]
 impl<'r> FromData<'r> for Capped<TempFile<'_>> {
-    type Error = io::Error;
+    type Error = (Status, io::Error);
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> data::Outcome<'r, Self> {
         let has_form = |ty: &ContentType| ty.is_form_data() || ty.is_form();

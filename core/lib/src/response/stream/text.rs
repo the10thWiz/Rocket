@@ -66,7 +66,7 @@ impl<'r, S: Stream> Responder<'r, 'r> for TextStream<S>
     where S: Send + 'r, S::Item: AsRef<str> + Send + Unpin + 'r
 {
     type Error = std::convert::Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'r, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'r, Self::Error> {
         struct ByteStr<T>(T);
 
         impl<T: AsRef<str>> AsRef<[u8]> for ByteStr<T> {

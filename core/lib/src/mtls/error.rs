@@ -1,7 +1,8 @@
 use std::fmt;
 use std::num::NonZeroUsize;
 
-use crate::mtls::x509::{self, nom};
+use crate::http::Status;
+use crate::{catcher::TypedError, mtls::x509::{self, nom}};
 use transient::Static;
 
 /// An error returned by the [`Certificate`](crate::mtls::Certificate) guard.
@@ -43,6 +44,16 @@ pub enum Error {
 }
 
 impl Static for Error {}
+
+impl<'r> TypedError<'r> for Error {
+    fn respond_to(&self, _r: &'r crate::Request<'_>) -> Result<crate::Response<'r>, Status> {
+        Err(Status::Unauthorized)
+    }
+
+    fn source(&'r self) -> Option<&'r (dyn TypedError<'r> + 'r)> { None }
+
+    fn status(&self) -> Status { Status::Unauthorized }
+}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

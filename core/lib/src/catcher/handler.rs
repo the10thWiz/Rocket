@@ -50,12 +50,12 @@ pub type BoxFuture<'r, T = Result<'r>> = futures::future::BoxFuture<'r, T>;
 ///         -> catcher::Result<'r>
 ///     {
 ///         let inner = match self.0 {
-///             Kind::Simple => "simple".respond_to(req).responder_error()?,
-///             Kind::Intermediate => "intermediate".respond_to(req).responder_error()?,
-///             Kind::Complex => "complex".respond_to(req).responder_error()?,
+///             Kind::Simple => "simple".respond_to(req)?,
+///             Kind::Intermediate => "intermediate".respond_to(req)?,
+///             Kind::Complex => "complex".respond_to(req)?,
 ///         };
 ///
-///         Response::build_from(inner).status(status).ok::<()>().responder_error()
+///         Response::build_from(inner).status(status).ok()
 ///     }
 /// }
 ///

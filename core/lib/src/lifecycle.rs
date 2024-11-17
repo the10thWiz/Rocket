@@ -114,29 +114,33 @@ impl Rocket<Orbit> {
         } else {
             match self.route(request, data).await {
                 Outcome::Success(response) => response,
-                Outcome::Forward((data, _, _)) if request.method() == Method::Head => {
+                Outcome::Forward((data, _)) if request.method() == Method::Head => {
                     tracing::Span::current().record("autohandled", true);
 
                     // Dispatch the request again with Method `GET`.
                     request._set_method(Method::Get);
                     match self.route(request, data).await {
                         Outcome::Success(response) => response,
-                        Outcome::Error((status, error)) => {
-                            error_ptr.write(error);
+                        Outcome::Error(error) => {
+                            let status = error.status();
+                            error_ptr.write(Some(error));
                             self.dispatch_error(status, request, error_ptr.get()).await
                         },
-                        Outcome::Forward((_, status, error)) => {
-                            error_ptr.write(error);
+                        Outcome::Forward((_, error)) => {
+                            let status = error.status();
+                            error_ptr.write(Some(error));
                             self.dispatch_error(status, request, error_ptr.get()).await
                         },
                     }
                 }
-                Outcome::Forward((_, status, error)) => {
-                    error_ptr.write(error);
+                Outcome::Forward((_, error)) => {
+                    let status = error.status();
+                    error_ptr.write(Some(error));
                     self.dispatch_error(status, request, error_ptr.get()).await
                 },
-                Outcome::Error((status, error)) => {
-                    error_ptr.write(error);
+                Outcome::Error(error) => {
+                    let status = error.status();
+                    error_ptr.write(Some(error));
                     self.dispatch_error(status, request, error_ptr.get()).await
                 },
             }
@@ -222,8 +226,7 @@ impl Rocket<Orbit> {
     ) -> route::Outcome<'r> {
         // Go through all matching routes until we fail or succeed or run out of
         // routes to try, in which case we forward with the last status.
-        let mut status = Status::NotFound;
-        let mut error = None;
+        let mut error: Box<dyn TypedError<'r>> = Box::new(Status::NotFound);
         for route in self.router.route(request) {
             // Retrieve and set the requests parameters.
             route.trace_info();
@@ -238,11 +241,11 @@ impl Rocket<Orbit> {
             outcome.trace_info();
             match outcome {
                 o@Outcome::Success(_) | o@Outcome::Error(_) => return o,
-                Outcome::Forward(forwarded) => (data, status, error) = forwarded,
+                Outcome::Forward(forwarded) => (data, error) = forwarded,
             }
         }
 
-        Outcome::Forward((data, status, error))
+        Outcome::Forward((data, error))
     }
 
     // Invokes the catcher for `status`. Returns the response on success.
@@ -283,31 +286,17 @@ impl Rocket<Orbit> {
 
     /// Invokes the handler with `req` for catcher with status `status`.
     ///
-    /// In order of preference, invoked handler is:
-    ///   * the user's registered handler for `status`
-    ///   * the user's registered `default` handler
-    ///   * Rocket's default handler for `status`
-    ///
-    /// Return `Ok(result)` if the handler succeeded. Returns `Ok(Some(Status))`
-    /// if the handler ran to completion but failed. Returns `Ok(None)` if the
-    /// handler panicked while executing.
-    ///
-    /// # TODO: updated semantics:
-    ///
     /// Selects and invokes a specific catcher, with the following preference:
+    /// - The longest path base
     /// - Best matching error type (prefers calling `.source()` the fewest number
     ///   of times)
-    /// - The longest path base
     /// - Matching status
-    /// - The error's built-in responder (TODO: should this be before untyped catchers?)
+    /// - The error's built-in responder
     /// - If no catcher is found, Rocket's default handler is invoked
     ///
     /// Return `Ok(result)` if the handler succeeded. Returns `Ok(Some(Status))`
     /// if the handler ran to completion but failed. Returns `Ok(None)` if the
     /// handler panicked while executing.
-    ///
-    /// TODO: These semantics should (ideally) match the old semantics in the case where
-    /// `error` is `None`.
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,
@@ -315,18 +304,22 @@ impl Rocket<Orbit> {
         req: &'r Request<'s>
     ) -> Result<Response<'r>, Option<Status>> {
         // Lists error types by repeatedly calling `.source()`
-        let catchers = std::iter::successors(error, |e| e.source())
+        let catcher = std::iter::successors(error, |e| e.source())
             // Only go up to 5 levels deep (to prevent an endless cycle)
             .take(5)
             // Map to catchers
             .filter_map(|e| {
-                self.router.catch(status, req, Some(e.trait_obj_typeid())).map(|c| (c, e))
+                self.router.catch(status, req, Some(e.trait_obj_typeid())).map(|c| (c, Some(e)))
             })
-            // Select the minimum by the catcher's rank
+            // Add untyped catcher, at the end (with the lowest priority)
+            .chain(
+                self.router.catch(status, req, None)
+                    .map(|c| (c, None))
+            )
+            // Select the minimum by the catcher's rank. In case of a tie, selects the
+            // first it comes across
             .min_by_key(|(c, _)| c.rank);
-        if let Some((catcher, e)) = catchers {
-            self.invoke_specific_catcher(catcher, status, Some(e), req).await
-        } else if let Some(catcher) = self.router.catch(status, req, None) {
+        if let Some((catcher, error)) = catcher {
             self.invoke_specific_catcher(catcher, status, error, req).await
         } else if let Some(res) = error.and_then(|e| e.respond_to(req).ok()) {
             Ok(res)

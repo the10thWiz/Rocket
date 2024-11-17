@@ -239,7 +239,7 @@ impl<'r> FromRequest<'r> for WebSocket {
 
 impl<'r, 'o: 'r> Responder<'r, 'o> for Channel<'o> {
     type Error = std::convert::Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         Response::build()
             .raw_header("Sec-Websocket-Version", "13")
             .raw_header("Sec-WebSocket-Accept", self.ws.key.clone())
@@ -252,7 +252,7 @@ impl<'r, 'o: 'r, S> Responder<'r, 'o> for MessageStream<'o, S>
     where S: futures::Stream<Item = Result<Message>> + Send + 'o
 {
     type Error = std::convert::Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'o, Self::Error> {
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'o, Self::Error> {
         Response::build()
             .raw_header("Sec-Websocket-Version", "13")
             .raw_header("Sec-WebSocket-Accept", self.ws.key.clone())

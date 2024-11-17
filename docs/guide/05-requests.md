@@ -519,22 +519,59 @@ As an example, for the `User` guard above, instead of allowing the guard to
 forward in `admin_panel_user`, we might want to detect it and handle it
 dynamically:
 
+TODO: typed: This would actually make much more sense via a typed catcher
+
 ```rust
 # #[macro_use] extern crate rocket;
 # fn main() {}
 
+use rocket::response::Redirect;
+use rocket::request::{self, Request, FromRequest, Outcome};
+use rocket::either::Either;
+use rocket::http::Status;
+
 # type Template = ();
-# type AdminUser = rocket::http::Method;
-# type User = rocket::http::Method;
+// # type AdminUser = rocket::http::Method;
+// # type User = rocket::http::Method;
 # #[get("/login")]
 # fn login() -> Template { /* .. */ }
+# fn is_logged_in_as_admin(r: &Request<'_>) -> bool { true }
+# fn is_logged_in(r: &Request<'_>) -> bool { true }
 
-use rocket::response::Redirect;
+#[derive(Debug, TypedError)]
+enum LoginError {
+    #[error(status = 401)]
+    NotLoggedIn,
+    #[error(status = 401)]
+    NotAdmin,
+}
 
-#[get("/admin", rank = 2)]
-fn admin_panel_user(user: Option<User>) -> Result<&'static str, Redirect> {
-    let user = user.ok_or_else(|| Redirect::to(uri!(login)))?;
-    Ok("Sorry, you must be an administrator to access this page.")
+struct AdminUser {}
+#[async_trait]
+impl<'r> FromRequest<'r> for AdminUser {
+    type Error = LoginError;
+    async fn from_request(r: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        if is_logged_in_as_admin(r) {
+            Outcome::Success(Self {})
+        } else if is_logged_in(r) {
+            Outcome::Error(LoginError::NotAdmin)
+        } else {
+            Outcome::Error(LoginError::NotLoggedIn)
+        }
+    }
+}
+
+#[get("/admin")]
+fn admin_panel(user: AdminUser) -> &'static str {
+    "Welcome to the admin panel"
+}
+
+#[catch(401, error = "<e>")]
+fn catch_login_error(e: &LoginError) -> Either<&'static str, Redirect> {
+    match e {
+        LoginError::NotLoggedIn => Either::Right(Redirect::to(uri!(login))),
+        LoginError::NotAdmin => Either::Left("Admin permissions are required to view this page."),
+    }
 }
 ```
 
@@ -2136,7 +2173,7 @@ similarly be registered with [`register()`]:
 use rocket::Request;
 use rocket::http::Status;
 
-#[catch(default, status = "<status>")]
+#[catch(default)]
 fn default_catcher(status: Status) { /* .. */ }
 
 #[launch]

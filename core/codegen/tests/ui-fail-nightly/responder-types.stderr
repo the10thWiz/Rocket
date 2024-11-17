@@ -1,8 +1,61 @@
+error[E0277]: the trait bound `u8: Responder<'r, 'static>` is not satisfied
+ --> tests/ui-fail-nightly/responder-types.rs:3:10
+  |
+3 | #[derive(Responder)]
+  |          ^^^^^^^^^ the trait `Responder<'r, 'static>` is not implemented for `u8`
+  |
+  = help: the following other types implement trait `Responder<'r, 'o>`:
+            <&'o [u8] as Responder<'r, 'o>>
+            <&'o str as Responder<'r, 'o>>
+            <() as Responder<'r, 'static>>
+            <(ContentType, R) as Responder<'r, 'o>>
+            <(Status, R) as Responder<'r, 'o>>
+            <Accepted<R> as Responder<'r, 'o>>
+            <Arc<[u8]> as Responder<'r, 'static>>
+            <Arc<str> as Responder<'r, 'static>>
+          and $N others
+  = note: this error originates in the derive macro `Responder` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `u8: Responder<'r, 'static>` is not satisfied
+  --> tests/ui-fail-nightly/responder-types.rs:14:10
+   |
+14 | #[derive(Responder)]
+   |          ^^^^^^^^^ the trait `Responder<'r, 'static>` is not implemented for `u8`
+   |
+   = help: the following other types implement trait `Responder<'r, 'o>`:
+             <&'o [u8] as Responder<'r, 'o>>
+             <&'o str as Responder<'r, 'o>>
+             <() as Responder<'r, 'static>>
+             <(ContentType, R) as Responder<'r, 'o>>
+             <(Status, R) as Responder<'r, 'o>>
+             <Accepted<R> as Responder<'r, 'o>>
+             <Arc<[u8]> as Responder<'r, 'static>>
+             <Arc<str> as Responder<'r, 'static>>
+           and $N others
+   = note: this error originates in the derive macro `Responder` (in Nightly builds, run with -Z macro-backtrace for more info)
+
 error[E0277]: the trait bound `u8: Responder<'_, '_>` is not satisfied
  --> tests/ui-fail-nightly/responder-types.rs:5:12
   |
 5 |     thing: u8,
   |            ^^ the trait `Responder<'_, '_>` is not implemented for `u8`
+  |
+  = help: the following other types implement trait `Responder<'r, 'o>`:
+            <&'o [u8] as Responder<'r, 'o>>
+            <&'o str as Responder<'r, 'o>>
+            <() as Responder<'r, 'static>>
+            <(ContentType, R) as Responder<'r, 'o>>
+            <(Status, R) as Responder<'r, 'o>>
+            <Accepted<R> as Responder<'r, 'o>>
+            <Arc<[u8]> as Responder<'r, 'static>>
+            <Arc<str> as Responder<'r, 'static>>
+          and $N others
+
+error[E0277]: the trait bound `u8: Responder<'_, '_>` is not satisfied
+ --> tests/ui-fail-nightly/responder-types.rs:5:5
+  |
+5 |     thing: u8,
+  |     ^^^^^^^^^ the trait `Responder<'_, '_>` is not implemented for `u8`
   |
   = help: the following other types implement trait `Responder<'r, 'o>`:
             <&'o [u8] as Responder<'r, 'o>>
@@ -78,6 +131,23 @@ note: required by a bound in `Response::<'r>::set_header`
    |     pub fn set_header<'h: 'r, H: Into<Header<'h>>>(&mut self, header: H) -> bool {
    |                                  ^^^^^^^^^^^^^^^^ required by this bound in `Response::<'r>::set_header`
 
+error[E0277]: the trait bound `u8: Responder<'_, '_>` is not satisfied
+  --> tests/ui-fail-nightly/responder-types.rs:16:5
+   |
+16 |     thing: u8,
+   |     ^^^^^^^^^ the trait `Responder<'_, '_>` is not implemented for `u8`
+   |
+   = help: the following other types implement trait `Responder<'r, 'o>`:
+             <&'o [u8] as Responder<'r, 'o>>
+             <&'o str as Responder<'r, 'o>>
+             <() as Responder<'r, 'static>>
+             <(ContentType, R) as Responder<'r, 'o>>
+             <(Status, R) as Responder<'r, 'o>>
+             <Accepted<R> as Responder<'r, 'o>>
+             <Arc<[u8]> as Responder<'r, 'static>>
+             <Arc<str> as Responder<'r, 'static>>
+           and $N others
+
 error[E0277]: the trait bound `Header<'_>: From<std::string::String>` is not satisfied
   --> tests/ui-fail-nightly/responder-types.rs:24:5
    |
@@ -119,9 +189,9 @@ error[E0277]: the trait bound `usize: Responder<'_, '_>` is not satisfied
              <Arc<[u8]> as Responder<'r, 'static>>
              <Arc<str> as Responder<'r, 'static>>
            and $N others
-note: required by a bound in `route::handler::<impl Outcome<Response<'o>, Status, (rocket::Data<'o>, Status)>>::from`
+note: required by a bound in `route::handler::<impl Outcome<Response<'o>, (Status, std::option::Option<Box<(dyn TypedError<'o> + 'o)>>), (rocket::Data<'o>, Status, std::option::Option<Box<(dyn TypedError<'o> + 'o)>>)>>::from`
   --> $WORKSPACE/core/lib/src/route/handler.rs
    |
    |     pub fn from<R: Responder<'r, 'o>>(req: &'r Request<'_>, responder: R) -> Outcome<'r> {
-   |                    ^^^^^^^^^^^^^^^^^ required by this bound in `route::handler::<impl Outcome<Response<'o>, Status, (Data<'o>, Status)>>::from`
+   |                    ^^^^^^^^^^^^^^^^^ required by this bound in `route::handler::<impl Outcome<Response<'o>, (Status, Option<Box<dyn TypedError<'o>>>), (Data<'o>, Status, Option<Box<dyn TypedError<'o>>>)>>::from`
    = note: this error originates in the attribute macro `get` (in Nightly builds, run with -Z macro-backtrace for more info)

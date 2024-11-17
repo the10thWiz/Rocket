@@ -1,6 +1,5 @@
 use transient::TypeId;
 
-use crate::catcher::TypedError;
 use crate::{Route, Request, Catcher};
 use crate::router::Collide;
 use crate::http::Status;
@@ -89,6 +88,7 @@ impl Catcher {
     ///     [`status`](Status::code) _or_ is `default`.
     ///   * The catcher's [base](Catcher::base()) is a prefix of the `request`'s
     ///     [normalized](crate::http::uri::Origin#normalization) URI.
+    ///   * The catcher has the same [type](Catcher::error_type).
     ///
     /// For an error arising from a request to be routed to a particular
     /// catcher, that catcher must both `match` _and_ have higher precedence
@@ -99,11 +99,18 @@ impl Catcher {
     /// The precedence of a catcher is determined by:
     ///
     ///   1. The number of _complete_ segments in the catcher's `base`.
+    ///   3. The error type.
     ///   2. Whether the catcher is `default` or not.
     ///
     /// Non-default routes, and routes with more complete segments in their
     /// base, have higher precedence.
     ///
+    /// TODO: typed: Exact number has not yet been decided
+    /// During the routing process, [`.source()`] is called up to 5 times on
+    /// the error. This produces a sequence of types, and catchers that match
+    /// types earlier in the sequence are prefered.
+    ///
+    /// [`.source()`]: rocket::catcher::TypedError::source
     /// # Example
     ///
     /// ```rust
@@ -137,7 +144,6 @@ impl Catcher {
     /// let b_count = b.base().segments().filter(|s| !s.is_empty()).count();
     /// assert!(b_count > a_count);
     /// ```
-    // TODO: document error matching
     pub fn matches(&self, status: Status, request: &Request<'_>, error: Option<TypeId>) -> bool {
         self.code.map_or(true, |code| code == status.code)
             && error == self.error_type.map(|(ty, _)| ty)

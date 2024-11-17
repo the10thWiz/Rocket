@@ -1,4 +1,4 @@
-use std::io;
+use std::{fmt, io};
 use std::mem::transmute;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -31,12 +31,20 @@ pub struct ErasedRequest {
     _parts: Box<Parts>,
 }
 
+// SAFETY: This tells dropck that the parts of ErasedRequest MUST be dropped
+// as a group (and ensures they happen in order)
 impl Drop for ErasedRequest {
     fn drop(&mut self) { }
 }
 
 pub struct ErasedError<'r> {
     error: Option<Pin<Box<dyn TypedError<'r> + 'r>>>,
+}
+
+impl fmt::Debug for ErasedError<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<dyn TypedError>")
+    }
 }
 
 impl<'r> ErasedError<'r> {
@@ -63,7 +71,7 @@ impl<'r> ErasedError<'r> {
     }
 }
 
-// TODO: #[derive(Debug)]
+#[derive(Debug)]
 pub struct ErasedResponse {
     // XXX: SAFETY: This (dependent) field must come first due to drop order!
     response: Response<'static>,
@@ -72,6 +80,8 @@ pub struct ErasedResponse {
     _request: Arc<ErasedRequest>,
 }
 
+// SAFETY: This tells dropck that the parts of ErasedResponse MUST be dropped
+// as a group (and ensures they happen in order)
 impl Drop for ErasedResponse {
     fn drop(&mut self) { }
 }
@@ -82,6 +92,8 @@ pub struct ErasedIoHandler {
     _request: Arc<ErasedRequest>,
 }
 
+// SAFETY: This tells dropck that the parts of ErasedIoHandler MUST be dropped
+// as a group (and ensures they happen in order)
 impl Drop for ErasedIoHandler {
     fn drop(&mut self) { }
 }

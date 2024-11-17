@@ -1,6 +1,5 @@
 use transient::Transient;
 
-use crate::catcher::TypedError;
 use crate::request::Request;
 use crate::response::{self, Response, Responder};
 use crate::http::uri::Reference;
@@ -154,8 +153,8 @@ impl Redirect {
 /// value used to create the `Responder` is an invalid URI, an error of
 /// `Status::InternalServerError` is returned.
 impl<'r> Responder<'r, 'static> for Redirect {
-    type Error = std::convert::Infallible;
-    fn respond_to(self, _: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    type Error = Status;
+    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         if let Some(uri) = self.1 {
             Response::build()
                 .status(self.0)
@@ -163,27 +162,7 @@ impl<'r> Responder<'r, 'static> for Redirect {
                 .ok()
         } else {
             error!("Invalid URI used for redirect.");
-            response::Outcome::Forward(Status::InternalServerError)
-        }
-    }
-}
-
-// TODO: This is a hack
-impl<'r> TypedError<'r> for Redirect {
-    fn respond_to(&self, _req: &'r Request<'r>) -> Result<Response<'r>, Status> {
-        if let Some(uri) = &self.1 {
-            Response::build()
-                .status(self.0)
-                .raw_header("Location", uri.to_string())
-                .ok::<()>()
-                .responder_error()
-        } else {
-            error!("Invalid URI used for redirect.");
             Err(Status::InternalServerError)
         }
-    }
-
-    fn status(&self) -> Status {
-        self.0
     }
 }

@@ -164,7 +164,7 @@ impl<'r, T: Deserialize<'r>> MsgPack<T> {
 
 #[crate::async_trait]
 impl<'r, T: Deserialize<'r>> FromData<'r> for MsgPack<T> {
-    type Error = Error;
+    type Error = (Status, Error);
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Outcome<'r, Self> {
         match Self::from_data(req, data).await {
@@ -188,19 +188,16 @@ impl<'r, T: Deserialize<'r>> FromData<'r> for MsgPack<T> {
 /// serialization fails, an `Err` of `Status::InternalServerError` is returned.
 impl<'r, T: Serialize> Responder<'r, 'static> for MsgPack<T> {
     type Error = rmp_serde::encode::Error;
-    fn respond_to(self, req: &'r Request<'_>) -> response::Outcome<'static, Self::Error> {
+    fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static, Self::Error> {
         let buf = match rmp_serde::to_vec(&self.0) {
             Ok(v) => v,
             Err(e) => {
                 error!("MsgPack serialize failure: {}", e);
-                return response::Outcome::Error(e);
+                return Err(e);
             }
         };
-            // .map_err(|e| {
-            //     Status::InternalServerError
-            // })?;
 
-        content::RawMsgPack(buf).respond_to(req).map_err_type()
+        content::RawMsgPack(buf).respond_to(req).map_err(|e| match e {})
     }
 }
 
@@ -220,6 +217,7 @@ impl<'v, T: Deserialize<'v> + Send> form::FromFormField<'v> for MsgPack<T> {
     }
 }
 
+// TODO: why is the commented out?
 // impl<T: Serialize> fmt::UriDisplay<fmt::Query> for MsgPack<T> {
 //     fn fmt(&self, f: &mut fmt::Formatter<'_, fmt::Query>) -> std::fmt::Result {
 //         let bytes = to_vec(&self.0).map_err(|_| std::fmt::Error)?;
