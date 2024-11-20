@@ -128,8 +128,9 @@ features = ["provider-address-token-default", "provider-tls-rustls"]
 optional = true
 
 [dependencies.s2n-quic-h3]
-git = "https://github.com/SergioBenitez/s2n-quic-h3.git"
-rev = "6613956"
+# git = "https://github.com/SergioBenitez/s2n-quic-h3.git"
+# rev = "6613956"
+path = "../../../s2n-quic-h3"
 optional = true
 
 [target.'cfg(unix)'.dependencies]
