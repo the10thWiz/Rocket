@@ -4,7 +4,7 @@ use proc_macro2::Span;
 
 use crate::name::Name;
 use crate::proc_macro_ext::StringLit;
-use crate::attribute::param::{Parameter, Dynamic};
+use crate::attribute::param::{Dynamic, Parameter};
 use crate::http::uri::fmt::{Part, Kind, Path};
 use crate::attribute::suppress::Lint;
 
@@ -40,6 +40,12 @@ impl Dynamic {
     }
 }
 
+fn split_name(segment: &str) -> Option<(&str, &str, &str)> {
+    let start = segment.find('<')?;
+    let end = segment[start..].find('>')? + start;
+    Some((&segment[..start], &segment[start+1..end], &segment[end+1..]))
+}
+
 impl Parameter {
     pub fn parse<P: Part>(
         segment: &str,
@@ -48,9 +54,10 @@ impl Parameter {
         let mut trailing = false;
 
         // Check if this is a dynamic param. If so, check its well-formedness.
-        let lint = Lint::SegmentChars;
-        if segment.starts_with('<') && segment.ends_with('>') {
-            let mut name = &segment[1..(segment.len() - 1)];
+        if segment.is_empty() {
+            return Err(Error::new(segment, source_span, ErrorKind::Empty));
+        } else if let Some((prefix, mut name, postfix)) = split_name(segment) {
+            // let mut name = &segment[1..(segment.len() - 1)];
             if name.ends_with("..") {
                 trailing = true;
                 name = &name[..(name.len() - 2)];
@@ -63,7 +70,10 @@ impl Parameter {
                 return Err(Error::new(name, span, ErrorKind::BadIdent));
             }
 
-            let dynamic = Dynamic { name: Name::new(name, span), trailing, index: 0 };
+            let prefix = Some(prefix).filter(|s| !s.is_empty()).map(|s| Name::new(s, source_span));
+            let postfix = Some(postfix).filter(|s| !s.is_empty()).map(|s| Name::new(s, source_span));
+
+            let dynamic = Dynamic { name: Name::new(name, span), prefix, suffix: postfix, trailing, index: 0 };
             if dynamic.is_wild() && P::KIND != Kind::Path {
                 return Err(Error::new(name, span, ErrorKind::Ignored));
             } else if dynamic.is_wild() {
@@ -71,17 +81,6 @@ impl Parameter {
             } else {
                 return Ok(Parameter::Dynamic(dynamic));
             }
-        } else if segment.is_empty() {
-            return Err(Error::new(segment, source_span, ErrorKind::Empty));
-        } else if segment.starts_with('<') && lint.enabled(source_span) {
-            let candidate = candidate_from_malformed(segment);
-            source_span.warning("`segment` starts with `<` but does not end with `>`")
-                .help(format!("perhaps you meant the dynamic parameter `<{}>`?", candidate))
-                .note(lint.how_to_suppress())
-                .emit_as_item_tokens();
-        } else if (segment.contains('>') || segment.contains('<')) && lint.enabled(source_span) {
-            source_span.warning("`segment` contains `<` or `>` but is not a dynamic parameter")
-                .emit_as_item_tokens();
         }
 
         Ok(Parameter::Static(Name::new(segment, source_span)))

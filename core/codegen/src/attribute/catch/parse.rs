@@ -93,7 +93,7 @@ impl Attribute {
             .filter(|(name, _)| Some(*name) != meta.error.as_ref().map(|e| &e.name))
             .enumerate()
             .map(|(index, (name, (ident, ty)))| Guard {
-                source: Dynamic { name: name.clone(), index, trailing: false },
+                source: Dynamic { name: name.clone(), index, trailing: false, prefix: None, suffix: None },
                 fn_ident: ident.clone(),
                 ty: ty.clone(),
             })

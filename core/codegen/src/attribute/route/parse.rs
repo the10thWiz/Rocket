@@ -191,7 +191,7 @@ impl Route {
             })
             .enumerate()
             .map(|(index, (name, (ident, ty)))| Guard {
-                source: Dynamic { index, name: name.clone(), trailing: false },
+                source: Dynamic { index, name: name.clone(), trailing: false, prefix: None, suffix: None },
                 fn_ident: ident.clone(),
                 ty: ty.clone(),
             })

@@ -181,7 +181,8 @@ impl Collide for RouteUri<'_> {
 
 impl Collide for Segment {
     fn collides_with(&self, other: &Self) -> bool {
-        self.dynamic || other.dynamic || self.value == other.value
+        // TODO: actually check  values of prefix/postfix
+        self.dynamic.is_some() || other.dynamic.is_some() || self.value == other.value
     }
 }
 

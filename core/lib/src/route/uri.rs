@@ -3,6 +3,7 @@ use std::fmt;
 use crate::http::uri::{self, Origin, Path};
 use crate::http::ext::IntoOwned;
 use crate::form::ValueField;
+use crate::route::segment::QuerySegment;
 use crate::route::Segment;
 
 /// A route URI which is matched against requests.
@@ -248,7 +249,7 @@ impl Metadata {
             .collect::<Vec<_>>();
 
         let query_segs = uri.query()
-            .map(|q| q.raw_segments().map(Segment::from).collect::<Vec<_>>())
+            .map(|q| q.raw_segments().map(QuerySegment::from).collect::<Vec<_>>())
             .unwrap_or_default();
 
         let static_query_fields = query_segs.iter().filter(|s| !s.dynamic)
@@ -256,8 +257,8 @@ impl Metadata {
             .map(|f| (f.name.source().to_string(), f.value.to_string()))
             .collect();
 
-        let static_path = uri_segments.iter().all(|s| !s.dynamic);
-        let wild_path = !uri_segments.is_empty() && uri_segments.iter().all(|s| s.dynamic);
+        let static_path = uri_segments.iter().all(|s| s.dynamic.is_none());
+        let wild_path = !uri_segments.is_empty() && uri_segments.iter().all(|s| s.dynamic.is_some());
         let path_color = match (static_path, wild_path) {
             (true, _) => Color::Static,
             (_, true) => Color::Wild,

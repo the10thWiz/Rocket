@@ -169,7 +169,7 @@ fn paths_match(route: &Route, req: &Request<'_>) -> bool {
             return true;
         }
 
-        if !route_seg.dynamic && route_seg.value != req_seg {
+        if route_seg.dynamic.is_none() && route_seg.value != req_seg {
             return false;
         }
     }

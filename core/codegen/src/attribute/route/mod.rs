@@ -200,12 +200,19 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
         #Outcome::Forward((#__data, Box::new(__error) as Box<dyn #TypedError<'__r> + '__r>))
     });
 
+    let prefix = guard.prefix.as_ref().map(|name| quote_spanned!(name.span() => .and_then(|__s|__s.strip_prefix(#name))));
+    let suffix = guard.suffix.as_ref().map(|name| quote_spanned!(name.span() => .and_then(|__s|__s.strip_suffix(#name))));
+
     // All dynamic parameters should be found if this function is being called;
     // that's the point of statically checking the URI parameters.
+    // TODO: typed: handle error correctly
     let expr = match guard.trailing {
         false => quote_spanned! { ty.span() =>
             match #__req.routed_segment(#i) {
-                #_Some(__s) => match <#ty as #FromParam>::from_param(__s) {
+                #_Some(__s) => match <#ty as #FromParam>::from_param(match #_Some(__s) #prefix #suffix {
+                    #_Some(__s) => __s,
+                    #_None => return #Outcome::Forward((#__data, Box::new(#Status::NotFound) as Box<dyn #TypedError<'__r> + '__r>)),
+                }) {
                     #_Ok(__v) => __v,
                     #[allow(unreachable_code)]
                     #_Err(__error) => {

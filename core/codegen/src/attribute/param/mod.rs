@@ -18,6 +18,8 @@ pub struct Dynamic {
     pub name: Name,
     pub index: usize,
     pub trailing: bool,
+    pub prefix: Option<Name>,
+    pub suffix: Option<Name>,
 }
 
 #[derive(Debug, Clone)]

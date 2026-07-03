@@ -188,7 +188,7 @@ fn explode_query<'a>(
                 return Some(quote!(#query_arg::Raw(#source)));
             },
             Parameter::Dynamic(ref seg) => seg,
-            Parameter::Guard(ref seg) => seg,
+            Parameter::Guard(ref seg) => &seg.source,
             Parameter::Ignored(_) => unreachable!("invariant: unignorable q")
         };
 
